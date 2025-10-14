@@ -311,6 +311,7 @@
                 renderLeaderboardArray(users);
             } catch (e) {
                 console.error('JSONBin read failed, falling back to local.', e);
+                leaderboardList.innerHTML = '<p class="text-center text-red-400">Could not load cloud leaderboard. Using local fallback.</p>';
                 setupLocalLeaderboardListener();
             }
         }
@@ -581,29 +582,48 @@
         // --- JSONBin Helpers ---
         async function jsonbinFetch() {
             const url = `${JSONBIN_BASE}/${encodeURIComponent(jsonbinConfig.binId)}/latest`;
-            const res = await fetch(url, {
-                headers: {
-                    'X-Master-Key': jsonbinConfig.masterKey,
-                    'Content-Type': 'application/json'
+            try {
+                const res = await fetch(url, {
+                    headers: {
+                        'X-Master-Key': jsonbinConfig.masterKey,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                if (!res.ok) {
+                    const text = await res.text().catch(() => '');
+                    console.error('JSONBin GET error', res.status, text);
+                    // 404 or 400 -> treat as empty leaderboard
+                    return [];
                 }
-            });
-            if (!res.ok) throw new Error(`JSONBin GET failed: ${res.status}`);
-            const data = await res.json();
-            return Array.isArray(data.record) ? data.record : [];
+                const data = await res.json();
+                return Array.isArray(data.record) ? data.record : [];
+            } catch (err) {
+                console.error('JSONBin GET network error', err);
+                return [];
+            }
         }
 
         async function jsonbinPut(arrayData) {
             const url = `${JSONBIN_BASE}/${encodeURIComponent(jsonbinConfig.binId)}`;
-            const res = await fetch(url, {
-                method: 'PUT',
-                headers: {
-                    'X-Master-Key': jsonbinConfig.masterKey,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(arrayData)
-            });
-            if (!res.ok) throw new Error(`JSONBin PUT failed: ${res.status}`);
-            return res.json();
+            try {
+                const res = await fetch(url, {
+                    method: 'PUT',
+                    headers: {
+                        'X-Master-Key': jsonbinConfig.masterKey,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(arrayData)
+                });
+                if (!res.ok) {
+                    const text = await res.text().catch(() => '');
+                    console.error('JSONBin PUT error', res.status, text);
+                    throw new Error(`JSONBin PUT failed: ${res.status}`);
+                }
+                return res.json();
+            } catch (err) {
+                console.error('JSONBin PUT network error', err);
+                throw err;
+            }
         }
         
         /**
