@@ -326,32 +326,40 @@
          * Local fallback: uses localStorage for preview/demo when Firebase config is missing.
          */
         function setupLocalLeaderboardListener() {
-            const render = () => {
-                const raw = localStorage.getItem(`${appId}_local_leaderboard`) || '[]';
-                const users = JSON.parse(raw)
-                    .sort((a, b) => (b.score || 0) - (a.score || 0))
-                    .slice(0, 10);
-
-                if (users.length === 0) {
-                    leaderboardList.innerHTML = '<p class="text-center text-sm text-gray-500">No scores posted yet. Be the first!</p>';
-                    return;
-                }
-
-                let html = users.map((user, index) => `
-                    <div class="flex justify-between items-center p-3 rounded-lg ${user.id === userId ? 'bg-blue-900/40 border-blue-500 border' : 'bg-gray-800/50'}">
-                        <span class="font-bold text-yellow-500 w-8 text-center">${index + 1}.</span>
-                        <span class="flex-grow truncate px-2">${user.name} ${user.id === userId ? '(You)' : ''}</span>
-                        <span class="font-extrabold text-xl text-white">${user.score}/10</span>
-                    </div>
-                `).join('');
-                leaderboardList.innerHTML = html;
-            };
-
             // Render now and on storage changes (other tabs)
-            render();
+            renderLocalLeaderboard();
             window.addEventListener('storage', (e) => {
-                if (e.key === `${appId}_local_leaderboard`) render();
+                if (e.key === `${appId}_local_leaderboard`) renderLocalLeaderboard();
             });
+        }
+
+        // Renders local leaderboard from localStorage
+        function renderLocalLeaderboard() {
+            const raw = localStorage.getItem(`${appId}_local_leaderboard`) || '[]';
+            let users;
+            try {
+                users = JSON.parse(raw);
+                if (!Array.isArray(users)) users = [];
+            } catch (_) {
+                users = [];
+            }
+            users = users
+                .sort((a, b) => (b.score || 0) - (a.score || 0))
+                .slice(0, 10);
+
+            if (users.length === 0) {
+                leaderboardList.innerHTML = '<p class="text-center text-sm text-gray-500">No scores posted yet. Be the first!</p>';
+                return;
+            }
+
+            let html = users.map((user, index) => `
+                <div class="flex justify-between items-center p-3 rounded-lg ${user.id === userId ? 'bg-blue-900/40 border-blue-500 border' : 'bg-gray-800/50'}">
+                    <span class="font-bold text-yellow-500 w-8 text-center">${index + 1}.</span>
+                    <span class="flex-grow truncate px-2">${user.name} ${user.id === userId ? '(You)' : ''}</span>
+                    <span class="font-extrabold text-xl text-white">${user.score}/10</span>
+                </div>
+            `).join('');
+            leaderboardList.innerHTML = html;
         }
 
         /**
@@ -544,6 +552,8 @@
                     list.sort((a, b) => (b.score || 0) - (a.score || 0));
                     const top10 = list.slice(0, 10);
                     localStorage.setItem(key, JSON.stringify(top10));
+                    // Immediately refresh local leaderboard UI
+                    renderLocalLeaderboard();
                 } else {
                     // Check if user has a higher existing score (Firestore)
                     const userDocRef = firebase.doc(db, LEADERBOARD_PATH, userId);
