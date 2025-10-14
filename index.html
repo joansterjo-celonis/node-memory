@@ -127,46 +127,19 @@
         #quiz-logo-svg { color: #e5e7eb; }
     </style>
 
-    <!-- App Config: set a stable app ID and your Firebase web config -->
+    <!-- App Config: stable app ID and JSONBin config -->
     <script>
         // Set a stable app ID so everyone shares the same leaderboard namespace
         window.__app_id = 'figma-dev-mode-quiz';
 
-        // Replace the placeholder values below with your Firebase web app config
-        // from Project Settings → Your apps → Web app (</>), then deploy this file.
-        window.__firebase_config = JSON.stringify({
-            apiKey: "YOUR_API_KEY",
-            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-            projectId: "YOUR_PROJECT_ID",
-            appId: "YOUR_WEB_APP_ID"
+        // JSONBin configuration (create a bin and paste values here)
+        // See: https://jsonbin.io (Bin ID and X-Master-Key)
+        window.__jsonbin_config = JSON.stringify({
+            binId: "68ee44eeae596e708f132b44",
+            masterKey: "$2a$10$CEM2H64MEgaFduBj/wVX8uDu.xJicGBDwoVyQ3h8RCMgd587R5uLa"
         });
     </script>
 
-    <!-- Firebase SDK Imports (MUST be placed before the main script block) -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, query, orderBy, limit, serverTimestamp, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // Expose Firebase objects globally for the main script block
-        window.firebase = { 
-            initializeApp, 
-            getAuth, 
-            signInAnonymously, 
-            signInWithCustomToken, 
-            getFirestore, 
-            doc, 
-            setDoc, 
-            onSnapshot, 
-            collection, 
-            query, 
-            orderBy, 
-            limit,
-            serverTimestamp,
-            getDoc,
-            onAuthStateChanged
-        };
-    </script>
 </head>
 <body>
 
@@ -261,20 +234,15 @@
     </div>
 
     <script>
-        // --- Firebase/Firestore Global Setup ---
-        let app, db, auth;
-        let userId = 'anonymous'; // Default until authenticated
+        // --- Leaderboard Setup (JSONBin + local fallback) ---
+        let userId = 'anonymous';
         let userName = 'Anonymous Engineer'; 
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const LEADERBOARD_PATH = `artifacts/${appId}/public/data/quiz_leaderboard`;
-        // Detect placeholder configs and force local leaderboard in that case
-        const looksLikePlaceholder = (cfg) => {
-            if (!cfg) return true;
-            const vals = [cfg.apiKey, cfg.projectId, cfg.appId].map(v => (v || '').toString());
-            return vals.some(v => v.includes('YOUR_'));
-        };
-        const USE_LOCAL_LEADERBOARD = !firebaseConfig || !firebaseConfig.projectId || looksLikePlaceholder(firebaseConfig);
+        const jsonbinConfig = typeof __jsonbin_config !== 'undefined' ? JSON.parse(__jsonbin_config) : {};
+        const looksLikeJsonbinPlaceholder = (cfg) => !cfg || !cfg.binId || !cfg.masterKey || cfg.binId.includes('YOUR_') || cfg.masterKey.includes('YOUR_');
+        const USE_LOCAL_LEADERBOARD = looksLikeJsonbinPlaceholder(jsonbinConfig);
+        const LOCAL_KEY = `${appId}_local_leaderboard`;
+        const JSONBIN_BASE = 'https://api.jsonbin.io/v3/b';
 
         const quizData = [
             { question: "Question 1/13: What is the primary purpose of Figma's Dev Mode from an engineer's perspective?", options: ["To create and edit design files directly.", "To turn designs into code more efficiently by providing a developer-centric workspace.", "To collaborate with other engineers on coding tasks.", "To manage the project's timeline and budget."], answer: "To turn designs into code more efficiently by providing a developer-centric workspace.", explanation: "Dev Mode is specifically built to streamline the design-to-code handoff by providing specs, code snippets, and a developer-friendly interface." },
@@ -311,43 +279,22 @@
          */
         async function initFirebase() {
             try {
-                if (USE_LOCAL_LEADERBOARD || !window.firebase) {
-                    // Local preview mode: use localStorage-backed leaderboard
-                    userId = (localStorage.getItem(`${appId}_uid`) || crypto.randomUUID());
-                    localStorage.setItem(`${appId}_uid`, userId);
+                // Always set up a persistent local user id
+                userId = (localStorage.getItem(`${appId}_uid`) || crypto.randomUUID());
+                localStorage.setItem(`${appId}_uid`, userId);
+
+                if (USE_LOCAL_LEADERBOARD) {
                     setupLocalLeaderboardListener();
                     return;
                 }
-                
-                app = firebase.initializeApp(firebaseConfig);
-                db = firebase.getFirestore(app);
-                auth = firebase.getAuth(app);
-                
-                if (typeof __initial_auth_token !== 'undefined') {
-                    await firebase.signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await firebase.signInAnonymously(auth);
-                }
-                
-                userId = auth.currentUser?.uid || crypto.randomUUID();
-                console.log(`Authenticated as User ID: ${userId}`);
 
-                // Load existing name if available
-                const userDocRef = firebase.doc(db, LEADERBOARD_PATH, userId);
-                const userDoc = await firebase.getDoc(userDocRef);
-                if (userDoc.exists() && userDoc.data().name) {
-                    userName = userDoc.data().name;
-                    engineerNameInput.value = userName;
-                }
-                
-                setupLeaderboardListener();
+                // Initial load from JSONBin
+                await setupJsonbinLeaderboardListener();
 
             } catch (error) {
                 console.error("Error during Firebase initialization or authentication:", error);
                 // Fallback to local leaderboard if Firebase fails at runtime
                 try {
-                    userId = (localStorage.getItem(`${appId}_uid`) || crypto.randomUUID());
-                    localStorage.setItem(`${appId}_uid`, userId);
                     setupLocalLeaderboardListener();
                 } catch (e) {
                     console.error('Failed to initialize local leaderboard fallback:', e);
@@ -358,39 +305,14 @@
         /**
          * Sets up a real-time listener for the leaderboard.
          */
-        function setupLeaderboardListener() {
-            if (!db) return;
-            const leaderboardQuery = firebase.query(
-                firebase.collection(db, LEADERBOARD_PATH),
-                firebase.orderBy('score', 'desc'),
-                firebase.limit(10)
-            );
-
-            firebase.onSnapshot(leaderboardQuery, (snapshot) => {
-                let html = '';
-                const users = [];
-
-                snapshot.forEach((doc) => {
-                    const data = doc.data();
-                    users.push({ id: doc.id, name: data.name, score: data.score, timestamp: data.timestamp?.toDate() });
-                });
-
-                if (users.length === 0) {
-                    html = '<p class="text-center text-sm text-gray-500">No scores posted yet. Be the first!</p>';
-                } else {
-                    html = users.map((user, index) => `
-                        <div class="flex justify-between items-center p-3 rounded-lg ${user.id === userId ? 'bg-blue-900/40 border-blue-500 border' : 'bg-gray-800/50'}">
-                            <span class="font-bold text-yellow-500 w-8 text-center">${index + 1}.</span>
-                            <span class="flex-grow truncate px-2">${user.name} ${user.id === userId ? '(You)' : ''}</span>
-                            <span class="font-extrabold text-xl text-white">${user.score}/10</span>
-                        </div>
-                    `).join('');
-                }
-                leaderboardList.innerHTML = html;
-            }, (error) => {
-                console.error("Error fetching leaderboard:", error);
-                leaderboardList.innerHTML = '<p class="text-center text-red-400">Error loading leaderboard.</p>';
-            });
+        async function setupJsonbinLeaderboardListener() {
+            try {
+                const users = await jsonbinFetch();
+                renderLeaderboardArray(users);
+            } catch (e) {
+                console.error('JSONBin read failed, falling back to local.', e);
+                setupLocalLeaderboardListener();
+            }
         }
 
         /**
@@ -423,14 +345,18 @@
                 return;
             }
 
-            let html = users.map((user, index) => `
+            renderLeaderboardArray(users);
+        }
+
+        function renderLeaderboardArray(users) {
+            const html = users.map((user, index) => `
                 <div class="flex justify-between items-center p-3 rounded-lg ${user.id === userId ? 'bg-blue-900/40 border-blue-500 border' : 'bg-gray-800/50'}">
                     <span class="font-bold text-yellow-500 w-8 text-center">${index + 1}.</span>
                     <span class="flex-grow truncate px-2">${user.name} ${user.id === userId ? '(You)' : ''}</span>
-                    <span class="font-extrabold text-xl text-white">${user.score}/10</span>
+                    <span class="font-extrabold text-xl text-white">${user.score}/13</span>
                 </div>
             `).join('');
-            leaderboardList.innerHTML = html;
+            leaderboardList.innerHTML = html || '<p class="text-center text-sm text-gray-500">No scores posted yet. Be the first!</p>';
         }
 
         /**
@@ -589,7 +515,7 @@
         }
 
         /**
-         * Saves the user's score to Firestore.
+         * Saves the user's score to JSONBin (or local fallback).
          */
         async function submitScore() {
             const enteredName = engineerNameInput.value.trim() || 'Anonymous Engineer';
@@ -597,9 +523,8 @@
             
             userName = enteredName.substring(0, 20); // Truncate name to 20 chars
             
-            if ((!db || !userId) && !USE_LOCAL_LEADERBOARD) {
-                console.error("Database not initialized or user ID missing.");
-                // Fallback UI to close modal
+            if (!userId) {
+                console.error("User ID missing.");
                 nameModal.classList.remove('flex');
                 nameModal.classList.add('hidden');
                 return;
@@ -626,29 +551,22 @@
                     // Immediately refresh local leaderboard UI
                     renderLocalLeaderboard();
                 } else {
-                    // Check if user has a higher existing score (Firestore)
-                    const userDocRef = firebase.doc(db, LEADERBOARD_PATH, userId);
-                    const userDoc = await firebase.getDoc(userDocRef);
-
-                    let shouldUpdate = true;
-                    if (userDoc.exists()) {
-                        const existingScore = userDoc.data().score || 0;
-                        if (finalScore <= existingScore) {
-                            shouldUpdate = false;
+                    // JSONBin save with simple upsert-high-score behavior
+                    const current = await jsonbinFetch().catch(() => []);
+                    const list = Array.isArray(current) ? current : [];
+                    const idx = list.findIndex(u => u.id === userId);
+                    if (idx >= 0) {
+                        const existingScore = list[idx].score || 0;
+                        if (finalScore > existingScore) {
+                            list[idx] = { id: userId, name: userName, score: finalScore, timestamp: Date.now() };
                         }
-                    }
-
-                    if (shouldUpdate) {
-                        await firebase.setDoc(userDocRef, {
-                            name: userName,
-                            score: finalScore,
-                            timestamp: firebase.serverTimestamp(),
-                            userId: userId,
-                        }, { merge: true });
-                        console.log(`Score ${finalScore} submitted for user ${userId}.`);
                     } else {
-                        console.log(`New score ${finalScore} is not higher than existing score.`);
+                        list.push({ id: userId, name: userName, score: finalScore, timestamp: Date.now() });
                     }
+                    list.sort((a, b) => (b.score || 0) - (a.score || 0));
+                    const top10 = list.slice(0, 10);
+                    await jsonbinPut(top10);
+                    renderLeaderboardArray(top10);
                 }
                
             } catch (error) {
@@ -658,6 +576,34 @@
                 nameModal.classList.add('hidden');
                 showLeaderboard(true); // Show leaderboard immediately after submitting
             }
+        }
+
+        // --- JSONBin Helpers ---
+        async function jsonbinFetch() {
+            const url = `${JSONBIN_BASE}/${encodeURIComponent(jsonbinConfig.binId)}/latest`;
+            const res = await fetch(url, {
+                headers: {
+                    'X-Master-Key': jsonbinConfig.masterKey,
+                    'Content-Type': 'application/json'
+                }
+            });
+            if (!res.ok) throw new Error(`JSONBin GET failed: ${res.status}`);
+            const data = await res.json();
+            return Array.isArray(data.record) ? data.record : [];
+        }
+
+        async function jsonbinPut(arrayData) {
+            const url = `${JSONBIN_BASE}/${encodeURIComponent(jsonbinConfig.binId)}`;
+            const res = await fetch(url, {
+                method: 'PUT',
+                headers: {
+                    'X-Master-Key': jsonbinConfig.masterKey,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(arrayData)
+            });
+            if (!res.ok) throw new Error(`JSONBin PUT failed: ${res.status}`);
+            return res.json();
         }
         
         /**
