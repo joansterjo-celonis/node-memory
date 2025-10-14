@@ -200,7 +200,13 @@
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
         const LEADERBOARD_PATH = `artifacts/${appId}/public/data/quiz_leaderboard`;
-        const USE_LOCAL_LEADERBOARD = !firebaseConfig || !firebaseConfig.projectId;
+        // Detect placeholder configs and force local leaderboard in that case
+        const looksLikePlaceholder = (cfg) => {
+            if (!cfg) return true;
+            const vals = [cfg.apiKey, cfg.projectId, cfg.appId].map(v => (v || '').toString());
+            return vals.some(v => v.includes('YOUR_'));
+        };
+        const USE_LOCAL_LEADERBOARD = !firebaseConfig || !firebaseConfig.projectId || looksLikePlaceholder(firebaseConfig);
 
         const quizData = [
             { question: "Question 1/10: What is the primary purpose of Figma's Dev Mode from an engineer's perspective?", options: ["To create and edit design files directly.", "To turn designs into code more efficiently by providing a developer-centric workspace.", "To collaborate with other engineers on coding tasks.", "To manage the project's timeline and budget."], answer: "To turn designs into code more efficiently by providing a developer-centric workspace.", explanation: "Dev Mode is specifically built to streamline the design-to-code handoff by providing specs, code snippets, and a developer-friendly interface." },
@@ -267,6 +273,14 @@
 
             } catch (error) {
                 console.error("Error during Firebase initialization or authentication:", error);
+                // Fallback to local leaderboard if Firebase fails at runtime
+                try {
+                    userId = (localStorage.getItem(`${appId}_uid`) || crypto.randomUUID());
+                    localStorage.setItem(`${appId}_uid`, userId);
+                    setupLocalLeaderboardListener();
+                } catch (e) {
+                    console.error('Failed to initialize local leaderboard fallback:', e);
+                }
             }
         }
 
@@ -516,7 +530,7 @@
                 if (USE_LOCAL_LEADERBOARD) {
                     const key = `${appId}_local_leaderboard`;
                     const raw = localStorage.getItem(key) || '[]';
-                    const list = JSON.parse(raw);
+                    const list = Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [];
                     const idx = list.findIndex((u) => u.id === userId);
                     if (idx >= 0) {
                         const existingScore = list[idx].score || 0;
@@ -526,7 +540,10 @@
                     } else {
                         list.push({ id: userId, name: userName, score: finalScore, timestamp: Date.now() });
                     }
-                    localStorage.setItem(key, JSON.stringify(list));
+                    // Keep only top 10 by score desc
+                    list.sort((a, b) => (b.score || 0) - (a.score || 0));
+                    const top10 = list.slice(0, 10);
+                    localStorage.setItem(key, JSON.stringify(top10));
                 } else {
                     // Check if user has a higher existing score (Firestore)
                     const userDocRef = firebase.doc(db, LEADERBOARD_PATH, userId);
