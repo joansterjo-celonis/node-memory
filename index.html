@@ -11,7 +11,14 @@
         
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #0d1117; /* Deep Charcoal Background */
+            /* Modern gradient + subtle grid */
+            background:
+                radial-gradient(1200px 600px at 10% -10%, rgba(37, 99, 235, 0.18), transparent 60%),
+                radial-gradient(900px 500px at 100% 0%, rgba(16, 185, 129, 0.18), transparent 60%),
+                linear-gradient(#0d1117, #0d1117),
+                linear-gradient(transparent 0, rgba(255,255,255,0.03) 1px, transparent 1px);
+            background-size: auto, auto, 100% 100%, 24px 24px; /* grid size */
+            background-repeat: no-repeat, no-repeat, no-repeat, repeat;
             color: #e5e7eb; /* Off-White Text */
             display: flex;
             justify-content: center;
@@ -23,10 +30,12 @@
         #quiz-container {
             max-width: 650px;
             width: 100%;
-            background-color: #1a1e22; /* Slightly Lighter Card */
-            border: 1px solid #30363d;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-            border-radius: 12px;
+            background-color: rgba(26, 30, 34, 0.65); /* glass */
+            border: 1px solid rgba(96, 165, 250, 0.2);
+            backdrop-filter: blur(10px) saturate(140%);
+            -webkit-backdrop-filter: blur(10px) saturate(140%);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255,255,255,0.04);
+            border-radius: 14px;
         }
         
         .option-button {
@@ -40,6 +49,13 @@
         .option-button:not(.disabled):hover {
             background-color: #232b38;
             border-color: #60a5fa; /* Tailwind blue-400 */
+        }
+
+        /* Improved focus state */
+        .option-button:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.35);
+            border-color: #93c5fd;
         }
 
         .correct {
@@ -75,9 +91,11 @@
         }
 
         #leaderboard-content {
-            background-color: #1a1e22;
-            border: 1px solid #30363d;
-            border-radius: 12px;
+            background-color: rgba(26, 30, 34, 0.7);
+            border: 1px solid rgba(96, 165, 250, 0.2);
+            backdrop-filter: blur(10px) saturate(140%);
+            -webkit-backdrop-filter: blur(10px) saturate(140%);
+            border-radius: 14px;
         }
         
         /* Utility for the floating leaderboard button */
@@ -89,7 +107,7 @@
             transition: transform 0.2s;
         }
         .floating-button:hover {
-            transform: scale(1.05);
+            transform: translateY(-1px) scale(1.05);
         }
     </style>
 
@@ -151,8 +169,10 @@
     
     <!-- Main Quiz Container -->
     <div id="quiz-container" class="rounded-xl p-8 space-y-6">
-        <h1 class="text-3xl font-extrabold text-center text-blue-400">
-            Figma Dev Mode Mastery Quiz
+        <h1 class="text-3xl font-extrabold text-center">
+            <span style="background: linear-gradient(90deg, #60a5fa 0%, #34d399 50%, #eab308 100%); -webkit-background-clip: text; background-clip: text; color: transparent;">
+                Figma Dev Mode Mastery Quiz
+            </span>
         </h1>
         <p id="sub-title" class="text-center text-gray-400">Test your knowledge on the essential developer tool for design handoff.</p>
 
