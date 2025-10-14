@@ -133,10 +133,10 @@
         window.__app_id = 'figma-dev-mode-quiz';
 
         // JSONBin configuration (create a bin and paste values here)
-        // See: https://jsonbin.io (Bin ID and X-Master-Key)
+        // See: https://jsonbin.io (Bin ID and X-Access-Key)
         window.__jsonbin_config = JSON.stringify({
             binId: "68ee44eeae596e708f132b44",
-            masterKey: "$2a$10$CEM2H64MEgaFduBj/wVX8uDu.xJicGBDwoVyQ3h8RCMgd587R5uLa"
+            accessKey: "$2a$10$CEM2H64MEgaFduBj/wVX8uDu.xJicGBDwoVyQ3h8RCMgd587R5uLa"
         });
     </script>
 
@@ -239,7 +239,7 @@
         let userName = 'Anonymous Engineer'; 
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const jsonbinConfig = typeof __jsonbin_config !== 'undefined' ? JSON.parse(__jsonbin_config) : {};
-        const looksLikeJsonbinPlaceholder = (cfg) => !cfg || !cfg.binId || !cfg.masterKey || cfg.binId.includes('YOUR_') || cfg.masterKey.includes('YOUR_');
+        const looksLikeJsonbinPlaceholder = (cfg) => !cfg || !cfg.binId || !cfg.accessKey || cfg.binId.includes('YOUR_') || cfg.accessKey.includes('YOUR_');
         const USE_LOCAL_LEADERBOARD = looksLikeJsonbinPlaceholder(jsonbinConfig);
         const LOCAL_KEY = `${appId}_local_leaderboard`;
         const JSONBIN_BASE = 'https://api.jsonbin.io/v3/b';
@@ -585,18 +585,21 @@
             try {
                 const res = await fetch(url, {
                     headers: {
-                        'X-Master-Key': jsonbinConfig.masterKey,
+                        'X-Access-Key': jsonbinConfig.accessKey,
+                        'X-Bin-Meta': 'false',
                         'Content-Type': 'application/json'
                     }
                 });
                 if (!res.ok) {
                     const text = await res.text().catch(() => '');
                     console.error('JSONBin GET error', res.status, text);
-                    // 404 or 400 -> treat as empty leaderboard
                     return [];
                 }
                 const data = await res.json();
-                return Array.isArray(data.record) ? data.record : [];
+                // Support either raw array or {record: array}
+                if (Array.isArray(data)) return data;
+                if (data && Array.isArray(data.record)) return data.record;
+                return [];
             } catch (err) {
                 console.error('JSONBin GET network error', err);
                 return [];
@@ -609,7 +612,7 @@
                 const res = await fetch(url, {
                     method: 'PUT',
                     headers: {
-                        'X-Master-Key': jsonbinConfig.masterKey,
+                        'X-Access-Key': jsonbinConfig.accessKey,
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify(arrayData)
@@ -634,6 +637,10 @@
             if (show) {
                 leaderboardModal.classList.remove('hidden');
                 leaderboardModal.classList.add('flex');
+                // Refresh from JSONBin when opening if cloud mode is enabled
+                if (!USE_LOCAL_LEADERBOARD) {
+                    jsonbinFetch().then(renderLeaderboardArray).catch(() => {});
+                }
             } else {
                 leaderboardModal.classList.remove('flex');
                 leaderboardModal.classList.add('hidden');
