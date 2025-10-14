@@ -109,6 +109,20 @@
         .floating-button:hover {
             transform: translateY(-1px) scale(1.05);
         }
+
+        /* Brand logo styling */
+        #brand {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 8px;
+        }
+        #quiz-logo, #quiz-logo-svg {
+            height: 72px;
+            width: auto;
+            image-rendering: -webkit-optimize-contrast;
+            filter: drop-shadow(0 6px 20px rgba(0,0,0,0.35));
+        }
     </style>
 
     <!-- App Config: set a stable app ID and your Firebase web config -->
@@ -169,6 +183,30 @@
     
     <!-- Main Quiz Container -->
     <div id="quiz-container" class="rounded-xl p-8 space-y-6">
+        <div id="brand">
+            <!-- Inline SVG logo for crisp scaling -->
+            <svg id="quiz-logo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Figma Quiz logo">
+                <!-- Chat bubble outline -->
+                <rect x="24" y="36" rx="32" ry="32" width="176" height="136" fill="#ffffff" opacity="0.06"/>
+                <path d="M56 28h112a28 28 0 0 1 28 28v64a28 28 0 0 1-28 28h-56l-32 28v-28H56a28 28 0 0 1-28-28V56A28 28 0 0 1 56 28z" fill="none" stroke="#0f172a" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+
+                <!-- Stylized Q made of colored nodes -->
+                <circle cx="100" cy="88" r="22" fill="none" stroke="#0f172a" stroke-width="12"/>
+                <circle cx="72" cy="96" r="8" fill="#f59e0b"/>
+                <circle cx="100" cy="88" r="7" fill="#3b82f6"/>
+                <circle cx="116" cy="104" r="8" fill="#22c55e"/>
+                <circle cx="136" cy="120" r="10" fill="#ef4444"/>
+                <path d="M123 110 L132 116" stroke="#22c55e" stroke-width="6" stroke-linecap="round"/>
+                <path d="M132 116 L136 120" stroke="#ef4444" stroke-width="6" stroke-linecap="round"/>
+
+                <!-- Pen nib with color segments -->
+                <path d="M168 62 l22 -22 20 20 -22 22 -8 2 -12 -12z" fill="#0f172a"/>
+                <rect x="180" y="28" width="18" height="18" transform="rotate(45 189 37)" fill="#22c55e"/>
+                <rect x="194" y="42" width="18" height="18" transform="rotate(45 203 51)" fill="#f59e0b"/>
+                <rect x="166" y="42" width="18" height="18" transform="rotate(45 175 51)" fill="#3b82f6"/>
+                <circle cx="176" cy="76" r="3.5" fill="#ffffff"/>
+            </svg>
+        </div>
         <h1 class="text-3xl font-extrabold text-center">
             <span style="background: linear-gradient(90deg, #60a5fa 0%, #34d399 50%, #eab308 100%); -webkit-background-clip: text; background-clip: text; color: transparent;">
                 Figma Dev Mode Mastery Quiz
