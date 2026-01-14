@@ -8,6 +8,7 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     @keyframes slide-in-from-bottom-4 {
       from {
@@ -43,6 +44,10 @@
   <script type="text/babel">
     const { useState, useMemo } = React;
     const { createElement: h } = React;
+
+    // ----------------------------
+    // Model / Utilities
+    // ----------------------------
 
     // Icon components using inline SVG
     const createIcon = (paths) => (props) => {
@@ -87,9 +92,89 @@
     const FileJson = createIcon(['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1', 'M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1']);
     const X = createIcon('M18 6L6 18M6 6l12 12');
 
+    const readFileAsText = (file) =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+        reader.readAsText(file);
+      });
+
+    const readFileAsArrayBuffer = (file) =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+        reader.readAsArrayBuffer(file);
+      });
+
+    const parseCSV = (csvText) => {
+      // Minimal CSV parser (handles quoted values + commas). Good enough for most exports.
+      const rows = [];
+      let row = [];
+      let current = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < csvText.length; i++) {
+        const char = csvText[i];
+        const next = csvText[i + 1];
+
+        if (char === '"' && inQuotes && next === '"') {
+          current += '"';
+          i++;
+          continue;
+        }
+
+        if (char === '"') {
+          inQuotes = !inQuotes;
+          continue;
+        }
+
+        if (!inQuotes && (char === ',' || char === '\n' || char === '\r')) {
+          if (char === '\r' && next === '\n') continue;
+          row.push(current);
+          current = '';
+          if (char === '\n') {
+            rows.push(row);
+            row = [];
+          }
+          continue;
+        }
+
+        current += char;
+      }
+
+      // flush
+      row.push(current);
+      rows.push(row);
+
+      // drop trailing empty row
+      const trimmed = rows.filter(r => r.some(cell => String(cell).trim() !== ''));
+      if (trimmed.length === 0) return [];
+
+      const headers = trimmed[0].map(h => String(h || '').trim()).filter(Boolean);
+      const out = [];
+      for (let i = 1; i < trimmed.length; i++) {
+        const r = trimmed[i];
+        const obj = {};
+        headers.forEach((key, idx) => {
+          obj[key] = r[idx] ?? '';
+        });
+        out.push(obj);
+      }
+      return out;
+    };
+
+    const parseXLSX = (arrayBuffer) => {
+      const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+      const firstSheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[firstSheetName];
+      // defval keeps empty cells; raw false gives nicer strings for dates
+      return XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
+    };
+
     /**
-     * MOCK DATA
-     * A standard Procure-to-Pay (P2P) event log dataset for testing.
+     * Seed data (only used until the user uploads a file)
      */
     const INITIAL_DATA = [
       { id: 1, caseId: 'C001', activity: 'Create Purchase Order', resource: 'User A', amount: 5000, vendor: 'Siemens', timestamp: '2023-10-01' },
@@ -106,9 +191,9 @@
       { id: 12, caseId: 'C005', activity: 'Create Purchase Order', resource: 'User E', amount: 15000, vendor: 'Bosch', timestamp: '2023-10-11' },
     ];
 
-    /**
-     * TYPES
-     */
+    // ----------------------------
+    // View Components
+    // ----------------------------
     const NodeType = {
       SOURCE: 'SOURCE',
       FILTER: 'FILTER',
@@ -122,7 +207,7 @@
      * COMPONENT: Properties Panel
      * Handles configuration for the selected node.
      */
-    const PropertiesPanel = ({ node, updateNode, schema }) => {
+    const PropertiesPanel = ({ node, updateNode, schema, sourceStatus }) => {
       if (!node) return h('div', {
         className: 'h-full flex flex-col items-center justify-center p-6 text-gray-400 text-center bg-white border-l border-gray-200'
       }, [
@@ -184,6 +269,26 @@
               ])
             ]),
             h('div', {
+              key: 'upload',
+              className: 'space-y-1'
+            }, [
+              h('label', {
+                key: 'label',
+                className: 'text-sm font-semibold text-gray-700 block'
+              }, 'Upload data (CSV or Excel)'),
+              h('input', {
+                key: 'input',
+                type: 'file',
+                accept: '.csv,.xlsx,.xls',
+                className: 'block w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100',
+                onChange: (e) => handleChange('__file', e.target.files && e.target.files[0] ? e.target.files[0] : null)
+              }),
+              h('p', {
+                key: 'help',
+                className: 'text-xs text-gray-500'
+              }, 'Tip: upload replaces the “raw data” feeding the chain.')
+            ]),
+            h('div', {
               key: 'status',
               className: 'bg-blue-50 p-3 rounded-lg border border-blue-100'
             }, h('div', {
@@ -194,11 +299,11 @@
                 h('p', {
                   key: 'title',
                   className: 'text-xs font-semibold text-blue-900'
-                }, 'Connected'),
+                }, sourceStatus?.title || 'Connected'),
                 h('p', {
                   key: 'desc',
                   className: 'text-xs text-blue-700 mt-1'
-                }, `Mock dataset loaded successfully with ${INITIAL_DATA.length} records.`)
+                }, sourceStatus?.detail || `Loaded ${INITIAL_DATA.length} records.`)
               ])
             ]))
           ]),
@@ -441,23 +546,72 @@
      * MAIN APP COMPONENT
      */
     const AnalysisApp = () => {
+      // --- MODEL STATE ---
+      const [rawData, setRawData] = useState(INITIAL_DATA);
+      const [rawDataName, setRawDataName] = useState('Mock dataset');
+      const [loadError, setLoadError] = useState(null);
+      const [isLoadingFile, setIsLoadingFile] = useState(false);
+
       // --- STATE ---
       const [nodes, setNodes] = useState([
-        { id: 'node-start', type: 'SOURCE', title: 'Load Raw Data', description: 'Initial P2P Dataset', params: { source: 'P2P_Log_EU' } },
+        { id: 'node-start', type: 'SOURCE', title: 'Load Raw Data', description: 'Upload CSV/XLSX', params: { source: 'P2P_Log_EU', __file: null } },
         { id: 'node-viz', type: 'VIZ', title: 'Initial Analysis', description: 'Table View', params: { chartType: 'table' } }
       ]);
       const [selectedNodeId, setSelectedNodeId] = useState('node-start');
       const [activeAddMenuIndex, setActiveAddMenuIndex] = useState(null);
 
+      // Handle upload when SOURCE node file changes
+      const sourceNode = nodes.find(n => n.type === 'SOURCE');
+      const sourceFile = sourceNode?.params?.__file || null;
+      React.useEffect(() => {
+        let cancelled = false;
+        const run = async () => {
+          if (!sourceFile) return;
+          setLoadError(null);
+          setIsLoadingFile(true);
+          try {
+            const name = sourceFile.name || 'Uploaded file';
+            const lower = name.toLowerCase();
+            let data = [];
+            if (lower.endsWith('.csv')) {
+              const text = await readFileAsText(sourceFile);
+              data = parseCSV(text);
+            } else if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+              const buf = await readFileAsArrayBuffer(sourceFile);
+              data = parseXLSX(buf);
+            } else {
+              throw new Error('Unsupported file type. Please upload CSV or XLSX.');
+            }
+
+            if (!Array.isArray(data) || data.length === 0) {
+              throw new Error('No rows found in file.');
+            }
+
+            if (!cancelled) {
+              setRawData(data);
+              setRawDataName(name);
+              // keep selected node on source so user can configure
+              setSelectedNodeId('node-start');
+            }
+          } catch (err) {
+            if (!cancelled) setLoadError(err?.message || String(err));
+          } finally {
+            if (!cancelled) setIsLoadingFile(false);
+          }
+        };
+        run();
+        return () => { cancelled = true; };
+      }, [sourceFile]);
+
       // --- ENGINE ---
       const chainData = useMemo(() => {
-        let currentData = [...INITIAL_DATA];
+        let currentData = Array.isArray(rawData) ? [...rawData] : [];
         const results = [];
 
         for (const node of nodes) {
           // 1. Source (Reset/Load)
           if (node.type === 'SOURCE') {
-            currentData = [...INITIAL_DATA]; 
+            currentData = Array.isArray(rawData) ? [...rawData] : [];
           }
           // 2. Filter
           else if (node.type === 'FILTER' && node.params.field) {
@@ -665,7 +819,7 @@
               }, [
                 h('span', { key: 'time' }, 'Last edited just now'),
                 h('span', { key: 'dot', className: 'w-1 h-1 bg-gray-300 rounded-full' }),
-                h('span', { key: 'badge', className: 'bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium' }, 'Draft')
+                h('span', { key: 'badge', className: 'bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium' }, rawDataName || 'Draft')
               ])
             ])),
             h('div', {
@@ -704,15 +858,22 @@
           }, h('div', {
             className: 'max-w-4xl mx-auto pb-48'
           }, [
+            loadError && h('div', {
+              key: 'error',
+              className: 'mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800'
+            }, [
+              h('div', { key: 'title', className: 'font-semibold mb-1' }, 'Upload error'),
+              h('div', { key: 'msg' }, loadError)
+            ]),
             // THE CHAIN
             h('div', {
               key: 'chain',
-              className: 'relative pl-16'
+              className: 'relative'
             }, [
               // Vertical connecting line
               h('div', {
                 key: 'line',
-                className: 'absolute left-[5.25rem] top-12 bottom-12 w-0.5 bg-gray-300 -z-0'
+                className: 'absolute left-1/2 -translate-x-1/2 top-12 bottom-12 w-0.5 bg-gray-300 -z-0'
               }),
               ...nodes.map((node, index) => {
                 const result = getNodeResult(node.id);
@@ -731,14 +892,14 @@
 
                 return h('div', {
                   key: node.id,
-                  className: 'relative mb-0 group animate-in slide-in-from-bottom-4 duration-500 fill-mode-backwards',
+                  className: 'relative mb-0 group animate-in slide-in-from-bottom-4 duration-500 fill-mode-backwards flex flex-col items-center',
                   style: { animationDelay: `${index * 100}ms` }
                 }, [
                   // Node Card
                   h('div', {
                     key: 'card',
                     onClick: (e) => { e.stopPropagation(); setSelectedNodeId(node.id); },
-                    className: `relative z-10 flex flex-col bg-white rounded-2xl border transition-all cursor-pointer overflow-hidden mb-6 ${isActive ? 'border-blue-500 shadow-xl shadow-blue-500/10 ring-1 ring-blue-500' : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md'}`
+                    className: `relative z-10 w-full max-w-3xl flex flex-col bg-white rounded-2xl border transition-all cursor-pointer overflow-hidden mb-6 ${isActive ? 'border-blue-500 shadow-xl shadow-blue-500/10 ring-1 ring-blue-500' : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md'}`
                   }, [
                     // Node Header
                     h('div', {
@@ -902,7 +1063,7 @@
                     key: 'add-button',
                     className: 'h-10 relative mb-6'
                   }, h('div', {
-                    className: 'absolute left-[5.25rem] -translate-x-1/2 z-20'
+                    className: 'absolute left-1/2 -translate-x-1/2 z-20'
                   }, [
                     h('button', {
                       key: 'button',
@@ -989,7 +1150,13 @@
           key: 'properties',
           node: nodes.find(n => n.id === selectedNodeId),
           updateNode: updateNode,
-          schema: getNodeResult(selectedNodeId)?.schema || []
+          schema: getNodeResult(selectedNodeId)?.schema || [],
+          sourceStatus: (() => {
+            if (isLoadingFile) return { title: 'Loading…', detail: 'Parsing file and building table…' };
+            if (loadError) return { title: 'Error', detail: loadError };
+            const count = Array.isArray(rawData) ? rawData.length : 0;
+            return { title: 'Connected', detail: `${rawDataName || 'Dataset'} loaded with ${count} rows.` };
+          })()
         })
       ]);
     };
