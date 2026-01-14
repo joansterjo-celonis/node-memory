@@ -554,8 +554,7 @@
 
       // --- STATE ---
       const [nodes, setNodes] = useState([
-        { id: 'node-start', type: 'SOURCE', title: 'Load Raw Data', description: 'Upload CSV/XLSX', params: { source: 'P2P_Log_EU', __file: null } },
-        { id: 'node-viz', type: 'VIZ', title: 'Initial Analysis', description: 'Table View', params: { chartType: 'table' } }
+        { id: 'node-start', type: 'SOURCE', title: 'Load Raw Data', description: 'Choose system & upload dataset', params: { source: 'P2P_Log_EU', __file: null } }
       ]);
       const [selectedNodeId, setSelectedNodeId] = useState('node-start');
       const [activeAddMenuIndex, setActiveAddMenuIndex] = useState(null);
@@ -934,11 +933,22 @@
                         h('div', {
                           key: 'description',
                           className: 'text-sm text-gray-500 truncate flex items-center gap-2'
-                        }, node.type === 'FILTER' && node.params.field 
-                          ? h('span', null, 'Keeping only where ', h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.field), ` ${node.params.operator} `, h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.value || '...'))
-                          : node.type === 'AGGREGATE' && node.params.groupBy
-                          ? h('span', null, 'Grouping by ', h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.groupBy))
-                          : h('span', null, node.description || node.type))
+                        },
+                          node.type === 'SOURCE'
+                            ? h('span', null,
+                                'Dataset ',
+                                h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, rawDataName || 'Not loaded'),
+                                ' · ',
+                                h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, `${Array.isArray(rawData) ? rawData.length : 0} rows`),
+                                ' · System ',
+                                h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.source || '—')
+                              )
+                            : node.type === 'FILTER' && node.params.field 
+                            ? h('span', null, 'Keeping only where ', h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.field), ` ${node.params.operator} `, h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.value || '...'))
+                            : node.type === 'AGGREGATE' && node.params.groupBy
+                            ? h('span', null, 'Grouping by ', h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.groupBy))
+                            : h('span', null, node.description || node.type)
+                        )
                       ]),
                       h('div', {
                         key: 'actions',
