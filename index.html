@@ -834,19 +834,19 @@
                             h('thead', {
                               key: 'thead',
                               className: 'bg-gray-50 sticky top-0 z-10'
-                            }, h('tr', null, result.schema.map(h => h('th', {
-                              key: h,
+                            }, h('tr', null, result.schema.map(col => h('th', {
+                              key: col,
                               className: 'p-3 font-semibold text-gray-600 border-b border-gray-200 whitespace-nowrap'
-                            }, h)))),
+                            }, col)))),
                             h('tbody', {
                               key: 'tbody'
                             }, result.data.map((row, i) => h('tr', {
                               key: i,
                               className: 'hover:bg-blue-50/30 border-b border-gray-100 last:border-0 transition-colors'
-                            }, result.schema.map(h => h('td', {
-                              key: h,
+                            }, result.schema.map(col => h('td', {
+                              key: col,
                               className: 'p-3 text-gray-700 whitespace-nowrap'
-                            }, row[h])))))
+                            }, row[col])))))
                           ]))
                         : h('div', {
                             key: 'placeholder',
@@ -875,20 +875,20 @@
                           h('thead', {
                             key: 'thead',
                             className: 'bg-gray-50 text-gray-500 border-b border-gray-200'
-                          }, h('tr', null, result.schema.slice(0, 6).map(h => h('th', {
-                            key: h,
+                          }, h('tr', null, result.schema.slice(0, 6).map(col => h('th', {
+                            key: col,
                             className: 'py-2 px-4 font-medium whitespace-nowrap'
-                          }, h)))),
+                          }, col)))),
                           h('tbody', {
                             key: 'tbody',
                             className: 'text-gray-700'
                           }, result.data.slice(0, 3).map((row, i) => h('tr', {
                             key: i,
                             className: 'border-b border-gray-100 last:border-0 hover:bg-blue-50/50'
-                          }, result.schema.slice(0, 6).map(h => h('td', {
-                            key: h,
+                          }, result.schema.slice(0, 6).map(col => h('td', {
+                            key: col,
                             className: 'py-2 px-4 whitespace-nowrap'
-                          }, row[h])))))
+                          }, row[col])))))
                         ])),
                         result.data.length > 3 && h('div', {
                           key: 'more',
