@@ -36,6 +36,27 @@
       background-color: #e5e7eb;
       border-radius: 3px;
     }
+    .progress-bar {
+      position: relative;
+      height: 8px;
+      background: #dbeafe;
+      border-radius: 9999px;
+      overflow: hidden;
+    }
+    .progress-bar::after {
+      content: '';
+      position: absolute;
+      left: -40%;
+      top: 0;
+      bottom: 0;
+      width: 40%;
+      background: #3b82f6;
+      animation: progress-indeterminate 1s linear infinite;
+    }
+    @keyframes progress-indeterminate {
+      0% { left: -40%; }
+      100% { left: 100%; }
+    }
   </style>
 </head>
 <body>
@@ -254,22 +275,25 @@
             ]),
             h('div', {
               key: 'status',
-              className: 'bg-blue-50 p-3 rounded-lg border border-blue-100'
-            }, h('div', {
-              className: 'flex items-start gap-2'
+              className: 'bg-blue-50 p-3 rounded-lg border border-blue-100 space-y-2'
             }, [
-              h(Database, { key: 'icon', size: 16, className: 'text-blue-600 mt-0.5' }),
-              h('div', { key: 'text' }, [
-                h('p', {
-                  key: 'title',
-                  className: 'text-xs font-semibold text-blue-900'
-                }, sourceStatus?.title || 'No dataset loaded'),
-                h('p', {
-                  key: 'desc',
-                  className: 'text-xs text-blue-700 mt-1'
-                }, sourceStatus?.detail || 'Upload a CSV or Excel file to get started.')
-              ])
-            ]))
+              h('div', {
+                className: 'flex items-start gap-2'
+              }, [
+                h(Database, { key: 'icon', size: 16, className: 'text-blue-600 mt-0.5' }),
+                h('div', { key: 'text' }, [
+                  h('p', {
+                    key: 'title',
+                    className: 'text-xs font-semibold text-blue-900'
+                  }, sourceStatus?.title || 'No dataset loaded'),
+                  h('p', {
+                    key: 'desc',
+                    className: 'text-xs text-blue-700 mt-1'
+                  }, sourceStatus?.detail || 'Upload a CSV or Excel file to get started.')
+                ])
+              ]),
+              sourceStatus?.loading && h('div', { key: 'progress', className: 'progress-bar' })
+            ])
           ]),
 
           // FILTER CONFIG
@@ -1124,7 +1148,7 @@
           updateNode: updateNode,
           schema: getNodeResult(selectedNodeId)?.schema || [],
           sourceStatus: (() => {
-            if (isLoadingFile) return { title: 'Loading…', detail: 'Parsing file and building table…' };
+            if (isLoadingFile) return { title: 'Loading…', detail: 'Parsing file and building table…', loading: true };
             if (loadError) return { title: 'Error', detail: loadError };
             const count = Array.isArray(rawData) ? rawData.length : 0;
             return { title: 'Connected', detail: `${rawDataName || 'Dataset'} loaded with ${count} rows.` };
