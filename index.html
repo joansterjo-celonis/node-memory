@@ -1,672 +1,1002 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Figma Dev Mode Mastery Quiz</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* Custom styles for a minimal, playful, dark-mode look */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;800&display=swap');
-        
-        body {
-            font-family: 'Inter', sans-serif;
-            /* Modern gradient + subtle grid */
-            background:
-                radial-gradient(1200px 600px at 10% -10%, rgba(37, 99, 235, 0.18), transparent 60%),
-                radial-gradient(900px 500px at 100% 0%, rgba(16, 185, 129, 0.18), transparent 60%),
-                linear-gradient(#0d1117, #0d1117),
-                linear-gradient(transparent 0, rgba(255,255,255,0.03) 1px, transparent 1px);
-            background-size: auto, auto, 100% 100%, 24px 24px; /* grid size */
-            background-repeat: no-repeat, no-repeat, no-repeat, repeat;
-            color: #e5e7eb; /* Off-White Text */
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 20px;
-        }
-        
-        #quiz-container {
-            max-width: 650px;
-            width: 100%;
-            background-color: rgba(26, 30, 34, 0.65); /* glass */
-            border: 1px solid rgba(96, 165, 250, 0.2);
-            backdrop-filter: blur(10px) saturate(140%);
-            -webkit-backdrop-filter: blur(10px) saturate(140%);
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255,255,255,0.04);
-            border-radius: 14px;
-        }
-        
-        .option-button {
-            transition: all 0.2s ease;
-            cursor: pointer;
-            text-align: left;
-            border-radius: 8px;
-            border: 2px solid #30363d;
-        }
-
-        .option-button:not(.disabled):hover {
-            background-color: #232b38;
-            border-color: #60a5fa; /* Tailwind blue-400 */
-        }
-
-        /* Improved focus state */
-        .option-button:focus-visible {
-            outline: none;
-            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.35);
-            border-color: #93c5fd;
-        }
-
-        .correct {
-            background-color: #166534 !important; /* Tailwind green-700 */
-            color: #d1fae5 !important;
-            border-color: #10b981 !important; /* Tailwind emerald-500 */
-        }
-
-        .incorrect {
-            /* Neutralize old red styling to avoid misleading users */
-            background-color: #232b38 !important;
-            color: #e5e7eb !important;
-            border-color: #60a5fa !important; /* Tailwind blue-400 */
-        }
-        
-        .disabled {
-            pointer-events: none;
-            opacity: 0.7;
-        }
-
-        /* Neutral highlight for a user's selected (but incorrect) answer */
-        .selected-neutral {
-            background-color: #232b38 !important;
-            color: #e5e7eb !important;
-            border-color: #60a5fa !important; /* Tailwind blue-400 */
-        }
-
-        /* Leaderboard Modal Styles */
-        #leaderboard-modal {
-            background-color: rgba(0, 0, 0, 0.7);
-            backdrop-filter: blur(5px);
-            z-index: 100;
-        }
-
-        #leaderboard-content {
-            background-color: rgba(26, 30, 34, 0.7);
-            border: 1px solid rgba(96, 165, 250, 0.2);
-            backdrop-filter: blur(10px) saturate(140%);
-            -webkit-backdrop-filter: blur(10px) saturate(140%);
-            border-radius: 14px;
-        }
-        
-        /* Utility for the floating leaderboard button */
-        .floating-button {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 50;
-            transition: transform 0.2s;
-        }
-        .floating-button:hover {
-            transform: translateY(-1px) scale(1.05);
-        }
-
-        /* Brand logo styling */
-        #brand {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 8px;
-        }
-        #quiz-logo, #quiz-logo-svg {
-            height: 72px;
-            width: auto;
-            image-rendering: -webkit-optimize-contrast;
-            filter: drop-shadow(0 6px 20px rgba(0,0,0,0.35));
-        }
-        /* Make SVG outlines adapt to dark mode via currentColor */
-        #quiz-logo-svg { color: #e5e7eb; }
-    </style>
-
-    <!-- App Config: stable app ID and JSONBin config -->
-    <script>
-        // Set a stable app ID so everyone shares the same leaderboard namespace
-        window.__app_id = 'figma-dev-mode-quiz';
-
-        // JSONBin configuration (create a bin and paste values here)
-        // See: https://jsonbin.io (Bin ID and X-Access-Key)
-        window.__jsonbin_config = JSON.stringify({
-            binId: "68ee44eeae596e708f132b44",
-            accessKey: "$2a$10$CEM2H64MEgaFduBj/wVX8uDu.xJicGBDwoVyQ3h8RCMgd587R5uLa"
-        });
-    </script>
-
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice Approval Analysis</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    @keyframes slide-in-from-bottom-4 {
+      from {
+        opacity: 0;
+        transform: translateY(1rem);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+    .animate-in {
+      animation: slide-in-from-bottom-4 0.5s ease-out;
+    }
+    .fill-mode-backwards {
+      animation-fill-mode: backwards;
+    }
+    .scrollbar-thin {
+      scrollbar-width: thin;
+    }
+    .scrollbar-thumb-gray-200::-webkit-scrollbar {
+      width: 6px;
+    }
+    .scrollbar-thumb-gray-200::-webkit-scrollbar-thumb {
+      background-color: #e5e7eb;
+      border-radius: 3px;
+    }
+  </style>
 </head>
 <body>
+  <div id="root"></div>
 
-    <!-- Leaderboard Floating Button -->
-    <button onclick="showLeaderboard(true)" id="leaderboard-float-btn" class="floating-button bg-yellow-500 hover:bg-yellow-600 text-gray-900 font-bold py-2 px-3 rounded-full flex items-center shadow-lg">
-        <!-- SVG for Trophy Icon -->
-        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-1">
-            <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path>
-            <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path>
-            <path d="M4 22h16"></path>
-            <path d="M10 14.66V17c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-2.34l-1 1.73a.5.5 0 0 0 .5.75h11a.5.5 0 0 0 .5-.75l-1-1.73V17c0 .55-.45 1-1 1H15c-.55 0-1-.45-1-1v-2.34l-1 1.73a.5.5 0 0 0 .5.75h-3c-.55 0-1-.45-1-1V17"></path>
-            <path d="M12 11c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"></path>
-        </svg>
-        Leaderboard
-    </button>
-    
-    <!-- Main Quiz Container -->
-    <div id="quiz-container" class="rounded-xl p-8 space-y-6">
-        <div id="brand">
-            <!-- Inline SVG logo for crisp scaling -->
-            <svg id="quiz-logo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Figma Quiz logo">
-                <!-- Chat bubble outline -->
-                <rect x="24" y="36" rx="32" ry="32" width="176" height="136" fill="#ffffff" opacity="0.06"/>
-                <path d="M56 28h112a28 28 0 0 1 28 28v64a28 28 0 0 1-28 28h-56l-32 28v-28H56a28 28 0 0 1-28-28V56A28 28 0 0 1 56 28z" fill="none" stroke="currentColor" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <script type="text/babel">
+    const { useState, useMemo } = React;
+    const { createElement: h } = React;
 
-                <!-- Stylized Q made of colored nodes -->
-                <circle cx="100" cy="88" r="22" fill="none" stroke="currentColor" stroke-width="12"/>
-                <circle cx="72" cy="96" r="8" fill="#f59e0b"/>
-                <circle cx="100" cy="88" r="7" fill="#3b82f6"/>
-                <circle cx="116" cy="104" r="8" fill="#22c55e"/>
-                <circle cx="136" cy="120" r="10" fill="#ef4444"/>
-                <path d="M123 110 L132 116" stroke="#22c55e" stroke-width="6" stroke-linecap="round"/>
-                <path d="M132 116 L136 120" stroke="#ef4444" stroke-width="6" stroke-linecap="round"/>
+    // Icon components using inline SVG
+    const createIcon = (paths) => (props) => {
+      const size = props.size || 24;
+      const strokeWidth = props.strokeWidth || 2;
+      const className = props.className || '';
+      return h('svg', {
+        width: size,
+        height: size,
+        viewBox: '0 0 24 24',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: strokeWidth,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+        className: className,
+        ...props
+      }, Array.isArray(paths) ? paths.map((path, i) => 
+        h('path', { key: i, d: path })
+      ) : h('path', { d: paths }));
+    };
 
-                <!-- Pen nib with color segments -->
-                <path d="M168 62 l22 -22 20 20 -22 22 -8 2 -12 -12z" fill="currentColor"/>
-                <rect x="180" y="28" width="18" height="18" transform="rotate(45 189 37)" fill="#22c55e"/>
-                <rect x="194" y="42" width="18" height="18" transform="rotate(45 203 51)" fill="#f59e0b"/>
-                <rect x="166" y="42" width="18" height="18" transform="rotate(45 175 51)" fill="#3b82f6"/>
-                <circle cx="176" cy="76" r="3.5" fill="#ffffff"/>
-            </svg>
-        </div>
-        <h1 class="text-3xl font-extrabold text-center">
-            <span style="background: linear-gradient(90deg, #60a5fa 0%, #34d399 50%, #eab308 100%); -webkit-background-clip: text; background-clip: text; color: transparent;">
-                Figma Dev Mode Mastery Quiz
-            </span>
-        </h1>
-        <p id="sub-title" class="text-center text-gray-400">Test your knowledge on the essential developer tool for design handoff.</p>
+    const Plus = createIcon('M5 12h14M12 5v14');
+    const Filter = createIcon(['M22 3H2l8 9.46V19l4 2v-8.54L22 3z']);
+    const BarChart3 = createIcon(['M3 3v18h18', 'M18 17V9', 'M13 17V5', 'M8 17v-3']);
+    const Database = createIcon(['M21 5c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2s.9-2 2-2h14c1.1 0 2 .9 2 2z', 'M21 12c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2s.9-2 2-2h14c1.1 0 2 .9 2 2z', 'M21 19c0 1.1-.9 2-2 2H5c-1.1 0-2-.9-2-2s.9-2 2-2h14c1.1 0 2 .9 2 2z']);
+    const ArrowDown = createIcon('M12 5v14M19 12l-7 7-7-7');
+    const Trash2 = createIcon(['M3 6h18', 'M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6', 'M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2']);
+    const Settings = createIcon(['M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z', 'M9 12a3 3 0 1 0 6 0 3 3 0 1 0-6 0']);
+    const TableIcon = createIcon(['M12 3v18', 'M3 12h18', 'M3 3h18v18H3z']);
+    const Play = createIcon('M5 3l14 9-14 9V3z');
+    const Save = createIcon(['M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z', 'M17 21v-8H7v8', 'M7 3v5h8']);
+    const MoreHorizontal = createIcon(['M12 12h.01', 'M19 12h.01', 'M5 12h.01']);
+    const ChevronRight = createIcon('M9 18l6-6-6-6');
+    const ListFilter = createIcon(['M3 6h18', 'M7 12h10', 'M10 18h4']);
+    const Sigma = createIcon('M18 7c0 2-2 4-4 4H8M14 7c0-2-2-4-4-4M10 21V3');
+    const ArrowUpDown = createIcon(['M21 16V8', 'M18 5l3 3-3 3', 'M3 8v8', 'M6 19l-3-3 3-3']);
+    const Layout = createIcon(['M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z', 'M3.27 6.96L12 12.01l8.73-5.05', 'M12 22.08V12']);
+    const Undo = createIcon(['M3 7v6h6', 'M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13']);
+    const Redo = createIcon(['M21 7v6h-6', 'M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13']);
+    const Share2 = createIcon(['M18 8a3 3 0 1 0-2.977-2.63l-4.94 2.47a3 3 0 1 0 0 4.319l4.94 2.47a3 3 0 1 0 .895-1.789l-4.94-2.47a3.027 3.027 0 0 0 0-.74l4.94-2.47C18.456 8.778 18 8.402 18 8z']);
+    const FileJson = createIcon(['M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z', 'M14 2v6h6', 'M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1', 'M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1']);
+    const X = createIcon('M18 6L6 18M6 6l12 12');
 
-        <!-- Quiz Display Area -->
-        <div id="quiz-content" class="space-y-6">
-            <!-- Content loaded by startQuiz() -->
-        </div>
+    /**
+     * MOCK DATA
+     * A standard Procure-to-Pay (P2P) event log dataset for testing.
+     */
+    const INITIAL_DATA = [
+      { id: 1, caseId: 'C001', activity: 'Create Purchase Order', resource: 'User A', amount: 5000, vendor: 'Siemens', timestamp: '2023-10-01' },
+      { id: 2, caseId: 'C001', activity: 'Approve PO', resource: 'Manager B', amount: 5000, vendor: 'Siemens', timestamp: '2023-10-02' },
+      { id: 3, caseId: 'C001', activity: 'Receive Goods', resource: 'User C', amount: 5000, vendor: 'Siemens', timestamp: '2023-10-05' },
+      { id: 4, caseId: 'C002', activity: 'Create Purchase Order', resource: 'User A', amount: 1200, vendor: 'Bosch', timestamp: '2023-10-03' },
+      { id: 5, caseId: 'C002', activity: 'Receive Goods', resource: 'User C', amount: 1200, vendor: 'Bosch', timestamp: '2023-10-06' },
+      { id: 6, caseId: 'C002', activity: 'Pay Invoice', resource: 'Bot X', amount: 1200, vendor: 'Bosch', timestamp: '2023-10-07' },
+      { id: 7, caseId: 'C003', activity: 'Create Purchase Order', resource: 'User D', amount: 8500, vendor: 'Siemens', timestamp: '2023-10-04' },
+      { id: 8, caseId: 'C003', activity: 'Deny PO', resource: 'Manager B', amount: 8500, vendor: 'Siemens', timestamp: '2023-10-05' },
+      { id: 9, caseId: 'C004', activity: 'Create Purchase Order', resource: 'User A', amount: 300, vendor: 'Staples', timestamp: '2023-10-08' },
+      { id: 10, caseId: 'C004', activity: 'Receive Goods', resource: 'User A', amount: 300, vendor: 'Staples', timestamp: '2023-10-09' },
+      { id: 11, caseId: 'C004', activity: 'Pay Invoice', resource: 'Bot X', amount: 300, vendor: 'Staples', timestamp: '2023-10-10' },
+      { id: 12, caseId: 'C005', activity: 'Create Purchase Order', resource: 'User E', amount: 15000, vendor: 'Bosch', timestamp: '2023-10-11' },
+    ];
 
-        <!-- Feedback & Navigation -->
-        <div id="feedback" class="py-4 px-3 rounded-lg text-sm font-medium border hidden"></div>
-        <button id="next-button" onclick="nextQuestion()" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg disabled:opacity-50 transition duration-150" disabled>
-            Next Question
-        </button>
+    /**
+     * TYPES
+     */
+    const NodeType = {
+      SOURCE: 'SOURCE',
+      FILTER: 'FILTER',
+      AGGREGATE: 'AGGREGATE',
+      SORT: 'SORT',
+      LIMIT: 'LIMIT',
+      VIZ: 'VIZ'
+    };
 
-        <!-- Start Screen / Restart Button -->
-        <button id="start-button" onclick="startQuiz()" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg transition duration-150">
-            Start Quiz
-        </button>
-    </div>
+    /**
+     * COMPONENT: Properties Panel
+     * Handles configuration for the selected node.
+     */
+    const PropertiesPanel = ({ node, updateNode, schema }) => {
+      if (!node) return h('div', {
+        className: 'h-full flex flex-col items-center justify-center p-6 text-gray-400 text-center bg-white border-l border-gray-200'
+      }, [
+        h(Settings, { size: 48, className: 'mb-4 opacity-20', key: 'icon' }),
+        h('p', { key: 'text' }, 'Select a step in the chain', h('br'), 'to configure its logic.')
+      ]);
 
-    <!-- Name Prompt Modal (Hidden by default) -->
-    <div id="name-modal" class="fixed inset-0 hidden items-center justify-center" style="z-index: 200;">
-        <div class="absolute inset-0 bg-black opacity-80"></div>
-        <div class="bg-[#1a1e22] rounded-xl p-8 max-w-sm w-full z-10 space-y-4 border border-[#30363d] shadow-2xl">
-            <h3 class="text-2xl font-bold text-yellow-400 text-center">Enter Your Name</h3>
-            <p class="text-gray-400 text-center">Claim your score on the leaderboard!</p>
-            <input type="text" id="engineer-name-input" placeholder="e.g., Ada Lovelace" maxlength="20" class="w-full p-3 rounded-lg bg-[#0d1117] border border-[#30363d] text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <button id="submit-score-btn" onclick="submitScore()" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 rounded-lg transition duration-150">
-                Submit Score
-            </button>
-        </div>
-    </div>
+      const handleChange = (key, value) => {
+        updateNode(node.id, { ...node.params, [key]: value });
+      };
 
-    <!-- Leaderboard Modal (Hidden by default) -->
-    <div id="leaderboard-modal" class="fixed inset-0 hidden items-center justify-center">
-        <div id="leaderboard-content" class="rounded-xl p-6 max-w-lg w-full z-10 space-y-4">
-            <h3 class="text-3xl font-extrabold text-yellow-400 text-center flex items-center justify-center">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path><path d="M4 22h16"></path><path d="M10 14.66V17c0 .55-.45 1-1 1H7c-.55 0-1-.45-1-1v-2.34l-1 1.73a.5.5 0 0 0 .5.75h11a.5.5 0 0 0 .5-.75l-1-1.73V17c0 .55-.45 1-1 1H15c-.55 0-1-.45-1-1v-2.34l-1 1.73a.5.5 0 0 0 .5.75h-3c-.55 0-1-.45-1-1V17"></path><path d="M12 11c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5z"></path></svg>
-                Dev Mode Leaderboard
-            </h3>
-            <div id="leaderboard-list" class="space-y-2 text-gray-300">
-                <p class="text-center text-sm text-gray-500">Loading scores...</p>
-            </div>
-            <button onclick="showLeaderboard(false)" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2 rounded-lg transition duration-150">Close</button>
-        </div>
-    </div>
+      return h('div', {
+        className: 'h-full flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/50 w-80 animate-in slide-in-from-right duration-300'
+      }, [
+        h('div', {
+          key: 'header',
+          className: 'p-5 border-b border-gray-100 bg-white'
+        }, [
+          h('div', {
+            key: 'badge',
+            className: 'flex items-center gap-2 mb-1'
+          }, h('span', {
+            className: 'text-xs font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded'
+          }, `${node.type} Node`)),
+          h('h3', {
+            key: 'title',
+            className: 'font-bold text-gray-900 text-lg'
+          }, node.title),
+          h('p', {
+            key: 'id',
+            className: 'text-xs text-gray-500 mt-1'
+          }, `ID: ${node.id.split('-')[1]}`)
+        ]),
+        h('div', {
+          key: 'content',
+          className: 'p-5 flex-1 overflow-y-auto space-y-6'
+        }, [
+          // SOURCE CONFIG
+          node.type === 'SOURCE' && h('div', {
+            key: 'source-config',
+            className: 'space-y-4'
+          }, [
+            h('div', {
+              key: 'source-select',
+              className: 'space-y-1'
+            }, [
+              h('label', {
+                key: 'label',
+                className: 'text-sm font-semibold text-gray-700'
+              }, 'Dataset Source'),
+              h('select', {
+                key: 'select',
+                className: 'w-full p-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all',
+                value: node.params.source || 'P2P_Log_EU',
+                onChange: (e) => handleChange('source', e.target.value)
+              }, [
+                h('option', { key: 'p2p', value: 'P2P_Log_EU' }, 'Procure to Pay (EU Region)'),
+                h('option', { key: 'o2c', value: 'O2C_Log_US' }, 'Order to Cash (US Region)')
+              ])
+            ]),
+            h('div', {
+              key: 'status',
+              className: 'bg-blue-50 p-3 rounded-lg border border-blue-100'
+            }, h('div', {
+              className: 'flex items-start gap-2'
+            }, [
+              h(Database, { key: 'icon', size: 16, className: 'text-blue-600 mt-0.5' }),
+              h('div', { key: 'text' }, [
+                h('p', {
+                  key: 'title',
+                  className: 'text-xs font-semibold text-blue-900'
+                }, 'Connected'),
+                h('p', {
+                  key: 'desc',
+                  className: 'text-xs text-blue-700 mt-1'
+                }, `Mock dataset loaded successfully with ${INITIAL_DATA.length} records.`)
+              ])
+            ]))
+          ]),
 
-    <script>
-        // --- Leaderboard Setup (JSONBin + local fallback) ---
-        let userId = 'anonymous';
-        let userName = 'Anonymous Engineer'; 
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const jsonbinConfig = typeof __jsonbin_config !== 'undefined' ? JSON.parse(__jsonbin_config) : {};
-        const looksLikeJsonbinPlaceholder = (cfg) => !cfg || !cfg.binId || !cfg.accessKey || cfg.binId.includes('YOUR_') || cfg.accessKey.includes('YOUR_');
-        const USE_LOCAL_LEADERBOARD = looksLikeJsonbinPlaceholder(jsonbinConfig);
-        const LOCAL_KEY = `${appId}_local_leaderboard`;
-        const JSONBIN_BASE = 'https://api.jsonbin.io/v3/b';
+          // FILTER CONFIG
+          node.type === 'FILTER' && h('div', {
+            key: 'filter-config',
+            className: 'space-y-4'
+          }, [
+            h('div', {
+              key: 'field-select',
+              className: 'space-y-1'
+            }, [
+              h('label', {
+                key: 'label',
+                className: 'text-sm font-semibold text-gray-700 block'
+              }, 'Filter Field'),
+              h('select', {
+                key: 'select',
+                className: 'w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none',
+                value: node.params.field || '',
+                onChange: (e) => handleChange('field', e.target.value)
+              }, [
+                h('option', { key: 'empty', value: '' }, 'Select Field...'),
+                ...schema.map(f => h('option', { key: f, value: f }, f))
+              ])
+            ]),
+            h('div', {
+              key: 'operator-value',
+              className: 'grid grid-cols-3 gap-2'
+            }, [
+              h('div', {
+                key: 'operator',
+                className: 'col-span-1 space-y-1'
+              }, [
+                h('label', {
+                  key: 'label',
+                  className: 'text-sm font-semibold text-gray-700 block'
+                }, 'Operator'),
+                h('select', {
+                  key: 'select',
+                  className: 'w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none',
+                  value: node.params.operator || 'equals',
+                  onChange: (e) => handleChange('operator', e.target.value)
+                }, [
+                  h('option', { key: 'eq', value: 'equals' }, '='),
+                  h('option', { key: 'ne', value: 'not_equals' }, '!='),
+                  h('option', { key: 'gt', value: 'gt' }, '>'),
+                  h('option', { key: 'lt', value: 'lt' }, '<'),
+                  h('option', { key: 'contains', value: 'contains' }, 'Like')
+                ])
+              ]),
+              h('div', {
+                key: 'value',
+                className: 'col-span-2 space-y-1'
+              }, [
+                h('label', {
+                  key: 'label',
+                  className: 'text-sm font-semibold text-gray-700 block'
+                }, 'Value'),
+                h('input', {
+                  key: 'input',
+                  type: 'text',
+                  className: 'w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none',
+                  placeholder: 'e.g. Siemens',
+                  value: node.params.value || '',
+                  onChange: (e) => handleChange('value', e.target.value)
+                })
+              ])
+            ]),
+            h('p', {
+              key: 'note',
+              className: 'text-xs text-gray-500 italic'
+            }, 'Case sensitive for this prototype.')
+          ]),
 
-        const quizData = [
-            { question: "Question 1/13: What is the primary purpose of Figma's Dev Mode from an engineer's perspective?", options: ["To create and edit design files directly.", "To turn designs into code more efficiently by providing a developer-centric workspace.", "To collaborate with other engineers on coding tasks.", "To manage the project's timeline and budget."], answer: "To turn designs into code more efficiently by providing a developer-centric workspace.", explanation: "Dev Mode is specifically built to streamline the design-to-code handoff by providing specs, code snippets, and a developer-friendly interface." },
-            { question: "Question 2/13: What is the keyboard shortcut to quickly toggle between Design Mode and Dev Mode?", options: ["Ctrl + D", "Shift + F", "Shift + D", "Alt + D"], answer: "Shift + D", explanation: "The shortcut 'Shift + D' is the quickest way to enter or exit Dev Mode, saving engineers valuable time." },
-            { question: "Question 3/13: What is the main benefit of the 'Ready for development' status in Dev Mode?", options: ["It automatically generates all the code for the design.", "It signals to the engineering team which sections of the design are finalized and ready for implementation.", "It allows engineers to make changes to the design.", "It adds a comment to the design file for the designer."], answer: "It signals to the engineering team which sections of the design are finalized and ready for implementation.", explanation: "This status is a crucial communication tool, creating a single source of truth for work prioritization and avoiding developers implementing incomplete work." },
-            { question: "Question 4/13: In Dev Mode, where is the most common place to view the **CSS Box Model** (padding, border, margin) for a selected layer?", options: ["In the Layers Panel on the left sidebar.", "In the dedicated 'Box Model' section within the Inspect Panel on the right sidebar.", "By holding Shift + Click on the element.", "It is only visible in the Component Playground."], answer: "In the dedicated 'Box Model' section within the Inspect Panel on the right sidebar.", explanation: "The Inspect Panel provides a visual and quantifiable representation of the standard CSS box model (padding, border, and margin) for immediate code translation." },
-            { question: "Question 5/13: What section of Dev Mode is essential for understanding how an **Auto Layout frame** is structured (e.g., direction, spacing, alignment) for flexbox implementation?", options: ["The Properties panel, under 'Constraints.'", "The 'Layout' section of the Inspect Panel.", "By selecting the inner children elements only.", "The Prototype tab."], answer: "The 'Layout' section of the Inspect Panel.", explanation: "The Layout section clearly translates Auto Layout settings into familiar Flex/Grid properties, including direction, alignment, and gap." },
-            { question: "Question 6/13: When an engineer hovers over a component in Dev Mode, how does Figma distinguish between **padding, margin, and gap**?", options: ["They are all shown as one collective 'spacing' value.", "Padding is internal to the selected element, while margin is external space measured to other objects (often by holding Alt/Option), and Gap is explicitly shown in the Layout section.", "Figma only shows the margin, padding must be calculated.", "Padding and Gap are shown on the left, Margin on the right."], answer: "Padding is internal to the selected element, while margin is external space measured to other objects (often by holding Alt/Option), and Gap is explicitly shown in the Layout section.", explanation: "Figma uses context: Padding/Border is visible in the Inspect Box Model, Margin is measured using Alt/Option hover between elements, and Gap is listed in the Layout properties of the parent Auto Layout frame." },
-            { question: "Question 7/13: How can you quickly view the padding and margin of a selected element in Dev Mode?", options: ["Right-click and select 'Show measurements.'", "Hold down the Alt (Option on Mac) key and hover over the element.", "The values are always visible in the inspect panel.", "You have to manually calculate them."], answer: "Hold down the Alt (Option on Mac) key and hover over the element.", explanation: "Holding Alt/Option while hovering is the fastest way to instantly measure distances between layers—a key efficiency trick." },
-            { question: "Question 8/13: The inspect panel can provide code snippets in various languages. Which of the following is NOT a language option for code generation in Figma's Dev Mode?", options: ["CSS", "SwiftUI", "Compose (Jetpack Compose)", "Python"], answer: "Python", explanation: "Figma supports front-end development languages like CSS, SwiftUI (for iOS), and Compose (for Android), but not Python for UI output." },
-            { question: "Question 9/13: How can an engineer export assets (like icons or images) from a Figma file?", options: ["Select the asset in Dev Mode and use the 'Export' section in the inspect panel.", "You can only export assets if you have a 'Full' seat.", "You have to request the designer to export and send them to you.", "Exporting is not a feature in Dev Mode."], answer: "Select the asset in Dev Mode and use the 'Export' section in the inspect panel.", explanation: "The Export section in the inspect panel allows engineers to download assets in various formats (PNG, SVG, JPG) with specified resolution." },
-            { question: "Question 10/13: What is the purpose of the 'Compare changes' feature in Dev Mode?", options: ["It compares the current design with a design from a different file.", "It shows a side-by-side view of the current design and a previous version, highlighting what has been modified.", "It compares the current design to the code you have written.", "It checks for design system inconsistencies."], answer: "It shows a side-by-side view of the current design and a previous version, highlighting what has been modified.", explanation: "This feature is vital for quickly auditing design changes post-handoff, preventing wasted development time on outdated specs." },
-            { question: "Question 11/13: Dev Mode allows for integrations with external tools. Which of these is a common integration used to link designs to development tasks?", options: ["Salesforce", "Jira", "Google Docs", "Dropbox"], answer: "Jira", explanation: "Integrations like Jira allow engineers to quickly find the relevant design file from a ticket or link tickets directly to components in Figma." },
-            { question: "Question 12/13: What is the Component Playground?", options: ["A game for designers to test their knowledge of components.", "A separate space where developers can experiment with a component's different properties and variable modes without altering the main design.", "A tool for creating new components from scratch.", "A feature that automatically fixes component errors."], answer: "A separate space where developers can experiment with a component's different properties and variable modes without altering the main design.", explanation: "The Component Playground helps engineers understand and test component behavior (variants, props) quickly before coding them." },
-            { question: "Question 13/13: True or False: A developer with a View seat has access to all advanced features of Dev Mode, including Compare changes and Add external links.", options: ["True", "False"], answer: "False", explanation: "Full Dev Mode functionality, including 'Compare changes' and Dev resources, requires a paid 'Dev' or 'Full' seat. View seats only get basic inspection." }
-        ];
+          // AGGREGATE CONFIG
+          node.type === 'AGGREGATE' && h('div', {
+            key: 'aggregate-config',
+            className: 'space-y-5'
+          }, [
+            h('div', {
+              key: 'groupby',
+              className: 'space-y-1'
+            }, [
+              h('label', {
+                key: 'label',
+                className: 'text-sm font-semibold text-gray-700 block'
+              }, 'Group By (Dimension)'),
+              h('select', {
+                key: 'select',
+                className: 'w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none',
+                value: node.params.groupBy || '',
+                onChange: (e) => handleChange('groupBy', e.target.value)
+              }, [
+                h('option', { key: 'empty', value: '' }, 'Select Dimension...'),
+                ...schema.map(f => h('option', { key: f, value: f }, f))
+              ])
+            ]),
+            h('div', {
+              key: 'aggregation',
+              className: 'border-t border-gray-100 pt-4 space-y-4'
+            }, [
+              h('div', {
+                key: 'fn-select',
+                className: 'space-y-1'
+              }, [
+                h('label', {
+                  key: 'label',
+                  className: 'text-sm font-semibold text-gray-700 block'
+                }, 'Aggregation Function'),
+                h('div', {
+                  key: 'buttons',
+                  className: 'flex bg-gray-100 p-1 rounded-lg'
+                }, ['count', 'sum', 'avg'].map((fn) => h('button', {
+                  key: fn,
+                  onClick: () => handleChange('fn', fn),
+                  className: `flex-1 py-1.5 text-xs font-medium rounded-md capitalize transition-all ${node.params.fn === fn ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`
+                }, fn)))
+              ]),
+              node.params.fn !== 'count' && h('div', {
+                key: 'metric-field',
+                className: 'space-y-1 animate-in fade-in slide-in-from-top-1'
+              }, [
+                h('label', {
+                  key: 'label',
+                  className: 'text-sm font-semibold text-gray-700 block'
+                }, 'Metric Field'),
+                h('select', {
+                  key: 'select',
+                  className: 'w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none',
+                  value: node.params.metricField || '',
+                  onChange: (e) => handleChange('metricField', e.target.value)
+                }, [
+                  h('option', { key: 'empty', value: '' }, 'Select Numeric Field...'),
+                  ...schema.map(f => h('option', { key: f, value: f }, f))
+                ])
+              ])
+            ])
+          ]),
 
-        let currentQuestionIndex = 0;
-        let score = 0;
-        let answered = false;
+          // VIZ CONFIG
+          node.type === 'VIZ' && h('div', {
+            key: 'viz-config',
+            className: 'space-y-5'
+          }, [
+            h('div', {
+              key: 'chart-type',
+              className: 'space-y-1'
+            }, [
+              h('label', {
+                key: 'label',
+                className: 'text-sm font-semibold text-gray-700 block'
+              }, 'Visualization Type'),
+              h('div', {
+                key: 'buttons',
+                className: 'grid grid-cols-2 gap-3'
+              }, [
+                h('button', {
+                  key: 'bar',
+                  onClick: () => handleChange('chartType', 'bar'),
+                  className: `p-3 border rounded-lg flex flex-col items-center justify-center gap-2 text-sm transition-all ${node.params.chartType === 'bar' ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`
+                }, [
+                  h(BarChart3, { key: 'icon', size: 20 }),
+                  h('span', { key: 'text', className: 'font-medium' }, 'Bar Chart')
+                ]),
+                h('button', {
+                  key: 'table',
+                  onClick: () => handleChange('chartType', 'table'),
+                  className: `p-3 border rounded-lg flex flex-col items-center justify-center gap-2 text-sm transition-all ${node.params.chartType === 'table' ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'border-gray-200 hover:bg-gray-50 hover:border-gray-300'}`
+                }, [
+                  h(TableIcon, { key: 'icon', size: 20 }),
+                  h('span', { key: 'text', className: 'font-medium' }, 'Data Table')
+                ])
+              ])
+            ]),
+            node.params.chartType !== 'table' && h('div', {
+              key: 'axes',
+              className: 'space-y-4 pt-2 border-t border-gray-100'
+            }, [
+              h('div', {
+                key: 'x-axis',
+                className: 'space-y-1'
+              }, [
+                h('label', {
+                  key: 'label',
+                  className: 'text-sm font-semibold text-gray-700 block'
+                }, 'X Axis (Category)'),
+                h('select', {
+                  key: 'select',
+                  className: 'w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none',
+                  value: node.params.xAxis || '',
+                  onChange: (e) => handleChange('xAxis', e.target.value)
+                }, [
+                  h('option', { key: 'auto', value: '' }, 'Auto Select'),
+                  ...schema.map(f => h('option', { key: f, value: f }, f))
+                ])
+              ]),
+              h('div', {
+                key: 'y-axis',
+                className: 'space-y-1'
+              }, [
+                h('label', {
+                  key: 'label',
+                  className: 'text-sm font-semibold text-gray-700 block'
+                }, 'Y Axis (Value)'),
+                h('select', {
+                  key: 'select',
+                  className: 'w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none',
+                  value: node.params.yAxis || '',
+                  onChange: (e) => handleChange('yAxis', e.target.value)
+                }, [
+                  h('option', { key: 'auto', value: '' }, 'Auto Select'),
+                  ...schema.map(f => h('option', { key: f, value: f }, f))
+                ])
+              ]),
+              h('div', {
+                key: 'tip',
+                className: 'p-3 bg-blue-50 rounded border border-blue-100 text-xs text-blue-800'
+              }, h('p', null, h('strong', null, 'Tip:'), ' Click on any bar in the chart to instantly add a filter step for that selection.'))
+            ])
+          ])
+        ].filter(Boolean)),
+        h('div', {
+          key: 'footer',
+          className: 'p-4 bg-gray-50 border-t border-gray-200'
+        }, h('div', {
+          className: 'flex items-center gap-2 text-xs text-gray-500'
+        }, [
+          h('div', {
+            key: 'dot',
+            className: 'w-2 h-2 rounded-full bg-green-500 animate-pulse'
+          }),
+          h('span', { key: 'text' }, 'Changes autosaved to chain')
+        ]))
+      ]);
+    };
 
-        const quizContent = document.getElementById('quiz-content');
-        const feedbackEl = document.getElementById('feedback');
-        const nextButton = document.getElementById('next-button');
-        const startButton = document.getElementById('start-button');
-        const subTitle = document.getElementById('sub-title');
-        const nameModal = document.getElementById('name-modal');
-        const leaderboardModal = document.getElementById('leaderboard-modal');
-        const engineerNameInput = document.getElementById('engineer-name-input');
-        const leaderboardList = document.getElementById('leaderboard-list');
+    /**
+     * MAIN APP COMPONENT
+     */
+    const AnalysisApp = () => {
+      // --- STATE ---
+      const [nodes, setNodes] = useState([
+        { id: 'node-start', type: 'SOURCE', title: 'Load Raw Data', description: 'Initial P2P Dataset', params: { source: 'P2P_Log_EU' } },
+        { id: 'node-viz', type: 'VIZ', title: 'Initial Analysis', description: 'Table View', params: { chartType: 'table' } }
+      ]);
+      const [selectedNodeId, setSelectedNodeId] = useState('node-start');
+      const [activeAddMenuIndex, setActiveAddMenuIndex] = useState(null);
 
-        /**
-         * Initializes Firebase and authenticates the user.
-         */
-        async function initFirebase() {
-            try {
-                // Always set up a persistent local user id
-                userId = (localStorage.getItem(`${appId}_uid`) || crypto.randomUUID());
-                localStorage.setItem(`${appId}_uid`, userId);
+      // --- ENGINE ---
+      const chainData = useMemo(() => {
+        let currentData = [...INITIAL_DATA];
+        const results = [];
 
-                if (USE_LOCAL_LEADERBOARD) {
-                    setupLocalLeaderboardListener();
-                    return;
-                }
-
-                // Initial load from JSONBin
-                await setupJsonbinLeaderboardListener();
-
-            } catch (error) {
-                console.error("Error during Firebase initialization or authentication:", error);
-                // Fallback to local leaderboard if Firebase fails at runtime
-                try {
-                    setupLocalLeaderboardListener();
-                } catch (e) {
-                    console.error('Failed to initialize local leaderboard fallback:', e);
-                }
-            }
-        }
-
-        /**
-         * Sets up a real-time listener for the leaderboard.
-         */
-        async function setupJsonbinLeaderboardListener() {
-            try {
-                const users = await jsonbinFetch();
-                renderLeaderboardArray(users);
-            } catch (e) {
-                console.error('JSONBin read failed, falling back to local.', e);
-                leaderboardList.innerHTML = '<p class="text-center text-red-400">Could not load cloud leaderboard. Using local fallback.</p>';
-                setupLocalLeaderboardListener();
-            }
-        }
-
-        /**
-         * Local fallback: uses localStorage for preview/demo when Firebase config is missing.
-         */
-        function setupLocalLeaderboardListener() {
-            // Render now and on storage changes (other tabs)
-            renderLocalLeaderboard();
-            window.addEventListener('storage', (e) => {
-                if (e.key === `${appId}_local_leaderboard`) renderLocalLeaderboard();
+        for (const node of nodes) {
+          // 1. Source (Reset/Load)
+          if (node.type === 'SOURCE') {
+            currentData = [...INITIAL_DATA]; 
+          }
+          // 2. Filter
+          else if (node.type === 'FILTER' && node.params.field) {
+            currentData = currentData.filter(item => {
+              const val = item[node.params.field];
+              const filterVal = node.params.value;
+              
+              if (!filterVal && filterVal !== 0) return true;
+              
+              // Simple type coercion
+              if (node.params.operator === 'equals') return String(val) == String(filterVal);
+              if (node.params.operator === 'not_equals') return String(val) != String(filterVal);
+              if (node.params.operator === 'gt') return val > Number(filterVal);
+              if (node.params.operator === 'lt') return val < Number(filterVal);
+              if (node.params.operator === 'contains') return String(val).toLowerCase().includes(String(filterVal).toLowerCase());
+              return true;
             });
-        }
-
-        // Renders local leaderboard from localStorage
-        function renderLocalLeaderboard() {
-            const raw = localStorage.getItem(`${appId}_local_leaderboard`) || '[]';
-            let users;
-            try {
-                users = JSON.parse(raw);
-                if (!Array.isArray(users)) users = [];
-            } catch (_) {
-                users = [];
-            }
-            users = users
-                .sort((a, b) => (b.score || 0) - (a.score || 0))
-                .slice(0, 10);
-
-            if (users.length === 0) {
-                leaderboardList.innerHTML = '<p class="text-center text-sm text-gray-500">No scores posted yet. Be the first!</p>';
-                return;
-            }
-
-            renderLeaderboardArray(users);
-        }
-
-        function renderLeaderboardArray(users) {
-            const html = users.map((user, index) => `
-                <div class="flex justify-between items-center p-3 rounded-lg ${user.id === userId ? 'bg-blue-900/40 border-blue-500 border' : 'bg-gray-800/50'}">
-                    <span class="font-bold text-yellow-500 w-8 text-center">${index + 1}.</span>
-                    <span class="flex-grow truncate px-2">${user.name} ${user.id === userId ? '(You)' : ''}</span>
-                    <span class="font-extrabold text-xl text-white">${user.score}/13</span>
-                </div>
-            `).join('');
-            leaderboardList.innerHTML = html || '<p class="text-center text-sm text-gray-500">No scores posted yet. Be the first!</p>';
-        }
-
-        /**
-         * Clears the current content and displays the welcome screen.
-         */
-        function startQuiz() {
-            currentQuestionIndex = 0;
-            score = 0;
-            answered = false;
-
-            startButton.textContent = 'Restart Quiz';
-            startButton.classList.add('hidden');
-            nextButton.classList.add('hidden');
-            feedbackEl.classList.add('hidden');
-            subTitle.textContent = 'Find out if you are a Figma Dev Mode Master! Good luck.';
-
-            renderQuestion();
-        }
-
-        /**
-         * Renders the current question and its options to the DOM.
-         */
-        function renderQuestion() {
-            if (currentQuestionIndex >= quizData.length) {
-                showResults();
-                return;
-            }
-
-            const qData = quizData[currentQuestionIndex];
-            answered = false;
-            nextButton.disabled = true;
-            nextButton.classList.add('hidden');
-            feedbackEl.classList.add('hidden');
-            
-            let html = `
-                <div id="question-text" class="text-xl font-bold mb-4 text-blue-300">
-                    ${qData.question}
-                </div>
-                <div id="options-container" class="space-y-3">
-            `;
-
-            qData.options.forEach((option, index) => {
-                html += `
-                    <button class="option-button w-full bg-gray-700/50 text-left p-4 hover:bg-gray-600/70" 
-                            onclick="checkAnswer(this, '${option.replace(/'/g, "\\'")}')">
-                        <span class="font-mono text-blue-400 mr-2">${String.fromCharCode(65 + index)}.</span> ${option}
-                    </button>
-                `;
+          }
+          // 3. Aggregate
+          else if (node.type === 'AGGREGATE' && node.params.groupBy) {
+            const groups = {};
+            currentData.forEach(item => {
+              const key = item[node.params.groupBy];
+              if (!groups[key]) groups[key] = { [node.params.groupBy]: key, _count: 0, _sum: 0, _raw: [] };
+              groups[key]._count++;
+              groups[key]._raw.push(item);
+              if (node.params.metricField) {
+                groups[key]._sum += (Number(item[node.params.metricField]) || 0);
+              }
             });
 
-            html += `</div>`;
-            quizContent.innerHTML = html;
-        }
-
-        /**
-         * Checks the user's selected answer against the correct answer.
-         */
-        function checkAnswer(selectedButton, selectedAnswer) {
-            if (answered) return;
-            answered = true;
-
-            const qData = quizData[currentQuestionIndex];
-            const isCorrect = selectedAnswer === qData.answer;
-
-            // Apply styling
-            document.querySelectorAll('.option-button').forEach(btn => {
-                btn.classList.add('disabled');
-                const btnText = btn.textContent.substring(4).trim();
-                
-                if (btnText === qData.answer) {
-                    btn.classList.add('correct');
-                } else if (btn === selectedButton) {
-                    btn.classList.add('selected-neutral');
-                }
+            currentData = Object.values(groups).map((g) => {
+              const res = { [node.params.groupBy]: g[node.params.groupBy] };
+              if (node.params.fn === 'sum') res[node.params.metricField] = g._sum;
+              else if (node.params.fn === 'avg') res[node.params.metricField] = Math.round(g._sum / g._count);
+              else res['Record Count'] = g._count;
+              return res;
             });
+          }
 
-            // Update score and show feedback
-            if (isCorrect) {
-                score++;
-                feedbackEl.innerHTML = `<span class="font-bold text-green-400">Correct!</span> ${qData.explanation}`;
-                feedbackEl.classList.remove('bg-red-900/30', 'border-red-600/50');
-                feedbackEl.classList.add('bg-green-900/30', 'border-green-600/50');
-            } else {
-                feedbackEl.innerHTML = `<span class="font-bold text-red-400">Incorrect.</span> Correct answer: <span class="font-semibold text-white">${qData.answer}</span>. ${qData.explanation}`;
-                feedbackEl.classList.remove('bg-green-900/30', 'border-green-600/50');
-                feedbackEl.classList.add('bg-red-900/30', 'border-red-600/50');
-            }
-
-            feedbackEl.classList.remove('hidden');
-            nextButton.disabled = false;
-            nextButton.classList.remove('hidden');
+          results.push({
+            nodeId: node.id,
+            data: [...currentData],
+            schema: currentData.length > 0 ? Object.keys(currentData[0]) : []
+          });
         }
 
-        /**
-         * Advances to the next question.
-         */
-        function nextQuestion() {
-            currentQuestionIndex++;
-            renderQuestion();
+        return results;
+      }, [nodes]);
+
+      // --- ACTIONS ---
+      const addNode = (type, insertIndex, initialParams = {}) => {
+        const newId = `node-${Date.now()}`;
+        let title = 'New Step';
+        let params = { ...initialParams };
+        let description = '';
+
+        switch(type) {
+          case 'FILTER': 
+            title = 'Filter Data'; 
+            description = 'Exclude records';
+            params = { operator: 'equals', ...initialParams }; 
+            break;
+          case 'AGGREGATE': 
+            title = 'Group & Aggregate'; 
+            description = 'Summarize dimensions';
+            params = { fn: 'count', ...initialParams }; 
+            break;
+          case 'VIZ': 
+            title = 'Visualization'; 
+            description = 'Chart or Table';
+            params = { chartType: 'bar', ...initialParams }; 
+            break;
         }
 
-        /**
-         * Displays the final results screen and prompts for name.
-         */
-        function showResults() {
-            const total = quizData.length;
-            const percentage = (score / total) * 100;
-            let resultText = '';
-            let color = 'text-yellow-400';
-            let icon = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-yellow-400"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>`; // Lucide Code
-            
-            if (percentage === 100) {
-                resultText = "Figma Dev Mode Master! Your knowledge is flawless. You are ready to lead the charge on design handoff best practices.";
-                color = 'text-green-400';
-                icon = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-green-400"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>`; // Lucide CheckCircle
-            } else if (percentage >= 70) {
-                resultText = "Solid Dev Mode User. You've mastered the core features. Focus on advanced tools like 'Compare changes' and the 'Component Playground' to reach the next level.";
-            } else if (percentage >= 50) {
-                resultText = "Good Foundations. You understand the basics, but there are some critical time-saving features you're missing. Our workshop will help fill those gaps!";
-            } else {
-                resultText = "Opportunity to Grow. Let's dive deep into Dev Mode. A better understanding of this tool will dramatically increase your efficiency in implementation.";
-                color = 'text-red-400';
-                icon = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto text-red-400"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`; // Lucide AlertCircle
-            }
-
-            quizContent.innerHTML = `
-                <div class="text-center space-y-4">
-                    ${icon}
-                    <h2 class="text-4xl font-extrabold ${color}">Quiz Complete!</h2>
-                    <p class="text-2xl font-bold text-white">Final Score: ${score} out of ${total}</p>
-                    <div class="text-lg py-4 px-6 rounded-xl border border-gray-600 bg-gray-800 text-gray-200">
-                        ${resultText}
-                    </div>
-                </div>
-            `;
-            
-            nextButton.classList.add('hidden');
-            feedbackEl.classList.add('hidden');
-            startButton.classList.remove('hidden');
-            startButton.textContent = 'Try Again';
-            subTitle.textContent = `You scored ${score} out of ${total}. Well done!`;
-            
-            // Show name prompt modal
-            showNamePrompt();
-        }
-        
-        /**
-         * Shows the modal for the user to enter their name.
-         */
-        function showNamePrompt() {
-            if (userName !== 'Anonymous Engineer') {
-                engineerNameInput.value = userName;
-            }
-            nameModal.classList.remove('hidden');
-            nameModal.classList.add('flex');
-        }
-
-        /**
-         * Saves the user's score to JSONBin (or local fallback).
-         */
-        async function submitScore() {
-            const enteredName = engineerNameInput.value.trim() || 'Anonymous Engineer';
-            const finalScore = score;
-            
-            userName = enteredName.substring(0, 20); // Truncate name to 20 chars
-            
-            if (!userId) {
-                console.error("User ID missing.");
-                nameModal.classList.remove('flex');
-                nameModal.classList.add('hidden');
-                return;
-            }
-
-            try {
-                if (USE_LOCAL_LEADERBOARD) {
-                    const key = `${appId}_local_leaderboard`;
-                    const raw = localStorage.getItem(key) || '[]';
-                    const list = Array.isArray(JSON.parse(raw)) ? JSON.parse(raw) : [];
-                    const idx = list.findIndex((u) => u.id === userId);
-                    if (idx >= 0) {
-                        const existingScore = list[idx].score || 0;
-                        if (finalScore > existingScore) {
-                            list[idx] = { id: userId, name: userName, score: finalScore, timestamp: Date.now() };
-                        }
-                    } else {
-                        list.push({ id: userId, name: userName, score: finalScore, timestamp: Date.now() });
-                    }
-                    // Keep only top 10 by score desc
-                    list.sort((a, b) => (b.score || 0) - (a.score || 0));
-                    const top10 = list.slice(0, 10);
-                    localStorage.setItem(key, JSON.stringify(top10));
-                    // Immediately refresh local leaderboard UI
-                    renderLocalLeaderboard();
-                } else {
-                    // JSONBin save with simple upsert-high-score behavior
-                    const current = await jsonbinFetch().catch(() => []);
-                    const list = Array.isArray(current) ? current : [];
-                    const idx = list.findIndex(u => u.id === userId);
-                    if (idx >= 0) {
-                        const existingScore = list[idx].score || 0;
-                        if (finalScore > existingScore) {
-                            list[idx] = { id: userId, name: userName, score: finalScore, timestamp: Date.now() };
-                        }
-                    } else {
-                        list.push({ id: userId, name: userName, score: finalScore, timestamp: Date.now() });
-                    }
-                    list.sort((a, b) => (b.score || 0) - (a.score || 0));
-                    const top10 = list.slice(0, 10);
-                    await jsonbinPut(top10);
-                    renderLeaderboardArray(top10);
-                }
-               
-            } catch (error) {
-                console.error("Error submitting score:", error);
-            } finally {
-                nameModal.classList.remove('flex');
-                nameModal.classList.add('hidden');
-                showLeaderboard(true); // Show leaderboard immediately after submitting
-            }
-        }
-
-        // --- JSONBin Helpers ---
-        async function jsonbinFetch() {
-            const url = `${JSONBIN_BASE}/${encodeURIComponent(jsonbinConfig.binId)}/latest`;
-            try {
-                const res = await fetch(url, {
-                    headers: {
-                        'X-Access-Key': jsonbinConfig.accessKey,
-                        'X-Bin-Meta': 'false',
-                        'Content-Type': 'application/json'
-                    }
-                });
-                if (!res.ok) {
-                    const text = await res.text().catch(() => '');
-                    console.error('JSONBin GET error', res.status, text);
-                    return [];
-                }
-                const data = await res.json();
-                // Support either raw array or {record: array}
-                if (Array.isArray(data)) return data;
-                if (data && Array.isArray(data.record)) return data.record;
-                return [];
-            } catch (err) {
-                console.error('JSONBin GET network error', err);
-                return [];
-            }
-        }
-
-        async function jsonbinPut(arrayData) {
-            const url = `${JSONBIN_BASE}/${encodeURIComponent(jsonbinConfig.binId)}`;
-            try {
-                const res = await fetch(url, {
-                    method: 'PUT',
-                    headers: {
-                        'X-Access-Key': jsonbinConfig.accessKey,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(arrayData)
-                });
-                if (!res.ok) {
-                    const text = await res.text().catch(() => '');
-                    console.error('JSONBin PUT error', res.status, text);
-                    throw new Error(`JSONBin PUT failed: ${res.status}`);
-                }
-                return res.json();
-            } catch (err) {
-                console.error('JSONBin PUT network error', err);
-                throw err;
-            }
-        }
-        
-        /**
-         * Toggles the visibility of the leaderboard modal.
-         * @param {boolean} show - Whether to show (true) or hide (false) the modal.
-         */
-        function showLeaderboard(show) {
-            if (show) {
-                leaderboardModal.classList.remove('hidden');
-                leaderboardModal.classList.add('flex');
-                // Refresh from JSONBin when opening if cloud mode is enabled
-                if (!USE_LOCAL_LEADERBOARD) {
-                    jsonbinFetch().then(renderLeaderboardArray).catch(() => {});
-                }
-            } else {
-                leaderboardModal.classList.remove('flex');
-                leaderboardModal.classList.add('hidden');
-            }
-        }
-
-        // Initial setup on load
-        document.addEventListener('DOMContentLoaded', async () => {
-            // Display initial welcome screen with playful illustration/icon
-            quizContent.innerHTML = `
-                <div class="text-center space-y-6 py-8">
-                    <!-- Playful Illustration (Lucide Code) -->
-                    <svg xmlns="http://www.w3.org/2000/svg" width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto"><path d="m18 16 4-4-4-4"></path><path d="m6 8-4 4 4 4"></path><path d="m14.5 4-5 16"></path></svg>
-                    <p class="text-lg text-gray-300 font-semibold">Dev Mode: Bridging Design and Code.</p>
-                    <p class="text-md text-gray-400">Ready to find out how well you utilize the most powerful tool for design handoff?</p>
-                </div>
-            `;
-            
-            nextButton.classList.add('hidden');
-            
-            // Initialize Firebase services
-            await initFirebase();
+        setNodes(prev => {
+          const newNodes = [...prev];
+          if (typeof insertIndex === 'number') {
+            newNodes.splice(insertIndex, 0, { id: newId, type, title, description, params });
+            return newNodes;
+          }
+          return [...prev, { id: newId, type, title, description, params }];
         });
+        
+        setSelectedNodeId(newId);
+        setActiveAddMenuIndex(null);
+      };
 
-    </script>
+      const removeNode = (id) => {
+        setNodes(prev => prev.filter(n => n.id !== id));
+        if (selectedNodeId === id) setSelectedNodeId('node-start');
+      };
+
+      const updateNode = (id, params) => {
+        setNodes(prev => prev.map(n => n.id === id ? { ...n, params } : n));
+      };
+
+      const handleChartDrillDown = (data, nodeIndex, xAxisField) => {
+        if (!data || !data.activePayload) return;
+        const payload = data.activePayload[0].payload;
+        const value = payload[xAxisField];
+
+        // Insert a new Filter node right after the current visualization
+        addNode('FILTER', nodeIndex + 1, {
+          field: xAxisField,
+          operator: 'equals',
+          value: value
+        });
+      };
+
+      const getNodeResult = (id) => chainData.find(r => r.nodeId === id);
+
+      // Simple chart component since Recharts CDN might not work perfectly
+      const SimpleBarChart = ({ data, xAxis, yAxis, onClick }) => {
+        const maxValue = Math.max(...data.map(d => d[yAxis] || 0));
+        const barWidth = 40;
+        const chartHeight = 200;
+        const chartWidth = 600;
+        const padding = 40;
+
+        return h('svg', {
+          width: chartWidth,
+          height: chartHeight,
+          className: 'cursor-pointer',
+          onClick: onClick
+        }, [
+          ...data.map((entry, i) => {
+            const x = padding + (i * (chartWidth - 2 * padding) / data.length);
+            const barHeight = ((entry[yAxis] || 0) / maxValue) * (chartHeight - 2 * padding);
+            const y = chartHeight - padding - barHeight;
+            return h('rect', {
+              key: i,
+              x: x - barWidth / 2,
+              y: y,
+              width: barWidth,
+              height: barHeight,
+              fill: '#3B82F6',
+              className: 'hover:opacity-80 transition-opacity',
+              onClick: () => onClick && onClick({ activePayload: [{ payload: entry }] })
+            });
+          }),
+          ...data.map((entry, i) => {
+            const x = padding + (i * (chartWidth - 2 * padding) / data.length);
+            return h('text', {
+              key: `label-${i}`,
+              x: x,
+              y: chartHeight - 10,
+              textAnchor: 'middle',
+              fontSize: 11,
+              fill: '#64748B'
+            }, String(entry[xAxis]).substring(0, 10));
+          })
+        ]);
+      };
+
+      return h('div', {
+        className: 'flex h-screen w-full bg-slate-50 font-sans text-slate-900 overflow-hidden'
+      }, [
+        // 1. LEFT SIDEBAR
+        h('div', {
+          key: 'sidebar',
+          className: 'w-16 flex-shrink-0 bg-slate-900 flex flex-col items-center py-6 gap-6 text-slate-400 border-r border-slate-800 z-30'
+        }, [
+          h('div', {
+            key: 'logo',
+            className: 'w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-blue-900/50 mb-4 ring-1 ring-white/10'
+          }, h(Layout, { size: 20 })),
+          h('div', {
+            key: 'db',
+            className: 'p-2.5 bg-slate-800 rounded-lg hover:bg-slate-700 cursor-pointer transition-colors text-white relative group',
+            title: 'Data Assets'
+          }, h(Database, { size: 20 })),
+          h('div', {
+            key: 'saved',
+            className: 'p-2.5 hover:bg-slate-800 rounded-lg cursor-pointer transition-colors relative group',
+            title: 'Saved Analysis'
+          }, h(FileJson, { size: 20 })),
+          h('div', {
+            key: 'settings',
+            className: 'mt-auto p-2.5 hover:bg-slate-800 rounded-lg cursor-pointer transition-colors relative group'
+          }, h(Settings, { size: 20 }))
+        ]),
+
+        // 2. MAIN CANVAS AREA
+        h('div', {
+          key: 'main',
+          className: 'flex-1 flex flex-col relative overflow-hidden bg-[#F8FAFC]'
+        }, [
+          // Header
+          h('header', {
+            key: 'header',
+            className: 'h-16 bg-white border-b border-gray-200 flex items-center px-8 justify-between shadow-sm z-20'
+          }, [
+            h('div', {
+              key: 'title-section',
+              className: 'flex items-center gap-4'
+            }, h('div', null, [
+              h('h1', {
+                key: 'title',
+                className: 'font-bold text-gray-900 text-lg leading-tight'
+              }, 'Invoice Approval Analysis'),
+              h('div', {
+                key: 'meta',
+                className: 'flex items-center gap-2 text-xs text-gray-500'
+              }, [
+                h('span', { key: 'time' }, 'Last edited just now'),
+                h('span', { key: 'dot', className: 'w-1 h-1 bg-gray-300 rounded-full' }),
+                h('span', { key: 'badge', className: 'bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium' }, 'Draft')
+              ])
+            ])),
+            h('div', {
+              key: 'actions',
+              className: 'flex items-center gap-3'
+            }, [
+              h('div', {
+                key: 'undo-redo',
+                className: 'flex bg-gray-100 rounded-md p-1 mr-2'
+              }, [
+                h('button', {
+                  key: 'undo',
+                  className: 'p-1.5 text-gray-500 hover:text-gray-900 hover:bg-white rounded transition-all shadow-sm'
+                }, h(Undo, { size: 16 })),
+                h('button', {
+                  key: 'redo',
+                  className: 'p-1.5 text-gray-500 hover:text-gray-900 hover:bg-white rounded transition-all shadow-sm'
+                }, h(Redo, { size: 16 }))
+              ]),
+              h('button', {
+                key: 'share',
+                className: 'flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 hover:bg-gray-50 rounded-lg transition-colors shadow-sm'
+              }, [h(Share2, { key: 'icon', size: 16 }), ' Share']),
+              h('button', {
+                key: 'save',
+                className: 'flex items-center gap-2 px-5 py-2 text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 rounded-lg shadow-md hover:shadow-lg transition-all'
+              }, [h(Save, { key: 'icon', size: 16 }), ' Save Asset'])
+            ])
+          ]),
+
+          // Canvas Scroll Area
+          h('div', {
+            key: 'canvas',
+            className: 'flex-1 overflow-y-auto p-8 scroll-smooth',
+            onClick: () => setActiveAddMenuIndex(null)
+          }, h('div', {
+            className: 'max-w-4xl mx-auto pb-48'
+          }, [
+            // THE CHAIN
+            h('div', {
+              key: 'chain',
+              className: 'relative pl-16'
+            }, [
+              // Vertical connecting line
+              h('div', {
+                key: 'line',
+                className: 'absolute left-[5.25rem] top-12 bottom-12 w-0.5 bg-gray-300 -z-0'
+              }),
+              ...nodes.map((node, index) => {
+                const result = getNodeResult(node.id);
+                const isActive = selectedNodeId === node.id;
+                const isSource = node.type === 'SOURCE';
+
+                const IconMap = {
+                  SOURCE: Database,
+                  FILTER: Filter,
+                  AGGREGATE: Sigma,
+                  SORT: ArrowUpDown,
+                  LIMIT: ArrowDown,
+                  VIZ: BarChart3
+                };
+                const Icon = IconMap[node.type] || Database;
+
+                return h('div', {
+                  key: node.id,
+                  className: 'relative mb-0 group animate-in slide-in-from-bottom-4 duration-500 fill-mode-backwards',
+                  style: { animationDelay: `${index * 100}ms` }
+                }, [
+                  // Node Card
+                  h('div', {
+                    key: 'card',
+                    onClick: (e) => { e.stopPropagation(); setSelectedNodeId(node.id); },
+                    className: `relative z-10 flex flex-col bg-white rounded-2xl border transition-all cursor-pointer overflow-hidden mb-6 ${isActive ? 'border-blue-500 shadow-xl shadow-blue-500/10 ring-1 ring-blue-500' : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md'}`
+                  }, [
+                    // Node Header
+                    h('div', {
+                      key: 'header',
+                      className: 'flex items-center p-5 gap-5'
+                    }, [
+                      h('div', {
+                        key: 'icon',
+                        className: `w-14 h-14 rounded-xl flex items-center justify-center shrink-0 shadow-sm ${isActive ? 'bg-blue-600 text-white shadow-blue-600/30' : 'bg-white border border-gray-100 text-gray-500 shadow-sm'}`
+                      }, h(Icon, { size: 24 })),
+                      h('div', {
+                        key: 'content',
+                        className: 'flex-1 min-w-0'
+                      }, [
+                        h('div', {
+                          key: 'title-row',
+                          className: 'flex items-center gap-2 mb-0.5'
+                        }, [
+                          h('h4', {
+                            key: 'title',
+                            className: `font-bold text-lg ${isActive ? 'text-gray-900' : 'text-gray-700'}`
+                          }, node.title),
+                          node.type === 'FILTER' && h('span', {
+                            key: 'badge-filter',
+                            className: 'bg-orange-100 text-orange-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase'
+                          }, 'Filter'),
+                          node.type === 'AGGREGATE' && h('span', {
+                            key: 'badge-agg',
+                            className: 'bg-purple-100 text-purple-700 text-[10px] font-bold px-1.5 py-0.5 rounded uppercase'
+                          }, 'Transform')
+                        ]),
+                        h('div', {
+                          key: 'description',
+                          className: 'text-sm text-gray-500 truncate flex items-center gap-2'
+                        }, node.type === 'FILTER' && node.params.field 
+                          ? h('span', null, 'Keeping only where ', h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.field), ` ${node.params.operator} `, h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.value || '...'))
+                          : node.type === 'AGGREGATE' && node.params.groupBy
+                          ? h('span', null, 'Grouping by ', h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.groupBy))
+                          : h('span', null, node.description || node.type))
+                      ]),
+                      h('div', {
+                        key: 'actions',
+                        className: 'flex items-center gap-4 text-gray-400'
+                      }, [
+                        h('div', {
+                          key: 'count',
+                          className: 'text-right hidden group-hover:block transition-all'
+                        }, [
+                          h('div', { key: 'num', className: 'font-bold text-gray-900 text-sm' }, result?.data.length),
+                          h('div', { key: 'label', className: 'text-[10px] uppercase font-medium tracking-wide' }, 'Records')
+                        ]),
+                        !isSource && h('div', {
+                          key: 'delete',
+                          className: 'flex items-center border-l border-gray-100 pl-4'
+                        }, h('button', {
+                          onClick: (e) => { e.stopPropagation(); removeNode(node.id); },
+                          className: 'p-2 hover:bg-red-50 hover:text-red-500 rounded-lg transition-colors',
+                          title: 'Remove Step'
+                        }, h(Trash2, { size: 18 }))),
+                        h(ChevronRight, {
+                          key: 'chevron',
+                          size: 20,
+                          className: `transition-transform duration-300 ${isActive ? 'rotate-90 text-blue-500' : 'text-gray-300'}`
+                        })
+                      ])
+                    ]),
+                    // Node Preview Area
+                    h('div', {
+                      key: 'preview',
+                      className: `overflow-hidden transition-all duration-300 ease-in-out bg-gray-50/50 ${isActive || node.type === 'VIZ' ? 'max-h-[500px] border-t border-gray-100 opacity-100' : 'max-h-0 opacity-0'}`
+                    }, h('div', {
+                      className: 'p-5'
+                    }, [
+                      // Visualization Preview
+                      node.type === 'VIZ' && result && h('div', {
+                        key: 'viz-preview',
+                        className: 'h-72 w-full bg-white rounded-lg border border-gray-200 p-4 shadow-sm'
+                      }, node.params.chartType === 'bar' && node.params.xAxis && node.params.yAxis 
+                        ? h(SimpleBarChart, {
+                            key: 'chart',
+                            data: result.data,
+                            xAxis: node.params.xAxis,
+                            yAxis: node.params.yAxis,
+                            onClick: (data) => handleChartDrillDown(data, index, node.params.xAxis)
+                          })
+                        : node.params.chartType === 'table'
+                        ? h('div', {
+                            key: 'table',
+                            className: 'overflow-auto h-full text-sm scrollbar-thin scrollbar-thumb-gray-200'
+                          }, h('table', {
+                            className: 'w-full text-left border-collapse'
+                          }, [
+                            h('thead', {
+                              key: 'thead',
+                              className: 'bg-gray-50 sticky top-0 z-10'
+                            }, h('tr', null, result.schema.map(h => h('th', {
+                              key: h,
+                              className: 'p-3 font-semibold text-gray-600 border-b border-gray-200 whitespace-nowrap'
+                            }, h)))),
+                            h('tbody', {
+                              key: 'tbody'
+                            }, result.data.map((row, i) => h('tr', {
+                              key: i,
+                              className: 'hover:bg-blue-50/30 border-b border-gray-100 last:border-0 transition-colors'
+                            }, result.schema.map(h => h('td', {
+                              key: h,
+                              className: 'p-3 text-gray-700 whitespace-nowrap'
+                            }, row[h])))))
+                          ]))
+                        : h('div', {
+                            key: 'placeholder',
+                            className: 'h-full flex flex-col items-center justify-center text-gray-400 gap-3'
+                          }, [
+                            h('div', {
+                              key: 'icon',
+                              className: 'w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center'
+                            }, h(BarChart3, { size: 32, className: 'opacity-50' })),
+                            h('p', {
+                              key: 'text',
+                              className: 'text-sm font-medium'
+                            }, 'Configure axes in settings panel')
+                          ])),
+                      // Regular Table Preview for Non-VIZ Nodes
+                      node.type !== 'VIZ' && result && h('div', {
+                        key: 'table-preview',
+                        className: 'rounded-lg border border-gray-200 bg-white overflow-hidden shadow-sm'
+                      }, [
+                        h('div', {
+                          key: 'table-wrapper',
+                          className: 'overflow-x-auto'
+                        }, h('table', {
+                          className: 'w-full text-left text-sm'
+                        }, [
+                          h('thead', {
+                            key: 'thead',
+                            className: 'bg-gray-50 text-gray-500 border-b border-gray-200'
+                          }, h('tr', null, result.schema.slice(0, 6).map(h => h('th', {
+                            key: h,
+                            className: 'py-2 px-4 font-medium whitespace-nowrap'
+                          }, h)))),
+                          h('tbody', {
+                            key: 'tbody',
+                            className: 'text-gray-700'
+                          }, result.data.slice(0, 3).map((row, i) => h('tr', {
+                            key: i,
+                            className: 'border-b border-gray-100 last:border-0 hover:bg-blue-50/50'
+                          }, result.schema.slice(0, 6).map(h => h('td', {
+                            key: h,
+                            className: 'py-2 px-4 whitespace-nowrap'
+                          }, row[h])))))
+                        ])),
+                        result.data.length > 3 && h('div', {
+                          key: 'more',
+                          className: 'py-2 bg-gray-50 text-center text-xs text-gray-500 border-t border-gray-200'
+                        }, `...and ${result.data.length - 3} more rows`)
+                      ])
+                    ].filter(Boolean)))
+                  ]),
+                  // INTERSTITIAL ADD BUTTON
+                  h('div', {
+                    key: 'add-button',
+                    className: 'h-10 relative mb-6'
+                  }, h('div', {
+                    className: 'absolute left-[5.25rem] -translate-x-1/2 z-20'
+                  }, [
+                    h('button', {
+                      key: 'button',
+                      onClick: (e) => {
+                        e.stopPropagation();
+                        setActiveAddMenuIndex(activeAddMenuIndex === index ? null : index);
+                      },
+                      className: `flex items-center justify-center w-8 h-8 rounded-full shadow-md border-2 border-white transition-all ${activeAddMenuIndex === index ? 'bg-slate-900 text-white scale-110' : 'bg-gray-100 text-gray-400 hover:bg-blue-500 hover:text-white hover:scale-110'}`
+                    }, h(Plus, { size: 16, strokeWidth: 3 })),
+                    activeAddMenuIndex === index && h('div', {
+                      key: 'menu',
+                      className: 'absolute top-10 left-4 bg-white rounded-xl shadow-xl shadow-slate-200/50 border border-gray-100 p-2 w-64 animate-in fade-in slide-in-from-top-2 z-50'
+                    }, [
+                      h('div', {
+                        key: 'menu-header',
+                        className: 'flex items-center justify-between px-3 py-2'
+                      }, [
+                        h('span', {
+                          key: 'title',
+                          className: 'text-xs font-bold text-gray-400 uppercase tracking-wider'
+                        }, 'Insert Step'),
+                        h('button', {
+                          key: 'close',
+                          onClick: () => setActiveAddMenuIndex(null),
+                          className: 'text-gray-400 hover:text-gray-600'
+                        }, h(X, { size: 14 }))
+                      ]),
+                      h('button', {
+                        key: 'filter',
+                        onClick: () => addNode('FILTER', index + 1),
+                        className: 'w-full text-left px-3 py-3 hover:bg-blue-50 rounded-lg flex items-center gap-3 text-sm text-gray-700 transition-colors group/item'
+                      }, [
+                        h('div', {
+                          key: 'icon',
+                          className: 'bg-orange-100 text-orange-600 p-1.5 rounded group-hover/item:bg-orange-200'
+                        }, h(Filter, { size: 16 })),
+                        h('div', { key: 'text' }, [
+                          h('div', { key: 'title', className: 'font-semibold' }, 'Filter'),
+                          h('div', { key: 'desc', className: 'text-xs text-gray-500' }, 'Subset rows based on conditions')
+                        ])
+                      ]),
+                      h('button', {
+                        key: 'aggregate',
+                        onClick: () => addNode('AGGREGATE', index + 1),
+                        className: 'w-full text-left px-3 py-3 hover:bg-blue-50 rounded-lg flex items-center gap-3 text-sm text-gray-700 transition-colors group/item'
+                      }, [
+                        h('div', {
+                          key: 'icon',
+                          className: 'bg-purple-100 text-purple-600 p-1.5 rounded group-hover/item:bg-purple-200'
+                        }, h(Sigma, { size: 16 })),
+                        h('div', { key: 'text' }, [
+                          h('div', { key: 'title', className: 'font-semibold' }, 'Group & Aggregate'),
+                          h('div', { key: 'desc', className: 'text-xs text-gray-500' }, 'Pivot and summarize data')
+                        ])
+                      ]),
+                      h('div', {
+                        key: 'divider',
+                        className: 'h-px bg-gray-100 my-1'
+                      }),
+                      h('button', {
+                        key: 'viz',
+                        onClick: () => addNode('VIZ', index + 1),
+                        className: 'w-full text-left px-3 py-3 hover:bg-blue-50 rounded-lg flex items-center gap-3 text-sm text-gray-700 transition-colors group/item'
+                      }, [
+                        h('div', {
+                          key: 'icon',
+                          className: 'bg-blue-100 text-blue-600 p-1.5 rounded group-hover/item:bg-blue-200'
+                        }, h(BarChart3, { size: 16 })),
+                        h('div', { key: 'text' }, [
+                          h('div', { key: 'title', className: 'font-semibold' }, 'Visualize'),
+                          h('div', { key: 'desc', className: 'text-xs text-gray-500' }, 'Chart or table view')
+                        ])
+                      ])
+                    ])
+                  ]))
+                ]);
+              })
+            ])
+          ]))
+        ]),
+
+        // 3. RIGHT PANEL (Configuration)
+        h(PropertiesPanel, {
+          key: 'properties',
+          node: nodes.find(n => n.id === selectedNodeId),
+          updateNode: updateNode,
+          schema: getNodeResult(selectedNodeId)?.schema || []
+        })
+      ]);
+    };
+
+    // Render the app
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(h(AnalysisApp));
+  </script>
 </body>
 </html>
-
-
