@@ -173,24 +173,6 @@
       return XLSX.utils.sheet_to_json(sheet, { defval: '', raw: false });
     };
 
-    /**
-     * Seed data (only used until the user uploads a file)
-     */
-    const INITIAL_DATA = [
-      { id: 1, caseId: 'C001', activity: 'Create Purchase Order', resource: 'User A', amount: 5000, vendor: 'Siemens', timestamp: '2023-10-01' },
-      { id: 2, caseId: 'C001', activity: 'Approve PO', resource: 'Manager B', amount: 5000, vendor: 'Siemens', timestamp: '2023-10-02' },
-      { id: 3, caseId: 'C001', activity: 'Receive Goods', resource: 'User C', amount: 5000, vendor: 'Siemens', timestamp: '2023-10-05' },
-      { id: 4, caseId: 'C002', activity: 'Create Purchase Order', resource: 'User A', amount: 1200, vendor: 'Bosch', timestamp: '2023-10-03' },
-      { id: 5, caseId: 'C002', activity: 'Receive Goods', resource: 'User C', amount: 1200, vendor: 'Bosch', timestamp: '2023-10-06' },
-      { id: 6, caseId: 'C002', activity: 'Pay Invoice', resource: 'Bot X', amount: 1200, vendor: 'Bosch', timestamp: '2023-10-07' },
-      { id: 7, caseId: 'C003', activity: 'Create Purchase Order', resource: 'User D', amount: 8500, vendor: 'Siemens', timestamp: '2023-10-04' },
-      { id: 8, caseId: 'C003', activity: 'Deny PO', resource: 'Manager B', amount: 8500, vendor: 'Siemens', timestamp: '2023-10-05' },
-      { id: 9, caseId: 'C004', activity: 'Create Purchase Order', resource: 'User A', amount: 300, vendor: 'Staples', timestamp: '2023-10-08' },
-      { id: 10, caseId: 'C004', activity: 'Receive Goods', resource: 'User A', amount: 300, vendor: 'Staples', timestamp: '2023-10-09' },
-      { id: 11, caseId: 'C004', activity: 'Pay Invoice', resource: 'Bot X', amount: 300, vendor: 'Staples', timestamp: '2023-10-10' },
-      { id: 12, caseId: 'C005', activity: 'Create Purchase Order', resource: 'User E', amount: 15000, vendor: 'Bosch', timestamp: '2023-10-11' },
-    ];
-
     // ----------------------------
     // View Components
     // ----------------------------
@@ -251,24 +233,6 @@
             className: 'space-y-4'
           }, [
             h('div', {
-              key: 'source-select',
-              className: 'space-y-1'
-            }, [
-              h('label', {
-                key: 'label',
-                className: 'text-sm font-semibold text-gray-700'
-              }, 'Dataset Source'),
-              h('select', {
-                key: 'select',
-                className: 'w-full p-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all',
-                value: node.params.source || 'P2P_Log_EU',
-                onChange: (e) => handleChange('source', e.target.value)
-              }, [
-                h('option', { key: 'p2p', value: 'P2P_Log_EU' }, 'Procure to Pay (EU Region)'),
-                h('option', { key: 'o2c', value: 'O2C_Log_US' }, 'Order to Cash (US Region)')
-              ])
-            ]),
-            h('div', {
               key: 'upload',
               className: 'space-y-1'
             }, [
@@ -286,7 +250,7 @@
               h('p', {
                 key: 'help',
                 className: 'text-xs text-gray-500'
-              }, 'Tip: upload replaces the “raw data” feeding the chain.')
+              }, 'Tip: upload replaces the "raw data" feeding the chain.')
             ]),
             h('div', {
               key: 'status',
@@ -299,11 +263,11 @@
                 h('p', {
                   key: 'title',
                   className: 'text-xs font-semibold text-blue-900'
-                }, sourceStatus?.title || 'Connected'),
+                }, sourceStatus?.title || 'No dataset loaded'),
                 h('p', {
                   key: 'desc',
                   className: 'text-xs text-blue-700 mt-1'
-                }, sourceStatus?.detail || `Loaded ${INITIAL_DATA.length} records.`)
+                }, sourceStatus?.detail || 'Upload a CSV or Excel file to get started.')
               ])
             ]))
           ]),
@@ -547,14 +511,14 @@
      */
     const AnalysisApp = () => {
       // --- MODEL STATE ---
-      const [rawData, setRawData] = useState(INITIAL_DATA);
-      const [rawDataName, setRawDataName] = useState('Mock dataset');
+      const [rawData, setRawData] = useState([]);
+      const [rawDataName, setRawDataName] = useState(null);
       const [loadError, setLoadError] = useState(null);
       const [isLoadingFile, setIsLoadingFile] = useState(false);
 
       // --- STATE ---
       const [nodes, setNodes] = useState([
-        { id: 'node-start', type: 'SOURCE', title: 'Load Raw Data', description: 'Choose system & upload dataset', params: { source: 'P2P_Log_EU', __file: null } }
+        { id: 'node-start', type: 'SOURCE', title: 'Load Raw Data', description: 'Upload dataset', params: { __file: null } }
       ]);
       const [selectedNodeId, setSelectedNodeId] = useState('node-start');
       const [activeAddMenuIndex, setActiveAddMenuIndex] = useState(null);
@@ -939,9 +903,7 @@
                                 'Dataset ',
                                 h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, rawDataName || 'Not loaded'),
                                 ' · ',
-                                h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, `${Array.isArray(rawData) ? rawData.length : 0} rows`),
-                                ' · System ',
-                                h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.source || '—')
+                                h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, `${Array.isArray(rawData) ? rawData.length : 0} rows`)
                               )
                             : node.type === 'FILTER' && node.params.field 
                             ? h('span', null, 'Keeping only where ', h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.field), ` ${node.params.operator} `, h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.value || '...'))
