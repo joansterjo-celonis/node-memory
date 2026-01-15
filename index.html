@@ -964,7 +964,7 @@ const AnalysisApp = () => {
                         },
                           node.type === 'SOURCE'
                             ? h('span', null,
-                                'Dataset ',
+                                'File ',
                                 h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, rawDataName || 'Not loaded'),
                                 ' · ',
                                 h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, `${Array.isArray(rawData) ? rawData.length : 0} rows`)
@@ -982,9 +982,9 @@ const AnalysisApp = () => {
                       }, [
                         h('div', {
                           key: 'count',
-                          className: 'text-right hidden group-hover:block transition-all'
+                          className: `text-right transition-all ${node.type === 'SOURCE' ? 'block' : 'hidden group-hover:block'}`
                         }, [
-                          h('div', { key: 'num', className: 'font-bold text-gray-900 text-sm' }, result?.data.length),
+                          h('div', { key: 'num', className: 'font-bold text-gray-900 text-sm' }, result?.data.length ?? 0),
                           h('div', { key: 'label', className: 'text-[10px] uppercase font-medium tracking-wide' }, 'Records')
                         ]),
                         !isSource && h('div', {
