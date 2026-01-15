@@ -1,4 +1,4 @@
-This is the Figma DEV mode quiz for Engineers
+This is a cool prototype I'm working on.
 
 Built by Joan Sterjo & Gemini
 
