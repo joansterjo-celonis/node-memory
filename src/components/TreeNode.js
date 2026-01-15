@@ -190,12 +190,12 @@ const TreeNode = ({
             <div className={`border-t border-gray-100 bg-gray-50 ${isTablePreview ? 'p-0' : 'p-4'} flex-1 min-h-[12rem] animate-in slide-in-from-top-2 duration-200 flex flex-col`}>
               {/* TABLE VIEW */}
               {isTablePreview && (
-                <div className="h-full overflow-hidden text-[10px] bg-white border border-gray-200 rounded">
-                  <div className="flex justify-between text-xs font-bold text-gray-500 mb-2">
+                <div className="h-full overflow-hidden text-[10px] bg-white border border-gray-200 rounded flex flex-col">
+                  <div className="flex justify-between text-xs font-bold text-gray-500 mb-2 px-2 pt-2">
                     <span>Preview</span>
                     <span>{result.data.length} rows</span>
                   </div>
-                  <div className="overflow-auto h-[120px]">
+                  <div className="overflow-auto flex-1 min-h-0 px-2 pb-2">
                     <table className="w-full text-left border-collapse">
                       <thead>
                         <tr className="bg-gray-50 border-b sticky top-0 shadow-sm">
