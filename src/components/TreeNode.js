@@ -23,6 +23,123 @@ const {
 const { getChildren, countDescendants, getNodeResult, calculateMetric } = window.NodeUtils;
 const SimpleChart = window.SimpleChart;
 
+const TABLE_ROW_HEIGHT = 24;
+const TABLE_OVERSCAN = 6;
+
+const TablePreview = React.memo(({ data, columns, onCellClick, nodeId }) => {
+  const scrollRef = React.useRef(null);
+  const rafRef = React.useRef(null);
+  const [scrollTop, setScrollTop] = React.useState(0);
+  const [viewportHeight, setViewportHeight] = React.useState(0);
+
+  const totalRows = data.length;
+  const maxScrollTop = Math.max(0, totalRows * TABLE_ROW_HEIGHT - viewportHeight);
+  const effectiveScrollTop = Math.min(scrollTop, maxScrollTop);
+  const startIndex = Math.max(0, Math.floor(effectiveScrollTop / TABLE_ROW_HEIGHT) - TABLE_OVERSCAN);
+  const endIndex = Math.min(
+    totalRows,
+    Math.ceil((effectiveScrollTop + viewportHeight) / TABLE_ROW_HEIGHT) + TABLE_OVERSCAN
+  );
+  const visibleRows = data.slice(startIndex, endIndex);
+  const paddingTop = startIndex * TABLE_ROW_HEIGHT;
+  const paddingBottom = Math.max(0, (totalRows - endIndex) * TABLE_ROW_HEIGHT);
+  const columnCount = Math.max(1, columns.length);
+
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const updateHeight = () => setViewportHeight(el.clientHeight);
+    updateHeight();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateHeight);
+      return () => window.removeEventListener('resize', updateHeight);
+    }
+
+    let frame = null;
+    const observer = new ResizeObserver(() => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updateHeight);
+    });
+
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  React.useEffect(() => () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+  }, []);
+
+  const handleScroll = (e) => {
+    const nextTop = e.currentTarget.scrollTop;
+    if (rafRef.current) return;
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      setScrollTop(nextTop);
+    });
+  };
+
+  if (columns.length === 0) {
+    return (
+      <div className="flex-1 min-h-0 px-2 pb-2 text-[10px] text-gray-400 flex items-center justify-center">
+        No columns available for preview
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      className="overflow-auto flex-1 min-h-0 px-2 pb-2"
+    >
+      <table className="w-full text-left border-collapse table-fixed">
+        <thead>
+          <tr className="bg-gray-50 border-b sticky top-0 shadow-sm">
+            {columns.map(col => (
+              <th key={col} className="p-1 bg-gray-50 text-gray-600 font-medium whitespace-nowrap">{col}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {paddingTop > 0 && (
+            <tr aria-hidden="true">
+              <td className="p-0 border-0" style={{ height: `${paddingTop}px` }} colSpan={columnCount}></td>
+            </tr>
+          )}
+          {visibleRows.map((row, idx) => (
+            <tr
+              key={startIndex + idx}
+              className="border-b hover:bg-blue-50 transition-colors"
+              style={{ height: `${TABLE_ROW_HEIGHT}px` }}
+            >
+              {columns.map(col => (
+                <td
+                  key={col}
+                  className="p-1 truncate cursor-pointer hover:bg-blue-100 hover:text-blue-700 transition-colors max-w-[100px]"
+                  onClick={(e) => { e.stopPropagation(); onCellClick(row[col], col, nodeId); }}
+                  title={`Filter by ${col} = ${row[col]}`}
+                >
+                  {row[col]}
+                </td>
+              ))}
+            </tr>
+          ))}
+          {paddingBottom > 0 && (
+            <tr aria-hidden="true">
+              <td className="p-0 border-0" style={{ height: `${paddingBottom}px` }} colSpan={columnCount}></td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+});
+
 const TreeNode = ({
   nodeId,
   nodes,
@@ -195,33 +312,12 @@ const TreeNode = ({
                     <span>Preview</span>
                     <span>{result.data.length} rows</span>
                   </div>
-                  <div className="overflow-auto flex-1 min-h-0 px-2 pb-2">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="bg-gray-50 border-b sticky top-0 shadow-sm">
-                          {visibleColumns.map(col => (
-                            <th key={col} className="p-1 bg-gray-50 text-gray-600 font-medium whitespace-nowrap">{col}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {result.data.slice(0,10).map((r,i) => (
-                          <tr key={i} className="border-b hover:bg-blue-50 transition-colors">
-                            {visibleColumns.map(col => (
-                              <td
-                                key={col}
-                                className="p-1 truncate cursor-pointer hover:bg-blue-100 hover:text-blue-700 transition-colors max-w-[100px]"
-                                onClick={(e) => { e.stopPropagation(); onTableCellClick(r[col], col, nodeId); }}
-                                title={`Filter by ${col} = ${r[col]}`}
-                              >
-                                {r[col]}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <TablePreview
+                    data={result.data}
+                    columns={visibleColumns}
+                    onCellClick={onTableCellClick}
+                    nodeId={nodeId}
+                  />
                 </div>
               )}
 
