@@ -530,17 +530,17 @@
       ]);
     };
 
-    /**
-     * MAIN APP COMPONENT
-     */
-    const AnalysisApp = () => {
+/**
+ * MAIN APP COMPONENT
+ */
+const AnalysisApp = () => {
       // --- MODEL STATE ---
       const [rawData, setRawData] = useState([]);
       const [rawDataName, setRawDataName] = useState(null);
       const [loadError, setLoadError] = useState(null);
       const [isLoadingFile, setIsLoadingFile] = useState(false);
 
-      // --- STATE ---
+  // --- STATE ---
       const [nodes, setNodes] = useState([
         { id: 'node-start', type: 'SOURCE', title: 'Load Raw Data', description: 'Upload dataset', params: { __file: null } }
       ]);
@@ -557,6 +557,8 @@
           setLoadError(null);
           setIsLoadingFile(true);
           try {
+            // Give the UI a moment to render the loading state.
+            await new Promise(resolve => setTimeout(resolve, 50));
             const name = sourceFile.name || 'Uploaded file';
             const lower = name.toLowerCase();
             let data = [];
@@ -590,124 +592,129 @@
         return () => { cancelled = true; };
       }, [sourceFile]);
 
-      // --- ENGINE ---
-      const chainData = useMemo(() => {
+  // --- ENGINE ---
+  const chainData = useMemo(() => {
         let currentData = Array.isArray(rawData) ? [...rawData] : [];
         const results = [];
 
-        for (const node of nodes) {
-          // 1. Source (Reset/Load)
-          if (node.type === 'SOURCE') {
+    for (const node of nodes) {
+      // 1. Source (Reset/Load)
+      if (node.type === 'SOURCE') {
             currentData = Array.isArray(rawData) ? [...rawData] : [];
-          }
-          // 2. Filter
-          else if (node.type === 'FILTER' && node.params.field) {
-            currentData = currentData.filter(item => {
+      }
+      // 2. Filter
+      else if (node.type === 'FILTER' && node.params.field) {
+        currentData = currentData.filter(item => {
               const val = item[node.params.field];
-              const filterVal = node.params.value;
-              
-              if (!filterVal && filterVal !== 0) return true;
-              
-              // Simple type coercion
-              if (node.params.operator === 'equals') return String(val) == String(filterVal);
-              if (node.params.operator === 'not_equals') return String(val) != String(filterVal);
-              if (node.params.operator === 'gt') return val > Number(filterVal);
-              if (node.params.operator === 'lt') return val < Number(filterVal);
-              if (node.params.operator === 'contains') return String(val).toLowerCase().includes(String(filterVal).toLowerCase());
-              return true;
-            });
-          }
-          // 3. Aggregate
-          else if (node.type === 'AGGREGATE' && node.params.groupBy) {
+          const filterVal = node.params.value;
+          
+          if (!filterVal && filterVal !== 0) return true;
+          
+          // Simple type coercion
+          if (node.params.operator === 'equals') return String(val) == String(filterVal);
+          if (node.params.operator === 'not_equals') return String(val) != String(filterVal);
+          if (node.params.operator === 'gt') return val > Number(filterVal);
+          if (node.params.operator === 'lt') return val < Number(filterVal);
+          if (node.params.operator === 'contains') return String(val).toLowerCase().includes(String(filterVal).toLowerCase());
+          return true;
+        });
+      }
+      // 3. Aggregate
+      else if (node.type === 'AGGREGATE' && node.params.groupBy) {
             const groups = {};
-            currentData.forEach(item => {
+        currentData.forEach(item => {
               const key = item[node.params.groupBy];
-              if (!groups[key]) groups[key] = { [node.params.groupBy]: key, _count: 0, _sum: 0, _raw: [] };
-              groups[key]._count++;
-              groups[key]._raw.push(item);
-              if (node.params.metricField) {
+          if (!groups[key]) groups[key] = { [node.params.groupBy]: key, _count: 0, _sum: 0, _raw: [] };
+          groups[key]._count++;
+          groups[key]._raw.push(item);
+          if (node.params.metricField) {
                 groups[key]._sum += (Number(item[node.params.metricField]) || 0);
-              }
-            });
+          }
+        });
 
             currentData = Object.values(groups).map((g) => {
               const res = { [node.params.groupBy]: g[node.params.groupBy] };
-              if (node.params.fn === 'sum') res[node.params.metricField] = g._sum;
-              else if (node.params.fn === 'avg') res[node.params.metricField] = Math.round(g._sum / g._count);
-              else res['Record Count'] = g._count;
-              return res;
-            });
-          }
-
-          results.push({
-            nodeId: node.id,
-            data: [...currentData],
-            schema: currentData.length > 0 ? Object.keys(currentData[0]) : []
-          });
-        }
-
-        return results;
-      }, [nodes]);
-
-      // --- ACTIONS ---
-      const addNode = (type, insertIndex, initialParams = {}) => {
-        const newId = `node-${Date.now()}`;
-        let title = 'New Step';
-        let params = { ...initialParams };
-        let description = '';
-
-        switch(type) {
-          case 'FILTER': 
-            title = 'Filter Data'; 
-            description = 'Exclude records';
-            params = { operator: 'equals', ...initialParams }; 
-            break;
-          case 'AGGREGATE': 
-            title = 'Group & Aggregate'; 
-            description = 'Summarize dimensions';
-            params = { fn: 'count', ...initialParams }; 
-            break;
-          case 'VIZ': 
-            title = 'Visualization'; 
-            description = 'Chart or Table';
-            params = { chartType: 'bar', ...initialParams }; 
-            break;
-        }
-
-        setNodes(prev => {
-          const newNodes = [...prev];
-          if (typeof insertIndex === 'number') {
-            newNodes.splice(insertIndex, 0, { id: newId, type, title, description, params });
-            return newNodes;
-          }
-          return [...prev, { id: newId, type, title, description, params }];
+          if (node.params.fn === 'sum') res[node.params.metricField] = g._sum;
+          else if (node.params.fn === 'avg') res[node.params.metricField] = Math.round(g._sum / g._count);
+          else res['Record Count'] = g._count;
+          return res;
         });
-        
-        setSelectedNodeId(newId);
-        setActiveAddMenuIndex(null);
-      };
+      }
+
+      results.push({
+        nodeId: node.id,
+        data: [...currentData],
+        schema: currentData.length > 0 ? Object.keys(currentData[0]) : []
+      });
+    }
+
+    return results;
+  }, [nodes]);
+
+  // --- ACTIONS ---
+      const addNode = (type, insertIndex, initialParams = {}) => {
+    const newId = `node-${Date.now()}`;
+    let title = 'New Step';
+    let params = { ...initialParams };
+    let description = '';
+
+    switch(type) {
+      case 'FILTER': 
+        title = 'Filter Data'; 
+        description = 'Exclude records';
+        params = { operator: 'equals', ...initialParams }; 
+        break;
+      case 'AGGREGATE': 
+        title = 'Group & Aggregate'; 
+        description = 'Summarize dimensions';
+        params = { fn: 'count', ...initialParams }; 
+        break;
+      case 'VIZ': 
+        title = 'Visualization'; 
+        description = 'Chart or Table';
+        params = { chartType: 'bar', ...initialParams }; 
+        break;
+    }
+
+    setNodes(prev => {
+      const newNodes = [...prev];
+      if (typeof insertIndex === 'number') {
+        newNodes.splice(insertIndex, 0, { id: newId, type, title, description, params });
+        return newNodes;
+      }
+      return [...prev, { id: newId, type, title, description, params }];
+    });
+    
+    setSelectedNodeId(newId);
+    setActiveAddMenuIndex(null);
+  };
 
       const removeNode = (id) => {
-        setNodes(prev => prev.filter(n => n.id !== id));
-        if (selectedNodeId === id) setSelectedNodeId('node-start');
-      };
+    setNodes(prev => prev.filter(n => n.id !== id));
+    if (selectedNodeId === id) setSelectedNodeId('node-start');
+  };
 
       const updateNode = (id, params) => {
-        setNodes(prev => prev.map(n => n.id === id ? { ...n, params } : n));
-      };
+        // If a file is selected, immediately flip loading so the UI updates.
+        if (id === 'node-start' && params && params.__file) {
+          setLoadError(null);
+          setIsLoadingFile(true);
+        }
+    setNodes(prev => prev.map(n => n.id === id ? { ...n, params } : n));
+  };
 
       const handleChartDrillDown = (data, nodeIndex, xAxisField) => {
-        if (!data || !data.activePayload) return;
-        const payload = data.activePayload[0].payload;
-        const value = payload[xAxisField];
+    if (!data || !data.activePayload) return;
+    const payload = data.activePayload[0].payload;
+    const value = payload[xAxisField];
 
-        // Insert a new Filter node right after the current visualization
-        addNode('FILTER', nodeIndex + 1, {
-          field: xAxisField,
-          operator: 'equals',
-          value: value
-        });
-      };
+    // Insert a new Filter node right after the current visualization
+    addNode('FILTER', nodeIndex + 1, {
+      field: xAxisField,
+      operator: 'equals',
+      value: value
+    });
+  };
 
       const getNodeResult = (id) => chainData.find(r => r.nodeId === id);
 
@@ -845,6 +852,13 @@
           }, h('div', {
             className: 'max-w-4xl mx-auto pb-48'
           }, [
+            isLoadingFile && h('div', {
+              key: 'global-loading',
+              className: 'mb-6 rounded-xl border border-blue-100 bg-blue-50 p-4'
+            }, [
+              h('div', { key: 'label', className: 'text-xs font-semibold text-blue-700 mb-2' }, 'Ingesting data…'),
+              h('div', { key: 'bar', className: 'progress-bar' })
+            ]),
             loadError && h('div', {
               key: 'error',
               className: 'mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800'
@@ -931,7 +945,7 @@
                               )
                             : node.type === 'FILTER' && node.params.field 
                             ? h('span', null, 'Keeping only where ', h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.field), ` ${node.params.operator} `, h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.value || '...'))
-                            : node.type === 'AGGREGATE' && node.params.groupBy
+                              : node.type === 'AGGREGATE' && node.params.groupBy
                             ? h('span', null, 'Grouping by ', h('span', { className: 'font-mono bg-gray-100 px-1 rounded text-gray-700' }, node.params.groupBy))
                             : h('span', null, node.description || node.type)
                         )
@@ -1064,8 +1078,8 @@
                     h('button', {
                       key: 'button',
                       onClick: (e) => {
-                        e.stopPropagation();
-                        setActiveAddMenuIndex(activeAddMenuIndex === index ? null : index);
+                              e.stopPropagation();
+                              setActiveAddMenuIndex(activeAddMenuIndex === index ? null : index);
                       },
                       className: `flex items-center justify-center w-8 h-8 rounded-full shadow-md border-2 border-white transition-all ${activeAddMenuIndex === index ? 'bg-slate-900 text-white scale-110' : 'bg-gray-100 text-gray-400 hover:bg-blue-500 hover:text-white hover:scale-110'}`
                     }, h(Plus, { size: 16, strokeWidth: 3 })),
