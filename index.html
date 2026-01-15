@@ -62,13 +62,55 @@
   <div id="root"></div>
 
   <!-- Load app files in strict order (globals, no ES modules) -->
-  <script type="text/babel" data-presets="react" src="src/ui/icons.js"></script>
-  <script type="text/babel" data-presets="react" src="src/utils/ingest.js"></script>
-  <script type="text/babel" data-presets="react" src="src/utils/nodeUtils.js"></script>
-  <script type="text/babel" data-presets="react" src="src/ui/SimpleChart.js"></script>
-  <script type="text/babel" data-presets="react" src="src/components/PropertiesPanel.js"></script>
-  <script type="text/babel" data-presets="react" src="src/components/TreeNode.js"></script>
-  <script type="text/babel" data-presets="react" src="src/app/AnalysisApp.js"></script>
-  <script type="text/babel" data-presets="react" src="src/main.jsx"></script>
+  <script>
+    (function () {
+      const showBootError = (msg) => {
+        const el = document.getElementById('boot-error');
+        if (!el) return;
+        el.style.display = 'block';
+        el.textContent = msg;
+      };
+
+      if (location.protocol === 'file:') {
+        showBootError('This app must be served from a local server (not file://). Run: python3 -m http.server 5173 --directory .');
+        return;
+      }
+
+      const files = [
+        'src/ui/icons.js',
+        'src/utils/ingest.js',
+        'src/utils/nodeUtils.js',
+        'src/ui/SimpleChart.js',
+        'src/components/PropertiesPanel.js',
+        'src/components/TreeNode.js',
+        'src/app/AnalysisApp.js',
+        'src/main.jsx'
+      ];
+
+      const loadAll = async () => {
+        for (const file of files) {
+          const res = await fetch(file);
+          if (!res.ok) {
+            showBootError(`Failed to load ${file}. Status ${res.status}.`);
+            return;
+          }
+          const code = await res.text();
+          try {
+            const compiled = Babel.transform(code, { presets: ['react'] }).code;
+            (0, eval)(compiled);
+          } catch (err) {
+            console.error(err);
+            showBootError(`Error while compiling ${file}: ${err?.message || err}`);
+            return;
+          }
+        }
+      };
+
+      loadAll().catch((err) => {
+        console.error(err);
+        showBootError(`Loader failed: ${err?.message || err}`);
+      });
+    })();
+  </script>
 </body>
 </html>
