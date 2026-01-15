@@ -76,6 +76,16 @@
         return;
       }
 
+      const getBasePath = () => {
+        const path = location.pathname;
+        const last = path.split('/').pop() || '';
+        if (last.includes('.')) {
+          return path.replace(/[^/]*$/, '');
+        }
+        return path.endsWith('/') ? path : `${path}/`;
+      };
+      const base = getBasePath();
+
       const files = [
         'src/ui/icons.js',
         'src/utils/ingest.js',
@@ -89,9 +99,9 @@
 
       const loadAll = async () => {
         for (const file of files) {
-          const res = await fetch(file);
+          const res = await fetch(`${base}${file}`);
           if (!res.ok) {
-            showBootError(`Failed to load ${file}. Status ${res.status}.`);
+            showBootError(`Failed to load ${file}. Status ${res.status}. Base path: ${base}`);
             return;
           }
           const code = await res.text();
