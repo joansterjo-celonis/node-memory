@@ -49,7 +49,10 @@ const TablePreview = React.memo(({ data, columns, onCellClick, nodeId }) => {
     const el = scrollRef.current;
     if (!el) return;
 
-    const updateHeight = () => setViewportHeight(el.clientHeight);
+    const updateHeight = () => {
+      const height = el.getBoundingClientRect().height;
+      setViewportHeight(height);
+    };
     updateHeight();
 
     if (typeof ResizeObserver === 'undefined') {
@@ -63,12 +66,18 @@ const TablePreview = React.memo(({ data, columns, onCellClick, nodeId }) => {
       frame = requestAnimationFrame(updateHeight);
     });
 
+    // Observe the scroll container and the resizable node wrapper.
     observer.observe(el);
+    const resizable = el.closest('[data-node-resize]');
+    if (resizable) observer.observe(resizable);
+    const parent = el.parentElement;
+    if (parent) observer.observe(parent);
+
     return () => {
       observer.disconnect();
       if (frame) cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [data.length, columns.length]);
 
   React.useEffect(() => () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -97,7 +106,7 @@ const TablePreview = React.memo(({ data, columns, onCellClick, nodeId }) => {
       onScroll={handleScroll}
       className="overflow-auto flex-1 min-h-0 px-2 pb-2"
     >
-      <table className="w-full text-left border-collapse table-fixed">
+      <table className="min-w-max w-full text-left border-collapse">
         <thead>
           <tr className="bg-gray-50 border-b sticky top-0 shadow-sm">
             {columns.map(col => (
@@ -227,10 +236,12 @@ const TreeNode = ({
           `}
           style={{
             width: 320,
+            height: 320,
             minWidth: 260,
             minHeight: 180,
             resize: 'both'
           }}
+          data-node-resize="true"
         >
           {/* Header */}
           <div className="p-4 flex items-center gap-3">
@@ -304,7 +315,7 @@ const TreeNode = ({
           {isExpanded && result && (() => {
             const isTablePreview = node.params.subtype === 'TABLE' || (node.type !== 'COMPONENT' && node.type !== 'JOIN');
             return (
-            <div className={`border-t border-gray-100 bg-gray-50 ${isTablePreview ? 'p-0' : 'p-4'} flex-1 min-h-[12rem] animate-in slide-in-from-top-2 duration-200 flex flex-col`}>
+            <div className={`border-t border-gray-100 bg-gray-50 ${isTablePreview ? 'p-0' : 'p-4'} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
               {/* TABLE VIEW */}
               {isTablePreview && (
                 <div className="h-full overflow-hidden text-[10px] bg-white border border-gray-200 rounded flex flex-col">
