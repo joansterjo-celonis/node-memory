@@ -211,7 +211,7 @@
      * COMPONENT: Properties Panel
      * Handles configuration for the selected node.
      */
-    const PropertiesPanel = ({ node, updateNode, schema, sourceStatus }) => {
+    const PropertiesPanel = ({ node, updateNode, schema, sourceStatus, onIngest }) => {
       if (!node) return h('div', {
         className: 'h-full flex flex-col items-center justify-center p-6 text-gray-400 text-center bg-white border-l border-gray-200'
       }, [
@@ -274,6 +274,16 @@
                 className: 'text-xs text-gray-500'
               }, 'Tip: upload replaces the "raw data" feeding the chain.')
             ]),
+            h('button', {
+              key: 'ingest',
+              onClick: () => onIngest && onIngest(),
+              disabled: !node.params?.__file || sourceStatus?.loading,
+              className: `w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                !node.params?.__file || sourceStatus?.loading
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`
+            }, sourceStatus?.loading ? 'Ingesting…' : 'Ingest Data'),
             h('div', {
               key: 'status',
               className: 'bg-blue-50 p-3 rounded-lg border border-blue-100 space-y-2'
@@ -541,6 +551,7 @@ const AnalysisApp = () => {
       const [loadError, setLoadError] = useState(null);
       const [isLoadingFile, setIsLoadingFile] = useState(false);
       const [selectedFile, setSelectedFile] = useState(null);
+      const [pendingFile, setPendingFile] = useState(null);
 
   // --- STATE ---
       const [nodes, setNodes] = useState([
@@ -702,18 +713,21 @@ const AnalysisApp = () => {
   };
 
       const updateNode = (id, params) => {
-        // If a file is selected, immediately flip loading so the UI updates.
+        // Track pending file selection without ingesting yet.
         if (id === 'node-start' && params && Object.prototype.hasOwnProperty.call(params, '__file')) {
-          if (params.__file) {
-            setLoadError(null);
-            setIsLoadingFile(true);
-            setSelectedFile(params.__file);
-          } else {
-            setSelectedFile(null);
-          }
+          setPendingFile(params.__file || null);
         }
     setNodes(prev => prev.map(n => n.id === id ? { ...n, params } : n));
   };
+
+      const ingestPendingFile = () => {
+        if (!pendingFile) {
+          setLoadError('Please select a file to ingest.');
+          return;
+        }
+        setLoadError(null);
+        setSelectedFile(pendingFile);
+      };
 
       const handleChartDrillDown = (data, nodeIndex, xAxisField) => {
     if (!data || !data.activePayload) return;
@@ -1173,6 +1187,7 @@ const AnalysisApp = () => {
           node: nodes.find(n => n.id === selectedNodeId),
           updateNode: updateNode,
           schema: getNodeResult(selectedNodeId)?.schema || [],
+          onIngest: ingestPendingFile,
           sourceStatus: (() => {
             if (isLoadingFile) return { title: 'Loading…', detail: 'Parsing file and building table…', loading: true };
             if (loadError) return { title: 'Error', detail: loadError };
