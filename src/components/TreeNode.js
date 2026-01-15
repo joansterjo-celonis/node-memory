@@ -25,6 +25,8 @@ const SimpleChart = window.SimpleChart;
 
 const TABLE_ROW_HEIGHT = 24;
 const TABLE_OVERSCAN = 6;
+const BRANCH_CONNECTOR_HEIGHT = 16;
+const BRANCH_CONNECTOR_STROKE = 2;
 
 const TablePreview = React.memo(({ data, columns, onCellClick, nodeId }) => {
   const scrollRef = React.useRef(null);
@@ -149,6 +151,117 @@ const TablePreview = React.memo(({ data, columns, onCellClick, nodeId }) => {
   );
 });
 
+const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
+  const containerRef = React.useRef(null);
+  const childRefs = React.useRef([]);
+  const rafRef = React.useRef(null);
+  const [layout, setLayout] = React.useState({ parentX: 0, childXs: [] });
+
+  const updateLayout = React.useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    if (!rect.width) return;
+    const childXs = childRefs.current
+      .map((el) => {
+        if (!el) return null;
+        const childRect = el.getBoundingClientRect();
+        return childRect.left + childRect.width / 2 - rect.left;
+      })
+      .filter((val) => val !== null);
+    setLayout({ parentX: rect.width / 2, childXs });
+  }, []);
+
+  const scheduleUpdate = React.useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      updateLayout();
+    });
+  }, [updateLayout]);
+
+  React.useLayoutEffect(() => {
+    scheduleUpdate();
+  }, [childrenNodes.length, scheduleUpdate]);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    const hasResizeObserver = typeof ResizeObserver !== 'undefined';
+    if (!container) return undefined;
+
+    let observer = null;
+    if (hasResizeObserver) {
+      observer = new ResizeObserver(scheduleUpdate);
+      observer.observe(container);
+      childRefs.current.forEach((el) => {
+        if (el) observer.observe(el);
+      });
+    } else {
+      window.addEventListener('resize', scheduleUpdate);
+    }
+
+    return () => {
+      if (observer) observer.disconnect();
+      window.removeEventListener('resize', scheduleUpdate);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [childrenNodes.length, scheduleUpdate]);
+
+  childRefs.current = [];
+  const hasLayout = layout.parentX > 0 && layout.childXs.length === childrenNodes.length;
+  const midY = BRANCH_CONNECTOR_HEIGHT / 2;
+
+  return (
+    <div className="flex flex-col items-center">
+      <div
+        ref={containerRef}
+        className="relative flex gap-8"
+        style={{ paddingTop: BRANCH_CONNECTOR_HEIGHT }}
+      >
+        {hasLayout && (
+          <svg
+            className="absolute top-0 left-0 w-full text-gray-300 pointer-events-none"
+            height={BRANCH_CONNECTOR_HEIGHT}
+            aria-hidden="true"
+          >
+            <line
+              x1={layout.parentX}
+              y1="0"
+              x2={layout.parentX}
+              y2={midY}
+              stroke="currentColor"
+              strokeWidth={BRANCH_CONNECTOR_STROKE}
+              strokeLinecap="round"
+            />
+            {layout.childXs.map((childX, idx) => (
+              <polyline
+                key={idx}
+                points={`${layout.parentX},${midY} ${childX},${midY} ${childX},${BRANCH_CONNECTOR_HEIGHT}`}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={BRANCH_CONNECTOR_STROKE}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ))}
+          </svg>
+        )}
+        {childrenNodes.map((child, idx) => (
+          <div
+            key={child.id}
+            ref={(el) => {
+              if (el) childRefs.current[idx] = el;
+            }}
+            className="flex flex-col items-center"
+          >
+            {renderChild(child)}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const TreeNode = ({
   nodeId,
   nodes,
@@ -236,10 +349,10 @@ const TreeNode = ({
           `}
           style={{
             width: 320,
-            height: 320,
+            height: isExpanded ? 320 : 'auto',
             minWidth: 260,
-            minHeight: 180,
-            resize: 'both'
+            minHeight: isExpanded ? 180 : 0,
+            resize: isExpanded ? 'both' : 'none'
           }}
           data-node-resize="true"
         >
@@ -442,7 +555,7 @@ const TreeNode = ({
       {/* CONNECTORS & CHILDREN */}
       {children.length > 0 && (
         <div className="flex flex-col items-center">
-          <div className="w-0.5 h-8 bg-gray-300 relative group/line">
+          <div className="w-0.5 h-8 bg-gray-300 rounded-full relative group/line">
             {!areChildrenCollapsed && (
               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity z-30">
                 <button
@@ -543,40 +656,30 @@ const TreeNode = ({
                 setShowInsertMenuForId={setShowInsertMenuForId}
               />
             ) : (
-              <div className="flex flex-col items-center">
-                <div className="relative flex gap-8">
-                  {children.map((child, idx) => (
-                    <div key={child.id} className="flex flex-col items-center relative">
-                      <div className="flex w-full h-4">
-                        <div className={`w-1/2 border-t-2 border-gray-300 ${idx === 0 ? 'border-transparent' : ''}`}></div>
-                        <div className={`w-1/2 border-t-2 border-gray-300 ${idx === children.length - 1 ? 'border-transparent' : ''}`}></div>
-                      </div>
-                      <div className="absolute top-0 w-0.5 h-4 bg-gray-300"></div>
-                      <div className="pt-0">
-                        <TreeNode
-                          nodeId={child.id}
-                          nodes={nodes}
-                          selectedNodeId={selectedNodeId}
-                          chainData={chainData}
-                          onSelect={onSelect}
-                          onAdd={onAdd}
-                          onInsert={onInsert}
-                          onRemove={onRemove}
-                          onToggleExpand={onToggleExpand}
-                          onToggleChildren={onToggleChildren}
-                          onToggleBranch={onToggleBranch}
-                          onDrillDown={onDrillDown}
-                          onTableCellClick={onTableCellClick}
-                          showAddMenuForId={showAddMenuForId}
-                          setShowAddMenuForId={setShowAddMenuForId}
-                          showInsertMenuForId={showInsertMenuForId}
-                          setShowInsertMenuForId={setShowInsertMenuForId}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <MultiBranchGroup
+                childrenNodes={children}
+                renderChild={(child) => (
+                  <TreeNode
+                    nodeId={child.id}
+                    nodes={nodes}
+                    selectedNodeId={selectedNodeId}
+                    chainData={chainData}
+                    onSelect={onSelect}
+                    onAdd={onAdd}
+                    onInsert={onInsert}
+                    onRemove={onRemove}
+                    onToggleExpand={onToggleExpand}
+                    onToggleChildren={onToggleChildren}
+                    onToggleBranch={onToggleBranch}
+                    onDrillDown={onDrillDown}
+                    onTableCellClick={onTableCellClick}
+                    showAddMenuForId={showAddMenuForId}
+                    setShowAddMenuForId={setShowAddMenuForId}
+                    showInsertMenuForId={showInsertMenuForId}
+                    setShowInsertMenuForId={setShowInsertMenuForId}
+                  />
+                )}
+              />
             )
           )}
         </div>
