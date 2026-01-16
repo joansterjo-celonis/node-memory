@@ -17,7 +17,8 @@ const {
   Hash,
   Gauge,
   LinkIcon,
-  Minimize2
+  Minimize2,
+  Share2
 } = window.Icons;
 
 const { getChildren, countDescendants, getNodeResult, calculateMetric, formatNumber } = window.NodeUtils;
@@ -45,6 +46,83 @@ const formatMetricLabel = (metric) => {
   if (!metric.field) return fnLabel;
   return `${fnLabel} of ${metric.field}`;
 };
+
+const AssistantPanel = React.memo(({ node, schema, onRun }) => {
+  const [question, setQuestion] = React.useState(node.params.assistantQuestion || '');
+
+  React.useEffect(() => {
+    setQuestion(node.params.assistantQuestion || '');
+  }, [node.id, node.params.assistantQuestion]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!onRun) return;
+    const trimmed = question.trim();
+    if (!trimmed) return;
+    onRun(node.id, trimmed);
+  };
+
+  const planSteps = node.params.assistantPlan || [];
+
+  return (
+    <div className="h-full bg-white border border-gray-200 rounded p-4 flex flex-col gap-3 text-[11px]">
+      <div className="flex items-center gap-2 text-gray-500 text-xs font-semibold uppercase tracking-wider">
+        <Share2 size={12} className="text-indigo-500" />
+        AI Assistant
+      </div>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+        <textarea
+          className="w-full min-h-[72px] p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none resize-y"
+          placeholder="Ask a question… e.g. 'Show total revenue by region'"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+        />
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] text-gray-400">
+            {schema.length === 0 ? 'No columns available yet.' : `${schema.length} columns available`}
+          </span>
+          <button
+            type="submit"
+            className="px-3 py-1.5 rounded bg-blue-600 text-white text-[11px] font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!question.trim() || node.params.assistantStatus === 'loading'}
+          >
+            {node.params.assistantStatus === 'loading' ? 'Thinking…' : 'Build Nodes'}
+          </button>
+        </div>
+      </form>
+      {node.params.assistantStatus === 'loading' && (
+        <div className="text-[11px] text-blue-600 bg-blue-50 border border-blue-100 rounded p-2">
+          Analyzing question and building a plan…
+        </div>
+      )}
+      {node.params.assistantStatus === 'error' && (
+        <div className="text-[11px] text-red-600 bg-red-50 border border-red-100 rounded p-2">
+          {node.params.assistantError || 'I could not build a plan from that question.'}
+        </div>
+      )}
+      {node.params.assistantStatus === 'success' && node.params.assistantSummary && (
+        <div className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded p-2">
+          {node.params.assistantSummary}
+        </div>
+      )}
+      {planSteps.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Planned Steps</div>
+          <ul className="space-y-1">
+            {planSteps.map((step, idx) => (
+              <li key={`${step}-${idx}`} className="text-gray-600">• {step}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {node.params.assistantStatus !== 'success' && node.params.assistantStatus !== 'error' && (
+        <div className="text-[11px] text-gray-400">
+          Ask a question to build a filter, aggregate, and view automatically.
+        </div>
+      )}
+    </div>
+  );
+});
 
 const TablePreview = React.memo(({ data, columns, onCellClick, nodeId }) => {
   const scrollRef = React.useRef(null);
@@ -294,6 +372,7 @@ const TreeNode = ({
   onToggleBranch,
   onDrillDown,
   onTableCellClick,
+  onAssistantRequest,
   showAddMenuForId,
   setShowAddMenuForId,
   showInsertMenuForId,
@@ -317,6 +396,7 @@ const TreeNode = ({
   if (node.type === 'COMPONENT') {
     if (node.params.subtype === 'TABLE') Icon = TableIcon;
     if (node.params.subtype === 'PIVOT') Icon = TableIcon;
+    if (node.params.subtype === 'AI') Icon = Share2;
     if (node.params.subtype === 'CHART') Icon = BarChart3;
     if (node.params.subtype === 'KPI') Icon = Hash;
     if (node.params.subtype === 'GAUGE') Icon = Gauge;
@@ -497,7 +577,7 @@ const TreeNode = ({
                 {node.type === 'FILTER' && node.params.field ? `${node.params.field} ${node.params.operator} ${node.params.value}` :
                   node.type === 'AGGREGATE' ? `Group by ${node.params.groupBy}` :
                   node.type === 'JOIN' ? `with ${node.params.rightTable || '...'}` :
-                  node.type === 'COMPONENT' ? `${node.params.subtype} View` :
+                  node.type === 'COMPONENT' ? (node.params.subtype === 'AI' ? 'AI Assistant' : `${node.params.subtype} View`) :
                   node.description || node.type}
               </div>
             </div>
@@ -545,6 +625,7 @@ const TreeNode = ({
           {isExpanded && result && (() => {
             const isTablePreview = node.params.subtype === 'TABLE' || (node.type !== 'COMPONENT' && node.type !== 'JOIN');
             const isPivotPreview = node.params.subtype === 'PIVOT';
+            const isAssistantPreview = node.params.subtype === 'AI';
             const hasTableLikePreview = isTablePreview || isPivotPreview;
             return (
             <div className={`border-t border-gray-100 bg-gray-50 ${hasTableLikePreview ? 'p-0' : 'p-4'} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
@@ -562,6 +643,15 @@ const TreeNode = ({
                     nodeId={nodeId}
                   />
                 </div>
+              )}
+
+              {/* AI ASSISTANT VIEW */}
+              {isAssistantPreview && (
+                <AssistantPanel
+                  node={node}
+                  schema={result.schema || []}
+                  onRun={onAssistantRequest}
+                />
               )}
 
               {/* PIVOT VIEW */}
@@ -726,6 +816,9 @@ const TreeNode = ({
                 <button onClick={() => onAdd('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
                   <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Pivot Table
                 </button>
+                <button onClick={() => onAdd('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                  <Share2 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> AI Assistant
+                </button>
                 <button onClick={() => onAdd('COMPONENT', nodeId, 'CHART')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
                   <BarChart3 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Chart
                 </button>
@@ -777,6 +870,9 @@ const TreeNode = ({
                     <button onClick={() => onInsert('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
                       <TableIcon size={12} className="text-gray-400" /> Pivot Table
                     </button>
+                    <button onClick={() => onInsert('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                      <Share2 size={12} className="text-gray-400" /> AI Assistant
+                    </button>
                   </div>
                 )}
               </div>
@@ -811,6 +907,7 @@ const TreeNode = ({
                     onToggleBranch={onToggleBranch}
                     onDrillDown={onDrillDown}
                     onTableCellClick={onTableCellClick}
+                    onAssistantRequest={onAssistantRequest}
                     showAddMenuForId={showAddMenuForId}
                     setShowAddMenuForId={setShowAddMenuForId}
                     showInsertMenuForId={showInsertMenuForId}
@@ -842,6 +939,7 @@ const TreeNode = ({
                 onToggleBranch={onToggleBranch}
                 onDrillDown={onDrillDown}
                 onTableCellClick={onTableCellClick}
+                onAssistantRequest={onAssistantRequest}
                 showAddMenuForId={showAddMenuForId}
                 setShowAddMenuForId={setShowAddMenuForId}
                 showInsertMenuForId={showInsertMenuForId}
@@ -865,6 +963,7 @@ const TreeNode = ({
                     onToggleBranch={onToggleBranch}
                     onDrillDown={onDrillDown}
                     onTableCellClick={onTableCellClick}
+                    onAssistantRequest={onAssistantRequest}
                     showAddMenuForId={showAddMenuForId}
                     setShowAddMenuForId={setShowAddMenuForId}
                     showInsertMenuForId={showInsertMenuForId}

@@ -14,6 +14,7 @@ const NodeType = {
 const ComponentType = {
   TABLE: 'TABLE',
   PIVOT: 'PIVOT',
+  AI: 'AI',
   CHART: 'CHART',
   KPI: 'KPI',
   GAUGE: 'GAUGE'

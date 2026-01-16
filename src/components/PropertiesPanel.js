@@ -14,14 +14,37 @@ const KPI_FUNCTIONS = [
 ];
 
 const requiresMetricField = (fn) => ['sum', 'avg', 'min', 'max', 'count_distinct'].includes(fn);
+const DEFAULT_LLM_SETTINGS = {
+  baseUrl: 'https://api.openai.com/v1',
+  model: 'gpt-4o-mini',
+  apiKey: ''
+};
+
+const readStoredLlmSettings = () => {
+  if (typeof window === 'undefined' || !window.localStorage) return { ...DEFAULT_LLM_SETTINGS };
+  try {
+    const raw = window.localStorage.getItem('figma-quiz-llm-settings');
+    if (!raw) return { ...DEFAULT_LLM_SETTINGS };
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_LLM_SETTINGS, ...parsed };
+  } catch (err) {
+    return { ...DEFAULT_LLM_SETTINGS };
+  }
+};
 
 const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, onIngest }) => {
   // Local staging for JOIN config (so user can edit multiple fields then commit).
   const [localParams, setLocalParams] = useState({});
+  const [llmSettings, setLlmSettings] = useState(readStoredLlmSettings);
 
   useEffect(() => {
     if (node) setLocalParams(node.params || {});
   }, [node?.id, node?.params]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem('figma-quiz-llm-settings', JSON.stringify(llmSettings));
+  }, [llmSettings]);
 
   if (!node) {
     return (
@@ -298,20 +321,24 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
             <div className="border-t border-gray-100 pt-4 space-y-4">
               <div className="space-y-1">
                 <label className="text-sm font-semibold text-gray-700 block">Aggregation Function</label>
-                <div className="flex bg-gray-100 p-1 rounded-lg">
-                  {['count', 'sum', 'avg'].map((fn) => (
+                <div className="grid grid-cols-2 gap-2">
+                  {KPI_FUNCTIONS.map((fn) => (
                     <button
-                      key={fn}
-                      onClick={() => handleChange('fn', fn)}
-                      className={`flex-1 py-1.5 text-xs font-medium rounded-md capitalize transition-all ${node.params.fn === fn ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                      key={fn.value}
+                      onClick={() => handleChange('fn', fn.value)}
+                      className={`py-1.5 text-[11px] font-medium rounded-md transition-all ${
+                        node.params.fn === fn.value
+                          ? 'bg-blue-50 border border-blue-500 text-blue-700'
+                          : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
                     >
-                      {fn}
+                      {fn.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {node.params.fn !== 'count' && (
+              {requiresMetricField(node.params.fn || 'count') && (
                 <div className="space-y-1">
                   <label className="text-sm font-semibold text-gray-700 block">Metric Field</label>
                   <select
@@ -363,6 +390,64 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
                 <div className="flex justify-between items-center px-1">
                   <button onClick={() => handleChange('columns', schema)} className="text-[10px] font-medium text-blue-600 hover:underline">Select All</button>
                   <button onClick={() => handleChange('columns', [])} className="text-[10px] font-medium text-gray-400 hover:text-gray-600 hover:underline">Clear All</button>
+                </div>
+              </div>
+            )}
+
+            {/* AI Assistant Config */}
+            {node.params.subtype === 'AI' && (
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-gray-700">AI Assistant</div>
+                  <p className="text-xs text-gray-500">
+                    Ask your question inside the node card to generate a plan of nodes.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-xs text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={!!node.params.assistantUseLLM}
+                      onChange={(e) => handleChange('assistantUseLLM', e.target.checked)}
+                    />
+                    Use LLM for smarter planning
+                  </label>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                      OpenAI-Compatible Settings
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-gray-500 block">API Base URL</label>
+                      <input
+                        type="text"
+                        className="w-full p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={llmSettings.baseUrl}
+                        onChange={(e) => setLlmSettings(prev => ({ ...prev, baseUrl: e.target.value }))}
+                        placeholder="https://api.openai.com/v1"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-gray-500 block">Model</label>
+                      <input
+                        type="text"
+                        className="w-full p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={llmSettings.model}
+                        onChange={(e) => setLlmSettings(prev => ({ ...prev, model: e.target.value }))}
+                        placeholder="gpt-4o-mini"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-gray-500 block">API Key</label>
+                      <input
+                        type="password"
+                        className="w-full p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={llmSettings.apiKey}
+                        onChange={(e) => setLlmSettings(prev => ({ ...prev, apiKey: e.target.value }))}
+                        placeholder="sk-..."
+                      />
+                      <p className="text-[10px] text-gray-400">Stored locally in your browser.</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
