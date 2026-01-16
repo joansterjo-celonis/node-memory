@@ -4,13 +4,47 @@ const React = window.React;
 const { useState, useEffect } = React;
 const { Database, Settings, Play, BarChart3, TrendingUp, Hash, Gauge, TableIcon, CheckSquare } = window.Icons;
 
+const KPI_FUNCTIONS = [
+  { value: 'count', label: 'Count' },
+  { value: 'count_distinct', label: 'Distinct Count' },
+  { value: 'sum', label: 'Sum' },
+  { value: 'avg', label: 'Average' },
+  { value: 'min', label: 'Min' },
+  { value: 'max', label: 'Max' }
+];
+
+const requiresMetricField = (fn) => ['sum', 'avg', 'min', 'max', 'count_distinct'].includes(fn);
+const DEFAULT_LLM_SETTINGS = {
+  baseUrl: 'https://api.openai.com/v1',
+  model: 'gpt-4o-mini',
+  apiKey: ''
+};
+
+const readStoredLlmSettings = () => {
+  if (typeof window === 'undefined' || !window.localStorage) return { ...DEFAULT_LLM_SETTINGS };
+  try {
+    const raw = window.localStorage.getItem('figma-quiz-llm-settings');
+    if (!raw) return { ...DEFAULT_LLM_SETTINGS };
+    const parsed = JSON.parse(raw);
+    return { ...DEFAULT_LLM_SETTINGS, ...parsed };
+  } catch (err) {
+    return { ...DEFAULT_LLM_SETTINGS };
+  }
+};
+
 const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, onIngest }) => {
   // Local staging for JOIN config (so user can edit multiple fields then commit).
   const [localParams, setLocalParams] = useState({});
+  const [llmSettings, setLlmSettings] = useState(readStoredLlmSettings);
 
   useEffect(() => {
     if (node) setLocalParams(node.params || {});
   }, [node?.id, node?.params]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem('figma-quiz-llm-settings', JSON.stringify(llmSettings));
+  }, [llmSettings]);
 
   if (!node) {
     return (
@@ -33,6 +67,30 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
 
   const commitJoin = () => updateNode(node.id, localParams);
   const handleMetaChange = (key, value) => updateNode(node.id, { [key]: value }, true);
+
+  const kpiMetrics = (node.type === 'COMPONENT' && node.params.subtype === 'KPI')
+    ? (node.params.metrics && node.params.metrics.length > 0
+      ? node.params.metrics
+      : [{ id: 'metric-default', label: '', fn: node.params.fn || 'count', field: node.params.metricField || '' }])
+    : [];
+
+  const updateKpiMetric = (idx, updates) => {
+    const next = kpiMetrics.map((metric, index) => index === idx ? { ...metric, ...updates } : metric);
+    handleChange('metrics', next);
+  };
+
+  const addKpiMetric = () => {
+    const next = [
+      ...kpiMetrics,
+      { id: `metric-${Date.now()}`, label: '', fn: 'count', field: '' }
+    ];
+    handleChange('metrics', next);
+  };
+
+  const removeKpiMetric = (idx) => {
+    const next = kpiMetrics.filter((_, index) => index !== idx);
+    handleChange('metrics', next);
+  };
 
   return (
     <div className="h-full flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/50 w-80 animate-in slide-in-from-right duration-300 z-50">
@@ -263,20 +321,24 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
             <div className="border-t border-gray-100 pt-4 space-y-4">
               <div className="space-y-1">
                 <label className="text-sm font-semibold text-gray-700 block">Aggregation Function</label>
-                <div className="flex bg-gray-100 p-1 rounded-lg">
-                  {['count', 'sum', 'avg'].map((fn) => (
+                <div className="grid grid-cols-2 gap-2">
+                  {KPI_FUNCTIONS.map((fn) => (
                     <button
-                      key={fn}
-                      onClick={() => handleChange('fn', fn)}
-                      className={`flex-1 py-1.5 text-xs font-medium rounded-md capitalize transition-all ${node.params.fn === fn ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                      key={fn.value}
+                      onClick={() => handleChange('fn', fn.value)}
+                      className={`py-1.5 text-[11px] font-medium rounded-md transition-all ${
+                        node.params.fn === fn.value
+                          ? 'bg-blue-50 border border-blue-500 text-blue-700'
+                          : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+                      }`}
                     >
-                      {fn}
+                      {fn.label}
                     </button>
                   ))}
                 </div>
               </div>
 
-              {node.params.fn !== 'count' && (
+              {requiresMetricField(node.params.fn || 'count') && (
                 <div className="space-y-1">
                   <label className="text-sm font-semibold text-gray-700 block">Metric Field</label>
                   <select
@@ -332,6 +394,117 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
               </div>
             )}
 
+            {/* AI Assistant Config */}
+            {node.params.subtype === 'AI' && (
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-gray-700">AI Assistant</div>
+                  <p className="text-xs text-gray-500">
+                    Ask your question inside the node card to generate a plan of nodes.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-xs text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={!!node.params.assistantUseLLM}
+                      onChange={(e) => handleChange('assistantUseLLM', e.target.checked)}
+                    />
+                    Use LLM for smarter planning
+                  </label>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                      OpenAI-Compatible Settings
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-gray-500 block">API Base URL</label>
+                      <input
+                        type="text"
+                        className="w-full p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={llmSettings.baseUrl}
+                        onChange={(e) => setLlmSettings(prev => ({ ...prev, baseUrl: e.target.value }))}
+                        placeholder="https://api.openai.com/v1"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-gray-500 block">Model</label>
+                      <input
+                        type="text"
+                        className="w-full p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={llmSettings.model}
+                        onChange={(e) => setLlmSettings(prev => ({ ...prev, model: e.target.value }))}
+                        placeholder="gpt-4o-mini"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold text-gray-500 block">API Key</label>
+                      <input
+                        type="password"
+                        className="w-full p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={llmSettings.apiKey}
+                        onChange={(e) => setLlmSettings(prev => ({ ...prev, apiKey: e.target.value }))}
+                        placeholder="sk-..."
+                      />
+                      <p className="text-[10px] text-gray-400">Stored locally in your browser.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Pivot Table Config */}
+            {node.params.subtype === 'PIVOT' && (
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-semibold text-gray-700 block">Row Field</label>
+                  <select
+                    className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={node.params.pivotRow || ''}
+                    onChange={(e) => handleChange('pivotRow', e.target.value)}
+                  >
+                    <option value="">Select Row Field...</option>
+                    {schema.map(f => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-semibold text-gray-700 block">Column Field</label>
+                  <select
+                    className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={node.params.pivotColumn || ''}
+                    onChange={(e) => handleChange('pivotColumn', e.target.value)}
+                  >
+                    <option value="">Select Column Field...</option>
+                    {schema.map(f => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-semibold text-gray-700 block">Aggregation</label>
+                  <select
+                    className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={node.params.pivotFn || 'count'}
+                    onChange={(e) => handleChange('pivotFn', e.target.value)}
+                  >
+                    {KPI_FUNCTIONS.map(fn => (
+                      <option key={fn.value} value={fn.value}>{fn.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {requiresMetricField(node.params.pivotFn || 'count') && (
+                  <div className="space-y-1">
+                    <label className="text-sm font-semibold text-gray-700 block">Value Field</label>
+                    <select
+                      className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                      value={node.params.pivotValue || ''}
+                      onChange={(e) => handleChange('pivotValue', e.target.value)}
+                    >
+                      <option value="">Select Value Field...</option>
+                      {schema.map(f => <option key={f} value={f}>{f}</option>)}
+                    </select>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Chart Type Selector */}
             {node.params.subtype === 'CHART' && (
               <div className="space-y-1">
@@ -381,24 +554,87 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
               </div>
             )}
 
-            {/* KPI / GAUGE metric config */}
-            {(node.params.subtype === 'KPI' || node.params.subtype === 'GAUGE') && (
+            {/* KPI metric config */}
+            {node.params.subtype === 'KPI' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-semibold text-gray-700">Metrics</label>
+                  <button
+                    onClick={addKpiMetric}
+                    className="text-xs font-medium text-blue-600 hover:underline"
+                  >
+                    Add Metric
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {kpiMetrics.map((metric, idx) => (
+                    <div key={metric.id || idx} className="border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          className="flex-1 p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                          placeholder="Label (optional)"
+                          value={metric.label || ''}
+                          onChange={(e) => updateKpiMetric(idx, { label: e.target.value })}
+                        />
+                        {kpiMetrics.length > 1 && (
+                          <button
+                            onClick={() => removeKpiMetric(idx)}
+                            className="text-[10px] text-gray-400 hover:text-red-500"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-semibold text-gray-500 block">Aggregation</label>
+                          <select
+                            className="w-full p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                            value={metric.fn || 'count'}
+                            onChange={(e) => updateKpiMetric(idx, { fn: e.target.value })}
+                          >
+                            {KPI_FUNCTIONS.map(fn => (
+                              <option key={fn.value} value={fn.value}>{fn.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        {requiresMetricField(metric.fn || 'count') && (
+                          <div className="space-y-1">
+                            <label className="text-[10px] font-semibold text-gray-500 block">Field</label>
+                            <select
+                              className="w-full p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                              value={metric.field || ''}
+                              onChange={(e) => updateKpiMetric(idx, { field: e.target.value })}
+                            >
+                              <option value="">Select Field...</option>
+                              {schema.map(f => <option key={f} value={f}>{f}</option>)}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* GAUGE metric config */}
+            {node.params.subtype === 'GAUGE' && (
               <div className="space-y-4">
                 <div className="space-y-1">
                   <label className="text-sm font-semibold text-gray-700 block">Aggregation</label>
-                  <div className="flex bg-gray-100 p-1 rounded-lg">
-                    {['count', 'sum', 'avg'].map((fn) => (
-                      <button
-                        key={fn}
-                        onClick={() => handleChange('fn', fn)}
-                        className={`flex-1 py-1.5 text-xs font-medium rounded-md capitalize transition-all ${node.params.fn === fn ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                      >
-                        {fn}
-                      </button>
+                  <select
+                    className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={node.params.fn || 'count'}
+                    onChange={(e) => handleChange('fn', e.target.value)}
+                  >
+                    {KPI_FUNCTIONS.map(fn => (
+                      <option key={fn.value} value={fn.value}>{fn.label}</option>
                     ))}
-                  </div>
+                  </select>
                 </div>
-                {node.params.fn !== 'count' && (
+                {requiresMetricField(node.params.fn || 'count') && (
                   <div className="space-y-1">
                     <label className="text-sm font-semibold text-gray-700 block">Metric Field</label>
                     <select
@@ -406,7 +642,7 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
                       value={node.params.metricField || ''}
                       onChange={(e) => handleChange('metricField', e.target.value)}
                     >
-                      <option value="">Select Numeric Field...</option>
+                      <option value="">Select Field...</option>
                       {schema.map(f => <option key={f} value={f}>{f}</option>)}
                     </select>
                   </div>

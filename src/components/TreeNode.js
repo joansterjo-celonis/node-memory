@@ -17,16 +17,113 @@ const {
   Hash,
   Gauge,
   LinkIcon,
-  Minimize2
+  Minimize2,
+  Share2
 } = window.Icons;
 
-const { getChildren, countDescendants, getNodeResult, calculateMetric } = window.NodeUtils;
+const { getChildren, countDescendants, getNodeResult, calculateMetric, formatNumber } = window.NodeUtils;
 const SimpleChart = window.SimpleChart;
 
 const TABLE_ROW_HEIGHT = 24;
 const TABLE_OVERSCAN = 6;
 const BRANCH_CONNECTOR_HEIGHT = 16;
 const BRANCH_CONNECTOR_STROKE = 2;
+const KPI_LABELS = {
+  count: 'Count',
+  count_distinct: 'Distinct Count',
+  sum: 'Sum',
+  avg: 'Average',
+  min: 'Min',
+  max: 'Max'
+};
+
+const metricRequiresField = (fn) => ['sum', 'avg', 'min', 'max', 'count_distinct'].includes(fn);
+
+const formatMetricLabel = (metric) => {
+  if (metric.label) return metric.label;
+  const fnLabel = KPI_LABELS[metric.fn] || metric.fn || 'Count';
+  if (metric.fn === 'count') return fnLabel;
+  if (!metric.field) return fnLabel;
+  return `${fnLabel} of ${metric.field}`;
+};
+
+const AssistantPanel = React.memo(({ node, schema, onRun }) => {
+  const [question, setQuestion] = React.useState(node.params.assistantQuestion || '');
+
+  React.useEffect(() => {
+    setQuestion(node.params.assistantQuestion || '');
+  }, [node.id, node.params.assistantQuestion]);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!onRun) return;
+    const trimmed = question.trim();
+    if (!trimmed) return;
+    onRun(node.id, trimmed);
+  };
+
+  const planSteps = node.params.assistantPlan || [];
+
+  return (
+    <div className="bg-white border border-gray-200 rounded p-3 flex flex-col text-[11px] space-y-2">
+      <form onSubmit={handleSubmit} className="flex flex-col gap-2">
+        <textarea
+          className="w-full min-h-[72px] p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none resize-y"
+          placeholder="Ask a question… e.g. 'Show total revenue by region'"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+        />
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] text-gray-400">
+            {schema.length === 0 ? 'No columns available yet.' : `${schema.length} columns available`}
+          </span>
+          <button
+            type="submit"
+            className="px-3 py-1.5 rounded bg-blue-600 text-white text-[11px] font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!question.trim() || node.params.assistantStatus === 'loading'}
+          >
+            {node.params.assistantStatus === 'loading' ? 'Thinking…' : 'Build Nodes'}
+          </button>
+        </div>
+      </form>
+      {node.params.assistantStatus === 'loading' && (
+        <div className="text-[11px] text-blue-600 bg-blue-50 border border-blue-100 rounded p-2">
+          Analyzing question and building a plan…
+        </div>
+      )}
+      {node.params.assistantStatus === 'error' && (
+        <div className="text-[11px] text-red-600 bg-red-50 border border-red-100 rounded p-2">
+          {node.params.assistantError || 'I could not build a plan from that question.'}
+        </div>
+      )}
+      {node.params.assistantStatus === 'success' && node.params.assistantSummary && (
+        <div className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded p-2">
+          {node.params.assistantSummary}
+        </div>
+      )}
+      {node.params.assistantLlmError && (
+        <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded p-2">
+          LLM unavailable: {node.params.assistantLlmError}
+        </div>
+      )}
+      {planSteps.length > 0 && (
+        <div className="space-y-1">
+          <div className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Planned Steps</div>
+          <ul className="space-y-1">
+            {planSteps.map((step, idx) => (
+              <li key={`${step}-${idx}`} className="text-gray-600">• {step}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {node.params.assistantStatus !== 'success' && node.params.assistantStatus !== 'error' && (
+        <div className="text-[11px] text-gray-400">
+          Ask a question to build a filter, aggregate, and view automatically.
+        </div>
+      )}
+    </div>
+  );
+});
 
 const TablePreview = React.memo(({ data, columns, onCellClick, nodeId }) => {
   const scrollRef = React.useRef(null);
@@ -276,6 +373,7 @@ const TreeNode = ({
   onToggleBranch,
   onDrillDown,
   onTableCellClick,
+  onAssistantRequest,
   showAddMenuForId,
   setShowAddMenuForId,
   showInsertMenuForId,
@@ -298,13 +396,15 @@ const TreeNode = ({
   if (node.type === 'JOIN') Icon = LinkIcon;
   if (node.type === 'COMPONENT') {
     if (node.params.subtype === 'TABLE') Icon = TableIcon;
+    if (node.params.subtype === 'PIVOT') Icon = TableIcon;
+    if (node.params.subtype === 'AI') Icon = Share2;
     if (node.params.subtype === 'CHART') Icon = BarChart3;
     if (node.params.subtype === 'KPI') Icon = Hash;
     if (node.params.subtype === 'GAUGE') Icon = Gauge;
   }
 
   // KPI/Gauge metric calculation (derived from node output).
-  const metricValue = (node.type === 'COMPONENT' && (node.params.subtype === 'KPI' || node.params.subtype === 'GAUGE') && result)
+  const gaugeMetricValue = (node.type === 'COMPONENT' && node.params.subtype === 'GAUGE' && result)
     ? calculateMetric(result.data, node.params.metricField, node.params.fn || 'count')
     : 0;
 
@@ -312,6 +412,104 @@ const TreeNode = ({
   const visibleColumns = (node.type === 'COMPONENT' && node.params.subtype === 'TABLE' && node.params.columns && node.params.columns.length > 0)
     ? node.params.columns
     : result ? result.schema : [];
+
+  const kpiMetrics = React.useMemo(() => {
+    if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'KPI') return [];
+    const rawMetrics = (node.params.metrics && node.params.metrics.length > 0)
+      ? node.params.metrics
+      : [{ id: 'metric-default', label: '', fn: node.params.fn || 'count', field: node.params.metricField || '' }];
+    return rawMetrics.map(metric => ({
+      ...metric,
+      value: calculateMetric(result.data, metric.field, metric.fn || 'count')
+    }));
+  }, [node.type, node.params.subtype, node.params.metrics, node.params.fn, node.params.metricField, result]);
+
+  const pivotState = React.useMemo(() => {
+    if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'PIVOT') return null;
+    const rowField = node.params.pivotRow;
+    const columnField = node.params.pivotColumn;
+    const valueField = node.params.pivotValue;
+    const fn = node.params.pivotFn || 'count';
+    if (!rowField || !columnField) {
+      return { error: 'Select row and column fields to render the pivot.' };
+    }
+    if (metricRequiresField(fn) && !valueField) {
+      return { error: 'Select a value field for this aggregation.' };
+    }
+
+    const normalizeKey = (value) => (value === null || value === undefined || value === '' ? '(blank)' : String(value));
+    const rowKeys = [];
+    const colKeys = [];
+    const rowIndex = new Map();
+    const colIndex = new Map();
+    const cells = new Map();
+    const getCellKey = (rowKey, colKey) => `${rowKey}::${colKey}`;
+
+    const ensureRow = (key) => {
+      if (!rowIndex.has(key)) {
+        rowIndex.set(key, rowKeys.length);
+        rowKeys.push(key);
+      }
+    };
+
+    const ensureCol = (key) => {
+      if (!colIndex.has(key)) {
+        colIndex.set(key, colKeys.length);
+        colKeys.push(key);
+      }
+    };
+
+    const ensureCell = (rowKey, colKey) => {
+      const key = getCellKey(rowKey, colKey);
+      if (!cells.has(key)) {
+        cells.set(key, { count: 0, sum: 0, min: null, max: null, distinct: new Set() });
+      }
+      return cells.get(key);
+    };
+
+    result.data.forEach(row => {
+      const rowKey = normalizeKey(row[rowField]);
+      const colKey = normalizeKey(row[columnField]);
+      ensureRow(rowKey);
+      ensureCol(colKey);
+      const cell = ensureCell(rowKey, colKey);
+      cell.count += 1;
+      if (valueField) {
+        const rawValue = row[valueField];
+        if (fn === 'count_distinct') cell.distinct.add(rawValue);
+        const value = Number(rawValue);
+        if (!Number.isNaN(value)) {
+          cell.sum += value;
+          cell.min = cell.min === null ? value : Math.min(cell.min, value);
+          cell.max = cell.max === null ? value : Math.max(cell.max, value);
+        }
+      }
+    });
+
+    const matrix = rowKeys.map(rowKey => (
+      colKeys.map(colKey => {
+        const cell = cells.get(getCellKey(rowKey, colKey));
+        if (!cell) return null;
+        if (fn === 'count') return cell.count;
+        if (fn === 'count_distinct') return cell.distinct.size;
+        if (fn === 'sum') return cell.sum;
+        if (fn === 'avg') return cell.count ? cell.sum / cell.count : 0;
+        if (fn === 'min') return cell.min ?? 0;
+        if (fn === 'max') return cell.max ?? 0;
+        return 0;
+      })
+    ));
+
+    return { rowKeys, colKeys, matrix, fn, rowField, columnField };
+  }, [
+    node.type,
+    node.params.subtype,
+    node.params.pivotRow,
+    node.params.pivotColumn,
+    node.params.pivotValue,
+    node.params.pivotFn,
+    result
+  ]);
 
   const hiddenCount = areChildrenCollapsed ? countDescendants(nodes, nodeId) : 0;
 
@@ -349,10 +547,10 @@ const TreeNode = ({
           `}
           style={{
             width: 320,
-            height: isExpanded ? 320 : 'auto',
+            height: isExpanded ? (node.params.subtype === 'AI' ? 'auto' : 320) : 'auto',
             minWidth: 260,
-            minHeight: isExpanded ? 180 : 0,
-            resize: isExpanded ? 'both' : 'none'
+            minHeight: isExpanded ? (node.params.subtype === 'AI' ? 0 : 180) : 0,
+            resize: isExpanded && node.params.subtype !== 'AI' ? 'both' : 'none'
           }}
           data-node-resize="true"
         >
@@ -380,7 +578,7 @@ const TreeNode = ({
                 {node.type === 'FILTER' && node.params.field ? `${node.params.field} ${node.params.operator} ${node.params.value}` :
                   node.type === 'AGGREGATE' ? `Group by ${node.params.groupBy}` :
                   node.type === 'JOIN' ? `with ${node.params.rightTable || '...'}` :
-                  node.type === 'COMPONENT' ? `${node.params.subtype} View` :
+                  node.type === 'COMPONENT' ? (node.params.subtype === 'AI' ? 'AI Assistant' : `${node.params.subtype} View`) :
                   node.description || node.type}
               </div>
             </div>
@@ -427,8 +625,11 @@ const TreeNode = ({
           {/* Content Preview */}
           {isExpanded && result && (() => {
             const isTablePreview = node.params.subtype === 'TABLE' || (node.type !== 'COMPONENT' && node.type !== 'JOIN');
+            const isPivotPreview = node.params.subtype === 'PIVOT';
+            const isAssistantPreview = node.params.subtype === 'AI';
+            const hasTableLikePreview = isTablePreview || isPivotPreview || isAssistantPreview;
             return (
-            <div className={`border-t border-gray-100 bg-gray-50 ${isTablePreview ? 'p-0' : 'p-4'} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
+            <div className={`border-t border-gray-100 bg-gray-50 ${hasTableLikePreview ? 'p-0' : 'p-4'} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
               {/* TABLE VIEW */}
               {isTablePreview && (
                 <div className="h-full overflow-hidden text-[10px] bg-white border border-gray-200 rounded flex flex-col">
@@ -442,6 +643,61 @@ const TreeNode = ({
                     onCellClick={onTableCellClick}
                     nodeId={nodeId}
                   />
+                </div>
+              )}
+
+              {/* AI ASSISTANT VIEW */}
+              {isAssistantPreview && (
+                <AssistantPanel
+                  node={node}
+                  schema={result.schema || []}
+                  onRun={onAssistantRequest}
+                />
+              )}
+
+              {/* PIVOT VIEW */}
+              {isPivotPreview && (
+                <div className="h-full overflow-hidden text-[10px] bg-white border border-gray-200 rounded flex flex-col">
+                  <div className="flex justify-between text-xs font-bold text-gray-500 mb-2 px-2 pt-2">
+                    <span>Pivot</span>
+                    {pivotState && !pivotState.error && (
+                      <span>{pivotState.rowKeys.length} rows × {pivotState.colKeys.length} cols</span>
+                    )}
+                  </div>
+                  {!pivotState || pivotState.error ? (
+                    <div className="flex-1 min-h-0 px-2 pb-2 text-[10px] text-gray-400 flex items-center justify-center">
+                      {pivotState?.error || 'Configure row and column fields to render the pivot.'}
+                    </div>
+                  ) : (
+                    <div className="overflow-auto flex-1 min-h-0 px-2 pb-2">
+                      <table className="min-w-max w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-gray-50 border-b sticky top-0 shadow-sm">
+                            <th className="p-1 bg-gray-50 text-gray-600 font-medium whitespace-nowrap">{pivotState.rowField}</th>
+                            {pivotState.colKeys.map(col => (
+                              <th key={col} className="p-1 bg-gray-50 text-gray-600 font-medium whitespace-nowrap">{col}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pivotState.rowKeys.map((rowKey, rowIdx) => (
+                            <tr key={rowKey} className="border-b">
+                              <td className="p-1 text-gray-600 font-medium whitespace-nowrap">{rowKey}</td>
+                              {pivotState.colKeys.map((colKey, colIdx) => {
+                                const value = pivotState.matrix[rowIdx]?.[colIdx];
+                                const formatted = typeof value === 'number' ? formatNumber(value) : (value ?? '-');
+                                return (
+                                  <td key={`${rowKey}-${colKey}`} className="p-1 text-gray-700 whitespace-nowrap">
+                                    {formatted}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -472,12 +728,31 @@ const TreeNode = ({
               {/* KPI VIEW */}
               {node.params.subtype === 'KPI' && (
                 <div className="h-full flex flex-col items-center justify-center bg-white border border-gray-200 rounded p-4 text-center">
-                  <div className="text-gray-400 text-xs font-medium uppercase tracking-wider mb-2">
-                    {node.params.fn} of {node.params.metricField || 'records'}
-                  </div>
-                  <div className="text-4xl font-bold text-blue-600">
-                    {metricValue}
-                  </div>
+                  {kpiMetrics.length === 0 ? (
+                    <div className="text-xs text-gray-400">Configure KPI metrics to display.</div>
+                  ) : kpiMetrics.length === 1 ? (
+                    <>
+                      <div className="text-gray-400 text-xs font-medium uppercase tracking-wider mb-2">
+                        {formatMetricLabel(kpiMetrics[0])}
+                      </div>
+                      <div className="text-4xl font-bold text-blue-600">
+                        {typeof kpiMetrics[0].value === 'number' ? formatNumber(kpiMetrics[0].value) : kpiMetrics[0].value}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3 w-full">
+                      {kpiMetrics.map((metric, idx) => (
+                        <div key={metric.id || idx} className="bg-white border border-gray-200 rounded-lg p-3 text-left">
+                          <div className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-1">
+                            {formatMetricLabel(metric)}
+                          </div>
+                          <div className="text-lg font-bold text-blue-600">
+                            {typeof metric.value === 'number' ? formatNumber(metric.value) : metric.value}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -488,15 +763,17 @@ const TreeNode = ({
                     <span>{node.params.fn}</span>
                     <span>Target: {node.params.target || 100}</span>
                   </div>
-                  <div className="text-3xl font-bold text-gray-900 mb-3">{metricValue}</div>
+                  <div className="text-3xl font-bold text-gray-900 mb-3">
+                    {typeof gaugeMetricValue === 'number' ? formatNumber(gaugeMetricValue) : gaugeMetricValue}
+                  </div>
                   <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-blue-500 rounded-full transition-all duration-1000 ease-out"
-                      style={{ width: `${Math.min(100, (metricValue / (node.params.target || 100)) * 100)}%` }}
+                      style={{ width: `${Math.min(100, (gaugeMetricValue / (node.params.target || 100)) * 100)}%` }}
                     ></div>
                   </div>
                   <div className="mt-2 text-[10px] text-gray-400">
-                    {Math.round((metricValue / (node.params.target || 100)) * 100)}% of target
+                    {Math.round((gaugeMetricValue / (node.params.target || 100)) * 100)}% of target
                   </div>
                 </div>
               )}
@@ -536,6 +813,12 @@ const TreeNode = ({
 
                 <button onClick={() => onAdd('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
                   <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Table
+                </button>
+                <button onClick={() => onAdd('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                  <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Pivot Table
+                </button>
+                <button onClick={() => onAdd('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                  <Share2 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> AI Assistant
                 </button>
                 <button onClick={() => onAdd('COMPONENT', nodeId, 'CHART')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
                   <BarChart3 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Chart
@@ -585,6 +868,12 @@ const TreeNode = ({
                     <button onClick={() => onInsert('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
                       <TableIcon size={12} className="text-gray-400" /> Table
                     </button>
+                    <button onClick={() => onInsert('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                      <TableIcon size={12} className="text-gray-400" /> Pivot Table
+                    </button>
+                    <button onClick={() => onInsert('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                      <Share2 size={12} className="text-gray-400" /> AI Assistant
+                    </button>
                   </div>
                 )}
               </div>
@@ -619,6 +908,7 @@ const TreeNode = ({
                     onToggleBranch={onToggleBranch}
                     onDrillDown={onDrillDown}
                     onTableCellClick={onTableCellClick}
+                    onAssistantRequest={onAssistantRequest}
                     showAddMenuForId={showAddMenuForId}
                     setShowAddMenuForId={setShowAddMenuForId}
                     showInsertMenuForId={showInsertMenuForId}
@@ -650,6 +940,7 @@ const TreeNode = ({
                 onToggleBranch={onToggleBranch}
                 onDrillDown={onDrillDown}
                 onTableCellClick={onTableCellClick}
+                onAssistantRequest={onAssistantRequest}
                 showAddMenuForId={showAddMenuForId}
                 setShowAddMenuForId={setShowAddMenuForId}
                 showInsertMenuForId={showInsertMenuForId}
@@ -673,6 +964,7 @@ const TreeNode = ({
                     onToggleBranch={onToggleBranch}
                     onDrillDown={onDrillDown}
                     onTableCellClick={onTableCellClick}
+                    onAssistantRequest={onAssistantRequest}
                     showAddMenuForId={showAddMenuForId}
                     setShowAddMenuForId={setShowAddMenuForId}
                     showInsertMenuForId={showInsertMenuForId}

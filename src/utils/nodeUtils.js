@@ -13,6 +13,8 @@ const NodeType = {
 
 const ComponentType = {
   TABLE: 'TABLE',
+  PIVOT: 'PIVOT',
+  AI: 'AI',
   CHART: 'CHART',
   KPI: 'KPI',
   GAUGE: 'GAUGE'
@@ -48,10 +50,21 @@ const formatNumber = (num) =>
 
 const calculateMetric = (data, field, fn) => {
   if (fn === 'count') return data.length;
+  if (fn === 'count_distinct') {
+    if (!field) return 0;
+    const set = new Set();
+    data.forEach(row => set.add(row[field]));
+    return set.size;
+  }
   if (!field) return 0;
-  const values = data.map(d => Number(d[field]) || 0);
+  const values = data
+    .map(d => Number(d[field]))
+    .filter(v => !Number.isNaN(v));
+  if (values.length === 0) return 0;
   if (fn === 'sum') return values.reduce((a, b) => a + b, 0);
-  if (fn === 'avg') return values.reduce((a, b) => a + b, 0) / (values.length || 1);
+  if (fn === 'avg') return values.reduce((a, b) => a + b, 0) / values.length;
+  if (fn === 'min') return Math.min(...values);
+  if (fn === 'max') return Math.max(...values);
   return 0;
 };
 
