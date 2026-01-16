@@ -1003,13 +1003,6 @@ const AnalysisApp = () => {
         <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-blue-900/50 mb-4 ring-1 ring-white/10">
           <Layout size={20} />
         </div>
-        <div
-          onClick={() => setShowDataModel(true)}
-          className="p-2.5 bg-slate-800 rounded-lg hover:bg-slate-700 cursor-pointer transition-colors text-white relative group"
-          title="Data Model"
-        >
-          <Database size={20} />
-        </div>
         <div className="p-2.5 hover:bg-slate-800 rounded-lg cursor-pointer transition-colors relative group" title="Saved Analysis">
           <FileJson size={20} />
         </div>
@@ -1078,6 +1071,7 @@ const AnalysisApp = () => {
         dataModel={dataModel}
         sourceStatus={sourceStatus}
         onIngest={ingestPendingFile}
+        onShowDataModel={() => setShowDataModel(true)}
       />
 
       {/* 4. DATA MODEL MODAL */}

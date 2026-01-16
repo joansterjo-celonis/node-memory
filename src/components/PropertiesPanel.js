@@ -32,7 +32,7 @@ const readStoredLlmSettings = () => {
   }
 };
 
-const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, onIngest }) => {
+const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, onIngest, onShowDataModel }) => {
   // Local staging for JOIN config (so user can edit multiple fields then commit).
   const [localParams, setLocalParams] = useState({});
   const [llmSettings, setLlmSettings] = useState(readStoredLlmSettings);
@@ -182,6 +182,19 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
               </div>
               {sourceStatus?.loading && <div className="progress-bar" />}
             </div>
+
+            <button
+              onClick={() => onShowDataModel && onShowDataModel()}
+              disabled={dataModel.order.length === 0}
+              className={`w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-colors ${
+                dataModel.order.length === 0
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : 'bg-slate-900 text-white hover:bg-slate-800'
+              }`}
+              title={dataModel.order.length === 0 ? 'Upload data to enable' : 'Preview Data Model'}
+            >
+              <Database size={14} /> Preview Data Model
+            </button>
           </div>
         )}
 
