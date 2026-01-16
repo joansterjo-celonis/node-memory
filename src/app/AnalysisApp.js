@@ -303,6 +303,7 @@ const AnalysisApp = () => {
     assistantStatus: 'idle',
     assistantSummary: '',
     assistantError: '',
+    assistantLlmError: '',
     assistantPlan: []
   });
 
@@ -859,7 +860,14 @@ const AnalysisApp = () => {
 
       if (!res.ok) {
         const message = await res.text();
-        return { ok: false, error: `LLM request failed (${res.status}). ${message}` };
+        let detail = message;
+        try {
+          const parsed = JSON.parse(message);
+          detail = parsed?.error?.message || parsed?.message || message;
+        } catch (err) {
+          // keep raw message
+        }
+        return { ok: false, error: `LLM request failed (${res.status}). ${detail}` };
       }
 
       const payload = await res.json();
@@ -873,7 +881,8 @@ const AnalysisApp = () => {
       if (!validation.ok) return { ok: false, error: validation.error };
       return sanitized;
     } catch (err) {
-      return { ok: false, error: err?.message || 'LLM request failed.' };
+      const message = err?.message || 'LLM request failed.';
+      return { ok: false, error: `Network error: ${message}` };
     }
   };
 
@@ -921,21 +930,25 @@ const AnalysisApp = () => {
     const result = getNodeResult(chainData, nodeId);
     const schema = result?.schema || [];
     const data = result?.data || [];
+    const llmAttempted = node.params.assistantUseLLM === true;
     applyAssistantPlan(nodeId, [], {
       assistantQuestion: question,
       assistantStatus: 'loading',
       assistantError: '',
+      assistantLlmError: '',
       assistantSummary: '',
       assistantPlan: []
     });
 
     let plan = null;
-    if (node.params.assistantUseLLM) {
+    let llmError = '';
+    if (llmAttempted) {
       const llmPlan = await callLlmPlanner({ question, schema, data });
       if (llmPlan.ok) {
         plan = llmPlan;
       } else {
         plan = null;
+        llmError = llmPlan.error || 'LLM unavailable.';
       }
     }
 
@@ -947,17 +960,23 @@ const AnalysisApp = () => {
         assistantQuestion: question,
         assistantStatus: 'error',
         assistantError: finalPlan?.error || 'Unable to build a plan for that question.',
+        assistantLlmError: llmAttempted ? llmError : '',
         assistantSummary: '',
         assistantPlan: []
       });
       return;
     }
 
-    const summaryPrefix = plan ? '' : 'LLM unavailable. ';
+    const summaryPrefix = plan
+      ? ''
+      : (llmAttempted
+        ? (llmError ? `LLM unavailable: ${llmError}. ` : 'LLM unavailable. ')
+        : 'LLM disabled. ');
     applyAssistantPlan(nodeId, finalPlan.steps, {
       assistantQuestion: question,
       assistantStatus: 'success',
       assistantError: '',
+      assistantLlmError: llmAttempted ? llmError : '',
       assistantSummary: `${summaryPrefix}${finalPlan.summary || ''}`.trim(),
       assistantPlan: finalPlan.planSteps
     });

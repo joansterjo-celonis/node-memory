@@ -65,11 +65,7 @@ const AssistantPanel = React.memo(({ node, schema, onRun }) => {
   const planSteps = node.params.assistantPlan || [];
 
   return (
-    <div className="h-full bg-white border border-gray-200 rounded p-4 flex flex-col gap-3 text-[11px]">
-      <div className="flex items-center gap-2 text-gray-500 text-xs font-semibold uppercase tracking-wider">
-        <Share2 size={12} className="text-indigo-500" />
-        AI Assistant
-      </div>
+    <div className="bg-white border border-gray-200 rounded p-3 flex flex-col text-[11px] space-y-2">
       <form onSubmit={handleSubmit} className="flex flex-col gap-2">
         <textarea
           className="w-full min-h-[72px] p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none resize-y"
@@ -103,6 +99,11 @@ const AssistantPanel = React.memo(({ node, schema, onRun }) => {
       {node.params.assistantStatus === 'success' && node.params.assistantSummary && (
         <div className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded p-2">
           {node.params.assistantSummary}
+        </div>
+      )}
+      {node.params.assistantLlmError && (
+        <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded p-2">
+          LLM unavailable: {node.params.assistantLlmError}
         </div>
       )}
       {planSteps.length > 0 && (
@@ -546,10 +547,10 @@ const TreeNode = ({
           `}
           style={{
             width: 320,
-            height: isExpanded ? 320 : 'auto',
+            height: isExpanded ? (node.params.subtype === 'AI' ? 'auto' : 320) : 'auto',
             minWidth: 260,
-            minHeight: isExpanded ? 180 : 0,
-            resize: isExpanded ? 'both' : 'none'
+            minHeight: isExpanded ? (node.params.subtype === 'AI' ? 0 : 180) : 0,
+            resize: isExpanded && node.params.subtype !== 'AI' ? 'both' : 'none'
           }}
           data-node-resize="true"
         >
@@ -626,7 +627,7 @@ const TreeNode = ({
             const isTablePreview = node.params.subtype === 'TABLE' || (node.type !== 'COMPONENT' && node.type !== 'JOIN');
             const isPivotPreview = node.params.subtype === 'PIVOT';
             const isAssistantPreview = node.params.subtype === 'AI';
-            const hasTableLikePreview = isTablePreview || isPivotPreview;
+            const hasTableLikePreview = isTablePreview || isPivotPreview || isAssistantPreview;
             return (
             <div className={`border-t border-gray-100 bg-gray-50 ${hasTableLikePreview ? 'p-0' : 'p-4'} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
               {/* TABLE VIEW */}
