@@ -276,7 +276,19 @@ const AnalysisApp = () => {
       title: 'New Step',
       branchName,
       isExpanded: true,
-      params: { subtype, operator: 'equals', fn: 'count', chartType: 'bar', target: 100, joinType: 'LEFT' }
+      params: {
+        subtype,
+        operator: 'equals',
+        fn: 'count',
+        chartType: 'bar',
+        target: 100,
+        joinType: 'LEFT',
+        metrics: [],
+        pivotRow: '',
+        pivotColumn: '',
+        pivotValue: '',
+        pivotFn: 'count'
+      }
     };
 
     const updatedNodes = nodes.map(n => n.id === parentId ? { ...n, areChildrenCollapsed: false } : n);
@@ -293,7 +305,19 @@ const AnalysisApp = () => {
       type,
       title: 'Inserted Step',
       isExpanded: true,
-      params: { subtype, operator: 'equals', fn: 'count', chartType: 'bar', target: 100, joinType: 'LEFT' }
+      params: {
+        subtype,
+        operator: 'equals',
+        fn: 'count',
+        chartType: 'bar',
+        target: 100,
+        joinType: 'LEFT',
+        metrics: [],
+        pivotRow: '',
+        pivotColumn: '',
+        pivotValue: '',
+        pivotFn: 'count'
+      }
     };
 
     let updatedNodes = nodes.map(n => n.id === parentId ? { ...n, areChildrenCollapsed: false } : n);
