@@ -42,8 +42,9 @@
       return;
     }
 
+    const cacheBust = Date.now();
     for (const file of files) {
-      const res = await fetch(`${base}${file}`);
+      const res = await fetch(`${base}${file}?v=${cacheBust}`, { cache: 'no-store' });
       if (!res.ok) {
         showBootError(`Failed to load ${file}. Status ${res.status}. Base path: ${base}`);
         return;
