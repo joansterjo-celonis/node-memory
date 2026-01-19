@@ -53,7 +53,11 @@ const calculateMetric = (data, field, fn) => {
   if (fn === 'count_distinct') {
     if (!field) return 0;
     const set = new Set();
-    data.forEach(row => set.add(row[field]));
+    data.forEach(row => {
+      const value = row[field];
+      if (value === null || value === undefined || value === '') return;
+      set.add(value);
+    });
     return set.size;
   }
   if (!field) return 0;
@@ -68,7 +72,7 @@ const calculateMetric = (data, field, fn) => {
   return 0;
 };
 
-window.NodeUtils = {
+export {
   NodeType,
   ComponentType,
   getChildren,

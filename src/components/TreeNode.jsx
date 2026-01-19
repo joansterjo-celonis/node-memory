@@ -1,7 +1,7 @@
 // src/components/TreeNode.js
 // Recursive node renderer for the branching analysis canvas.
-const React = window.React;
-const {
+import React from 'react';
+import {
   Plus,
   Filter,
   BarChart3,
@@ -19,10 +19,10 @@ const {
   LinkIcon,
   Minimize2,
   Share2
-} = window.Icons;
-
-const { getChildren, countDescendants, getNodeResult, calculateMetric, formatNumber } = window.NodeUtils;
-const SimpleChart = window.SimpleChart;
+} from '../ui/icons';
+import { getChildren, countDescendants, getNodeResult, calculateMetric, formatNumber } from '../utils/nodeUtils';
+import VisxChart from '../ui/SimpleChart';
+import WorldMapChart from '../ui/WorldMapChart';
 
 const TABLE_ROW_HEIGHT = 24;
 const TABLE_OVERSCAN = 6;
@@ -125,13 +125,41 @@ const AssistantPanel = React.memo(({ node, schema, onRun }) => {
   );
 });
 
-const TablePreview = React.memo(({ data, columns, onCellClick, nodeId }) => {
+const TablePreview = React.memo(({ data, columns, onCellClick, onSortChange, nodeId, sortBy, sortDirection }) => {
   const scrollRef = React.useRef(null);
   const rafRef = React.useRef(null);
   const [scrollTop, setScrollTop] = React.useState(0);
   const [viewportHeight, setViewportHeight] = React.useState(0);
 
-  const totalRows = data.length;
+  const normalizedSortDirection = sortDirection === 'asc' || sortDirection === 'desc' ? sortDirection : '';
+  const sortedData = React.useMemo(() => {
+    if (!sortBy || !normalizedSortDirection) return data;
+    if (!columns.includes(sortBy)) return data;
+    const withIndex = data.map((row, index) => ({ row, index }));
+    const direction = normalizedSortDirection === 'asc' ? 1 : -1;
+    withIndex.sort((a, b) => {
+      const aRaw = a.row?.[sortBy];
+      const bRaw = b.row?.[sortBy];
+      if (aRaw == null && bRaw == null) return a.index - b.index;
+      if (aRaw == null) return 1;
+      if (bRaw == null) return -1;
+      const aNum = Number(aRaw);
+      const bNum = Number(bRaw);
+      const bothNumeric = !Number.isNaN(aNum) && !Number.isNaN(bNum);
+      if (bothNumeric) {
+        if (aNum === bNum) return a.index - b.index;
+        return (aNum - bNum) * direction;
+      }
+      const aText = String(aRaw);
+      const bText = String(bRaw);
+      const result = aText.localeCompare(bText, undefined, { numeric: true, sensitivity: 'base' });
+      if (result === 0) return a.index - b.index;
+      return result * direction;
+    });
+    return withIndex.map(item => item.row);
+  }, [data, sortBy, normalizedSortDirection, columns]);
+
+  const totalRows = sortedData.length;
   const maxScrollTop = Math.max(0, totalRows * TABLE_ROW_HEIGHT - viewportHeight);
   const effectiveScrollTop = Math.min(scrollTop, maxScrollTop);
   const startIndex = Math.max(0, Math.floor(effectiveScrollTop / TABLE_ROW_HEIGHT) - TABLE_OVERSCAN);
@@ -139,7 +167,7 @@ const TablePreview = React.memo(({ data, columns, onCellClick, nodeId }) => {
     totalRows,
     Math.ceil((effectiveScrollTop + viewportHeight) / TABLE_ROW_HEIGHT) + TABLE_OVERSCAN
   );
-  const visibleRows = data.slice(startIndex, endIndex);
+  const visibleRows = sortedData.slice(startIndex, endIndex);
   const paddingTop = startIndex * TABLE_ROW_HEIGHT;
   const paddingBottom = Math.max(0, (totalRows - endIndex) * TABLE_ROW_HEIGHT);
   const columnCount = Math.max(1, columns.length);
@@ -191,6 +219,21 @@ const TablePreview = React.memo(({ data, columns, onCellClick, nodeId }) => {
     });
   };
 
+  const handleHeaderSort = (column) => {
+    if (!onSortChange) return;
+    let nextSortBy = column;
+    let nextDirection = 'asc';
+    if (sortBy === column) {
+      if (normalizedSortDirection === 'asc') {
+        nextDirection = 'desc';
+      } else if (normalizedSortDirection === 'desc') {
+        nextSortBy = '';
+        nextDirection = '';
+      }
+    }
+    onSortChange(nodeId, nextSortBy, nextDirection);
+  };
+
   if (columns.length === 0) {
     return (
       <div className="flex-1 min-h-0 px-2 pb-2 text-[10px] text-gray-400 flex items-center justify-center">
@@ -208,9 +251,31 @@ const TablePreview = React.memo(({ data, columns, onCellClick, nodeId }) => {
       <table className="min-w-max w-full text-left border-collapse">
         <thead>
           <tr className="bg-gray-50 border-b sticky top-0 shadow-sm">
-            {columns.map(col => (
-              <th key={col} className="p-1 bg-gray-50 text-gray-600 font-medium whitespace-nowrap">{col}</th>
-            ))}
+            {columns.map(col => {
+              const isSorted = sortBy === col && normalizedSortDirection;
+              const sortIndicator = isSorted ? (normalizedSortDirection === 'asc' ? '^' : 'v') : '';
+              const ariaSort = sortBy === col
+                ? (normalizedSortDirection === 'asc' ? 'ascending' : 'descending')
+                : 'none';
+              return (
+                <th
+                  key={col}
+                  role="button"
+                  aria-sort={ariaSort}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleHeaderSort(col);
+                  }}
+                  className="p-1 bg-gray-50 text-gray-600 font-medium whitespace-nowrap cursor-pointer hover:text-blue-600"
+                  title={`Sort by ${col}`}
+                >
+                  <span className="inline-flex items-center gap-1">
+                    {col}
+                    {sortIndicator && <span className="text-[10px] text-gray-400">{sortIndicator}</span>}
+                  </span>
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>
@@ -373,6 +438,7 @@ const TreeNode = ({
   onToggleBranch,
   onDrillDown,
   onTableCellClick,
+  onTableSortChange,
   onAssistantRequest,
   showAddMenuForId,
   setShowAddMenuForId,
@@ -388,6 +454,24 @@ const TreeNode = ({
   const isExpanded = node.isExpanded !== false;
   const areChildrenCollapsed = node.areChildrenCollapsed === true;
   const isBranchCollapsed = node.isBranchCollapsed === true;
+  const addMenuRef = React.useRef(null);
+  const insertMenuRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (showAddMenuForId !== nodeId || !addMenuRef.current) return undefined;
+    const frame = requestAnimationFrame(() => {
+      addMenuRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [showAddMenuForId, nodeId]);
+
+  React.useEffect(() => {
+    if (showInsertMenuForId !== nodeId || !insertMenuRef.current) return undefined;
+    const frame = requestAnimationFrame(() => {
+      insertMenuRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [showInsertMenuForId, nodeId]);
 
   // Resolve icon by node type (and component subtype).
   let Icon = Database;
@@ -511,6 +595,71 @@ const TreeNode = ({
     result
   ]);
 
+  const chartType = node.params.chartType || 'bar';
+  const chartAggFn = node.params.chartAggFn || 'none';
+  const chartYAxis = (chartType !== 'scatter' && chartType !== 'map' && chartAggFn === 'count' && !node.params.yAxis)
+    ? 'Record Count'
+    : node.params.yAxis;
+
+  const chartData = React.useMemo(() => {
+    if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'CHART') return [];
+    if (chartType === 'map') return [];
+    const xField = node.params.xAxis;
+    const yField = chartYAxis;
+    if (!xField || !yField) return result.data;
+    const aggFn = chartAggFn;
+    const shouldAggregate = chartType !== 'scatter' && aggFn !== 'none';
+    if (!shouldAggregate) return result.data;
+
+    const groups = new Map();
+    result.data.forEach((row) => {
+      const key = row?.[xField];
+      if (key === null || key === undefined || key === '') return;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    });
+
+    return Array.from(groups.entries()).map(([key, rows]) => ({
+      [xField]: key,
+      [yField]: calculateMetric(rows, yField, aggFn)
+    }));
+  }, [
+    result,
+    node.type,
+    node.params.subtype,
+    chartType,
+    chartAggFn,
+    chartYAxis,
+    node.params.xAxis,
+    node.params.yAxis
+  ]);
+
+  const mapData = React.useMemo(() => {
+    if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'CHART' || chartType !== 'map') return [];
+    const mapField = node.params.xAxis;
+    if (!mapField) return [];
+    const aggFn = chartAggFn === 'none' ? 'count' : chartAggFn;
+    const groups = new Map();
+    result.data.forEach((row) => {
+      const key = row?.[mapField];
+      if (key === null || key === undefined || key === '') return;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    });
+    return Array.from(groups.entries()).map(([key, rows]) => ({
+      code: key,
+      value: calculateMetric(rows, node.params.yAxis, aggFn)
+    }));
+  }, [
+    result,
+    node.type,
+    node.params.subtype,
+    chartType,
+    chartAggFn,
+    node.params.xAxis,
+    node.params.yAxis
+  ]);
+
   const hiddenCount = areChildrenCollapsed ? countDescendants(nodes, nodeId) : 0;
 
   // Compact collapsed branch representation.
@@ -627,9 +776,11 @@ const TreeNode = ({
             const isTablePreview = node.params.subtype === 'TABLE' || (node.type !== 'COMPONENT' && node.type !== 'JOIN');
             const isPivotPreview = node.params.subtype === 'PIVOT';
             const isAssistantPreview = node.params.subtype === 'AI';
+            const isChartPreview = node.params.subtype === 'CHART';
             const hasTableLikePreview = isTablePreview || isPivotPreview || isAssistantPreview;
+            const contentPaddingClass = hasTableLikePreview ? 'p-0' : (isChartPreview ? 'p-1' : 'p-4');
             return (
-            <div className={`border-t border-gray-100 bg-gray-50 ${hasTableLikePreview ? 'p-0' : 'p-4'} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
+            <div className={`border-t border-gray-100 bg-gray-50 ${contentPaddingClass} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
               {/* TABLE VIEW */}
               {isTablePreview && (
                 <div className="h-full overflow-hidden text-[10px] bg-white border border-gray-200 rounded flex flex-col">
@@ -641,7 +792,10 @@ const TreeNode = ({
                     data={result.data}
                     columns={visibleColumns}
                     onCellClick={onTableCellClick}
+                    onSortChange={onTableSortChange}
                     nodeId={nodeId}
+                    sortBy={node.params.tableSortBy}
+                    sortDirection={node.params.tableSortDirection}
                   />
                 </div>
               )}
@@ -715,15 +869,32 @@ const TreeNode = ({
               )}
 
               {/* CHART VIEW */}
-              {node.params.subtype === 'CHART' && (
-                <SimpleChart
-                  data={result.data}
-                  xAxis={node.params.xAxis}
-                  yAxis={node.params.yAxis}
-                  type={node.params.chartType || 'bar'}
-                  onClick={(d) => onDrillDown(d, node.params.xAxis, nodeId)}
+              {node.params.subtype === 'CHART' && (chartType === 'map' ? (
+                <WorldMapChart
+                  data={mapData}
+                  codeKey="code"
+                  valueKey="value"
+                  seriesColor={node.params.chartColor}
+                  showTooltip={node.params.chartShowTooltip}
+                  onSelect={(code) => onDrillDown({ activePayload: [{ payload: { __x: code } }] }, { xAxis: node.params.xAxis }, nodeId)}
                 />
-              )}
+              ) : (
+                <VisxChart
+                  data={chartData}
+                  xAxis={node.params.xAxis}
+                  yAxis={chartYAxis}
+                  type={chartType}
+                  showGrid={node.params.chartShowGrid}
+                  showPoints={node.params.chartShowPoints}
+                  curveType={node.params.chartCurve}
+                  stacked={node.params.chartStacked}
+                  showTooltip={node.params.chartShowTooltip}
+                  orientation={node.params.chartOrientation || 'vertical'}
+                  barGap={node.params.chartBarGap}
+                  seriesColor={node.params.chartColor}
+                  onClick={(d) => onDrillDown(d, { xAxis: node.params.xAxis }, nodeId)}
+                />
+              ))}
 
               {/* KPI VIEW */}
               {node.params.subtype === 'KPI' && (
@@ -796,39 +967,41 @@ const TreeNode = ({
             </button>
 
             {showAddMenuForId === nodeId && (
-              <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-xl border border-gray-100 p-2 w-56 z-50 animate-in fade-in slide-in-from-top-1">
-                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Data Ops</div>
-                <button onClick={() => onAdd('FILTER', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-orange-400"></div> Filter
-                </button>
-                <button onClick={() => onAdd('AGGREGATE', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-purple-400"></div> Aggregate
-                </button>
-                <button onClick={() => onAdd('JOIN', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-pink-400"></div> SQL Join
-                </button>
+              <div ref={addMenuRef} className="absolute top-10 left-1/2 -translate-x-1/2 z-50">
+                <div className="bg-white rounded-xl shadow-xl border border-gray-100 p-2 w-56 animate-in fade-in slide-in-from-top-1">
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Data Ops</div>
+                  <button onClick={() => onAdd('FILTER', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-orange-400"></div> Filter
+                  </button>
+                  <button onClick={() => onAdd('AGGREGATE', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-purple-400"></div> Aggregate
+                  </button>
+                  <button onClick={() => onAdd('JOIN', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-pink-400"></div> SQL Join
+                  </button>
 
-                <div className="h-px bg-gray-100 my-1"></div>
-                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Components</div>
+                  <div className="h-px bg-gray-100 my-1"></div>
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Components</div>
 
-                <button onClick={() => onAdd('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                  <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Table
-                </button>
-                <button onClick={() => onAdd('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                  <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Pivot Table
-                </button>
-                <button onClick={() => onAdd('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                  <Share2 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> AI Assistant
-                </button>
-                <button onClick={() => onAdd('COMPONENT', nodeId, 'CHART')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                  <BarChart3 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Chart
-                </button>
-                <button onClick={() => onAdd('COMPONENT', nodeId, 'KPI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                  <Hash size={14} className="text-gray-400 group-hover/item:text-blue-600" /> KPI
-                </button>
-                <button onClick={() => onAdd('COMPONENT', nodeId, 'GAUGE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                  <Gauge size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Gauge
-                </button>
+                  <button onClick={() => onAdd('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                    <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Table
+                  </button>
+                  <button onClick={() => onAdd('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                    <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Pivot Table
+                  </button>
+                  <button onClick={() => onAdd('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                    <Share2 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> AI Assistant
+                  </button>
+                  <button onClick={() => onAdd('COMPONENT', nodeId, 'CHART')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                    <BarChart3 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Chart
+                  </button>
+                  <button onClick={() => onAdd('COMPONENT', nodeId, 'KPI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                    <Hash size={14} className="text-gray-400 group-hover/item:text-blue-600" /> KPI
+                  </button>
+                  <button onClick={() => onAdd('COMPONENT', nodeId, 'GAUGE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                    <Gauge size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Gauge
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -853,27 +1026,29 @@ const TreeNode = ({
                 </button>
 
                 {showInsertMenuForId === nodeId && (
-                  <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-white rounded-lg shadow-xl border border-gray-100 p-2 w-48 z-50 animate-in fade-in slide-in-from-top-1">
-                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Insert Step</div>
-                    <button onClick={() => onInsert('FILTER', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-orange-400"></div> Filter
-                    </button>
-                    <button onClick={() => onInsert('AGGREGATE', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-purple-400"></div> Aggregate
-                    </button>
-                    <button onClick={() => onInsert('JOIN', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-pink-400"></div> Join
-                    </button>
-                    <div className="h-px bg-gray-100 my-1"></div>
-                    <button onClick={() => onInsert('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
-                      <TableIcon size={12} className="text-gray-400" /> Table
-                    </button>
-                    <button onClick={() => onInsert('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
-                      <TableIcon size={12} className="text-gray-400" /> Pivot Table
-                    </button>
-                    <button onClick={() => onInsert('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
-                      <Share2 size={12} className="text-gray-400" /> AI Assistant
-                    </button>
+                  <div ref={insertMenuRef} className="absolute top-6 left-1/2 -translate-x-1/2 z-50">
+                    <div className="bg-white rounded-lg shadow-xl border border-gray-100 p-2 w-48 animate-in fade-in slide-in-from-top-1">
+                      <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Insert Step</div>
+                      <button onClick={() => onInsert('FILTER', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-orange-400"></div> Filter
+                      </button>
+                      <button onClick={() => onInsert('AGGREGATE', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400"></div> Aggregate
+                      </button>
+                      <button onClick={() => onInsert('JOIN', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-pink-400"></div> Join
+                      </button>
+                      <div className="h-px bg-gray-100 my-1"></div>
+                      <button onClick={() => onInsert('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                        <TableIcon size={12} className="text-gray-400" /> Table
+                      </button>
+                      <button onClick={() => onInsert('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                        <TableIcon size={12} className="text-gray-400" /> Pivot Table
+                      </button>
+                      <button onClick={() => onInsert('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                        <Share2 size={12} className="text-gray-400" /> AI Assistant
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -908,6 +1083,7 @@ const TreeNode = ({
                     onToggleBranch={onToggleBranch}
                     onDrillDown={onDrillDown}
                     onTableCellClick={onTableCellClick}
+                    onTableSortChange={onTableSortChange}
                     onAssistantRequest={onAssistantRequest}
                     showAddMenuForId={showAddMenuForId}
                     setShowAddMenuForId={setShowAddMenuForId}
@@ -940,6 +1116,7 @@ const TreeNode = ({
                 onToggleBranch={onToggleBranch}
                 onDrillDown={onDrillDown}
                 onTableCellClick={onTableCellClick}
+                onTableSortChange={onTableSortChange}
                 onAssistantRequest={onAssistantRequest}
                 showAddMenuForId={showAddMenuForId}
                 setShowAddMenuForId={setShowAddMenuForId}
@@ -964,6 +1141,7 @@ const TreeNode = ({
                     onToggleBranch={onToggleBranch}
                     onDrillDown={onDrillDown}
                     onTableCellClick={onTableCellClick}
+                    onTableSortChange={onTableSortChange}
                     onAssistantRequest={onAssistantRequest}
                     showAddMenuForId={showAddMenuForId}
                     setShowAddMenuForId={setShowAddMenuForId}
@@ -980,4 +1158,4 @@ const TreeNode = ({
   );
 };
 
-window.TreeNode = TreeNode;
+export { TreeNode };

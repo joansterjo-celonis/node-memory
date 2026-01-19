@@ -1,13 +1,11 @@
 // src/app/AnalysisApp.js
 // Main application component: ingestion, history, engine, and layout.
-const React = window.React;
-const { useState, useMemo, useEffect } = React;
-
-const { PropertiesPanel } = window;
-const { TreeNode } = window;
-const { Layout, Database, FileJson, Settings, Undo, Redo, TableIcon, X } = window.Icons;
-const { readFileAsText, readFileAsArrayBuffer, parseCSV, parseXLSX } = window.Ingest;
-const { getChildren, getCalculationOrder, getNodeResult } = window.NodeUtils;
+import React, { useState, useMemo, useEffect } from 'react';
+import { PropertiesPanel } from '../components/PropertiesPanel';
+import { TreeNode } from '../components/TreeNode';
+import { Layout, Database, FileJson, Settings, Undo, Redo, TableIcon, X } from '../ui/icons';
+import { readFileAsText, readFileAsArrayBuffer, parseCSV, parseXLSX } from '../utils/ingest';
+import { getChildren, getCalculationOrder, getNodeResult } from '../utils/nodeUtils';
 
 const createInitialNodes = () => ([
   {
@@ -45,6 +43,7 @@ const AnalysisApp = () => {
   const [showInsertMenuForId, setShowInsertMenuForId] = useState(null);
   const [showDataModel, setShowDataModel] = useState(false);
   const [viewMode, setViewMode] = useState('canvas');
+  const [dataModelSorts, setDataModelSorts] = useState({});
   const [explorations, setExplorations] = useState([]);
   const [activeExplorationId, setActiveExplorationId] = useState(null);
   const [saveError, setSaveError] = useState(null);
@@ -116,6 +115,7 @@ const AnalysisApp = () => {
         if (!cancelled) {
           const model = { tables, order };
           setDataModel(model);
+          setDataModelSorts({});
           setRawDataName(fileNames.length === 1 ? fileNames[0] : `${fileNames.length} files`);
 
           // If SOURCE node has no table selected, set default silently.
@@ -209,6 +209,7 @@ const AnalysisApp = () => {
   const clearIngestedData = () => {
     setIsLoadingFile(false);
     setDataModel({ tables: {}, order: [] });
+    setDataModelSorts({});
     setRawDataName(null);
     setLoadError(null);
     setSelectedFiles([]);
@@ -248,6 +249,16 @@ const AnalysisApp = () => {
           if (node.params.operator === 'gte') return Number(val) >= Number(filterVal);
           if (node.params.operator === 'lte') return Number(val) <= Number(filterVal);
           if (node.params.operator === 'contains') return String(val).toLowerCase().includes(String(filterVal).toLowerCase());
+          if (node.params.operator === 'in') {
+            const list = Array.isArray(filterVal)
+              ? filterVal.map(value => String(value).trim()).filter(Boolean)
+              : String(filterVal)
+                .split(',')
+                .map(value => value.trim())
+                .filter(Boolean);
+            if (list.length === 0) return true;
+            return list.some(value => String(val) == value);
+          }
           return true;
         });
       } else if (node.type === 'AGGREGATE' && node.params.groupBy) {
@@ -376,6 +387,17 @@ const AnalysisApp = () => {
     operator: 'equals',
     fn: 'count',
     chartType: 'bar',
+    chartAggFn: 'sum',
+    chartBarGap: 0.2,
+    chartColor: '#2563eb',
+    chartOrientation: 'vertical',
+    chartShowGrid: true,
+    chartShowTooltip: true,
+    chartShowPoints: false,
+    chartStacked: false,
+    chartCurve: 'linear',
+    tableSortBy: '',
+    tableSortDirection: '',
     target: 100,
     joinType: 'LEFT',
     metrics: [],
@@ -474,12 +496,10 @@ const AnalysisApp = () => {
     setHistory(newHistory);
   };
 
-  const handleChartDrillDown = (data, xAxisField, parentId) => {
-    if (!data || !data.activePayload) return;
-    addNode('FILTER', parentId);
-  };
+  const buildInValue = (values) => values.map((value) => String(value)).join(', ');
 
-  const handleTableCellClick = (value, field, parentId) => {
+  const addFilterNode = ({ parentId, field, operator = 'equals', value }) => {
+    if (!parentId || !field) return;
     const newId = `node-${Date.now()}`;
     const newNode = {
       id: newId,
@@ -487,12 +507,76 @@ const AnalysisApp = () => {
       type: 'FILTER',
       title: 'Filter Data',
       isExpanded: true,
-      params: { field, operator: 'equals', value }
+      params: { field, operator, value }
     };
 
     const updatedNodes = nodes.map(n => n.id === parentId ? { ...n, areChildrenCollapsed: false } : n);
     updateNodes([...updatedNodes, newNode]);
     setSelectedNodeId(newId);
+  };
+
+  const handleChartDrillDown = (data, chartMeta, parentId) => {
+    if (!data || !parentId) return;
+    const xAxisField = chartMeta?.xAxis;
+    if (!xAxisField) return;
+    const payload = data.activePayload?.[0]?.payload;
+    const clickedValue = payload?.__x;
+    const selectionValues = data.selection?.values || (clickedValue !== undefined ? [clickedValue] : []);
+    if (!selectionValues.length) return;
+    const operator = selectionValues.length > 1 ? 'in' : 'equals';
+    const value = operator === 'in' ? buildInValue(selectionValues) : selectionValues[0];
+    addFilterNode({ parentId, field: xAxisField, operator, value });
+  };
+
+  const handleTableCellClick = (value, field, parentId) => {
+    addFilterNode({ parentId, field, operator: 'equals', value });
+  };
+
+  const handleTableSortChange = (nodeId, sortBy, sortDirection) => {
+    const targetNode = nodes.find(n => n.id === nodeId);
+    if (!targetNode) return;
+    const nextSortBy = sortBy || '';
+    const nextSortDirection = nextSortBy ? (sortDirection || 'asc') : '';
+    updateNode(nodeId, { ...targetNode.params, tableSortBy: nextSortBy, tableSortDirection: nextSortDirection });
+  };
+
+  const getSortedRows = (rows, sortBy, sortDirection) => {
+    if (!sortBy || !sortDirection) return rows;
+    const withIndex = rows.map((row, index) => ({ row, index }));
+    const direction = sortDirection === 'asc' ? 1 : -1;
+    withIndex.sort((a, b) => {
+      const aRaw = a.row?.[sortBy];
+      const bRaw = b.row?.[sortBy];
+      if (aRaw == null && bRaw == null) return a.index - b.index;
+      if (aRaw == null) return 1;
+      if (bRaw == null) return -1;
+      const aNum = Number(aRaw);
+      const bNum = Number(bRaw);
+      const bothNumeric = !Number.isNaN(aNum) && !Number.isNaN(bNum);
+      if (bothNumeric) {
+        if (aNum === bNum) return a.index - b.index;
+        return (aNum - bNum) * direction;
+      }
+      const aText = String(aRaw);
+      const bText = String(bRaw);
+      const result = aText.localeCompare(bText, undefined, { numeric: true, sensitivity: 'base' });
+      if (result === 0) return a.index - b.index;
+      return result * direction;
+    });
+    return withIndex.map(item => item.row);
+  };
+
+  const handleDataModelSort = (tableName, column) => {
+    setDataModelSorts((prev) => {
+      const current = prev[tableName] || { sortBy: '', sortDirection: '' };
+      if (current.sortBy !== column) {
+        return { ...prev, [tableName]: { sortBy: column, sortDirection: 'asc' } };
+      }
+      if (current.sortDirection === 'asc') {
+        return { ...prev, [tableName]: { sortBy: column, sortDirection: 'desc' } };
+      }
+      return { ...prev, [tableName]: { sortBy: '', sortDirection: '' } };
+    });
   };
 
   const getExplorationStats = (model) => {
@@ -1213,7 +1297,7 @@ const AnalysisApp = () => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {viewMode === 'canvas' ? (
+            {viewMode === 'canvas' && (
               <>
                 <div className="flex items-center bg-gray-100 rounded-lg p-1">
                   <button onClick={undo} disabled={historyIndex === 0} className="p-1.5 text-gray-600 hover:bg-white rounded disabled:opacity-30 disabled:hover:bg-transparent" title="Undo">
@@ -1228,14 +1312,7 @@ const AnalysisApp = () => {
                 </button>
                 {saveError && <span className="text-xs text-red-500">{saveError}</span>}
               </>
-            ) : (
-              <button onClick={startNewExploration} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm">
-                New Exploration
-              </button>
             )}
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-white flex items-center justify-center text-xs font-semibold shadow-md">
-              NMA
-            </div>
           </div>
         </header>
 
@@ -1331,6 +1408,7 @@ const AnalysisApp = () => {
                 onToggleBranch={toggleBranchCollapse}
                 onDrillDown={handleChartDrillDown}
                 onTableCellClick={handleTableCellClick}
+                onTableSortChange={handleTableSortChange}
                 onAssistantRequest={handleAssistantRequest}
                 showAddMenuForId={showAddMenuForId}
                 setShowAddMenuForId={setShowAddMenuForId}
@@ -1348,6 +1426,7 @@ const AnalysisApp = () => {
           node={nodes.find(n => n.id === selectedNodeId)}
           updateNode={updateNodeFromPanel}
           schema={getNodeResult(chainData, selectedNodeId)?.schema || []}
+          data={getNodeResult(chainData, selectedNodeId)?.data || []}
           dataModel={dataModel}
           sourceStatus={sourceStatus}
           onIngest={ingestPendingFiles}
@@ -1375,32 +1454,64 @@ const AnalysisApp = () => {
                 <div className="text-sm text-gray-500">Upload a CSV/XLSX file to populate the data model.</div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {dataModel.order.map(tableName => (
-                    <div key={tableName} className="bg-white rounded-lg border border-gray-200 shadow-sm flex flex-col">
-                      <div className="p-4 border-b border-gray-100 font-bold text-gray-800 flex items-center gap-2">
-                        <TableIcon size={16} className="text-gray-400" />
-                        {tableName.toUpperCase()}
-                      </div>
-                      <div className="p-0">
-                        <table className="w-full text-sm text-left">
-                          <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
-                            <tr><th className="p-3 font-semibold">Column</th><th className="p-3 font-semibold">Sample</th></tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {Object.keys((dataModel.tables[tableName] || [])[0] || {}).map(col => (
-                              <tr key={col}>
-                                <td className="p-3 font-medium text-gray-700">{col}</td>
-                                <td className="p-3 text-gray-400 truncate max-w-[100px]">{String((dataModel.tables[tableName] || [])[0]?.[col] || '')}</td>
+                  {dataModel.order.map((tableName) => {
+                    const baseRow = (dataModel.tables[tableName] || [])[0] || {};
+                    const rows = Object.keys(baseRow).map((col) => ({
+                      column: col,
+                      sample: String(baseRow[col] ?? '')
+                    }));
+                    const sortState = dataModelSorts[tableName] || { sortBy: '', sortDirection: '' };
+                    const sortedRows = getSortedRows(rows, sortState.sortBy, sortState.sortDirection);
+                    const resolveIndicator = (columnKey) => {
+                      if (sortState.sortBy !== columnKey) return '';
+                      return sortState.sortDirection === 'asc' ? '^' : 'v';
+                    };
+                    return (
+                      <div key={tableName} className="bg-white rounded-lg border border-gray-200 shadow-sm flex flex-col">
+                        <div className="p-4 border-b border-gray-100 font-bold text-gray-800 flex items-center gap-2">
+                          <TableIcon size={16} className="text-gray-400" />
+                          {tableName.toUpperCase()}
+                        </div>
+                        <div className="p-0">
+                          <table className="w-full text-sm text-left">
+                            <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                              <tr>
+                                {['column', 'sample'].map((columnKey) => (
+                                  <th
+                                    key={columnKey}
+                                    role="button"
+                                    aria-sort={sortState.sortBy === columnKey
+                                      ? (sortState.sortDirection === 'asc' ? 'ascending' : 'descending')
+                                      : 'none'}
+                                    onClick={() => handleDataModelSort(tableName, columnKey)}
+                                    className="p-3 font-semibold cursor-pointer hover:text-blue-600"
+                                  >
+                                    <span className="inline-flex items-center gap-1">
+                                      {columnKey === 'column' ? 'Column' : 'Sample'}
+                                      {resolveIndicator(columnKey) && (
+                                        <span className="text-[10px] text-gray-400">{resolveIndicator(columnKey)}</span>
+                                      )}
+                                    </span>
+                                  </th>
+                                ))}
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {sortedRows.map((row) => (
+                                <tr key={row.column}>
+                                  <td className="p-3 font-medium text-gray-700">{row.column}</td>
+                                  <td className="p-3 text-gray-400 truncate max-w-[100px]">{row.sample}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div className="mt-auto p-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-500 text-center">
+                          {(dataModel.tables[tableName] || []).length} total records
+                        </div>
                       </div>
-                      <div className="mt-auto p-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-500 text-center">
-                        {(dataModel.tables[tableName] || []).length} total records
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1411,4 +1522,4 @@ const AnalysisApp = () => {
   );
 };
 
-window.AnalysisApp = AnalysisApp;
+export default AnalysisApp;

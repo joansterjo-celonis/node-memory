@@ -8,13 +8,6 @@
   <!-- UI / styling -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- React runtime (global) -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-
-  <!-- Babel (transpile JSX in-browser) -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
   <!-- XLSX (Excel parsing) -->
   <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
@@ -61,7 +54,7 @@
   <div id="boot-error" style="display:none; padding:12px; margin:12px; border:1px solid #fecaca; background:#fef2f2; color:#991b1b; font-family:system-ui, -apple-system, sans-serif; font-size:12px;"></div>
   <div id="root"></div>
 
-  <!-- Load app files in strict order (globals, no ES modules) -->
-  <script src="loader.js"></script>
+  <!-- Vite entry -->
+  <script type="module" src="/src/main.jsx"></script>
 </body>
 </html>
