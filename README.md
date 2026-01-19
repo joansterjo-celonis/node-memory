@@ -1,6 +1,6 @@
 This is a cool prototype I'm working on.
 
-Built by Joan Sterjo & Gemini
+Built by Joan Sterjo
 
 ## Deploying to GitHub Pages
 
