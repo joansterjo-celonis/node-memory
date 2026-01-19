@@ -4,7 +4,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
 import { TreeNode } from '../components/TreeNode';
-import { Layout, Database, FileJson, Settings, Undo, Redo, TableIcon, X } from '../ui/icons';
+import { Layout, Database, AppsIcon, Settings, Undo, Redo, TableIcon, X } from '../ui/icons';
 import { readFileAsText, readFileAsArrayBuffer, parseCSV, parseXLSX } from '../utils/ingest';
 import { getChildren, getCalculationOrder, getNodeResult } from '../utils/nodeUtils';
 
@@ -430,8 +430,7 @@ const AnalysisApp = () => {
       params: getDefaultParams(subtype)
     };
 
-    const updatedNodes = nodes.map(n => n.id === parentId ? { ...n, areChildrenCollapsed: false } : n);
-    updateNodes([...updatedNodes, newNode]);
+    updateNodes([...nodes, newNode]);
     setSelectedNodeId(newId);
     setShowAddMenuForId(null);
   };
@@ -447,8 +446,7 @@ const AnalysisApp = () => {
       params: getDefaultParams(subtype)
     };
 
-    let updatedNodes = nodes.map(n => n.id === parentId ? { ...n, areChildrenCollapsed: false } : n);
-    updatedNodes = updatedNodes.map(n => n.parentId === parentId ? { ...n, parentId: newId } : n);
+    const updatedNodes = nodes.map(n => n.parentId === parentId ? { ...n, parentId: newId } : n);
 
     updateNodes([...updatedNodes, newNode]);
     setSelectedNodeId(newId);
@@ -470,13 +468,6 @@ const AnalysisApp = () => {
 
   const toggleNodeExpansion = (id) => {
     const newNodes = nodes.map(n => n.id === id ? { ...n, isExpanded: !n.isExpanded } : n);
-    const newHistory = [...history];
-    newHistory[historyIndex] = newNodes;
-    setHistory(newHistory);
-  };
-
-  const toggleChildrenCollapse = (id) => {
-    const newNodes = nodes.map(n => n.id === id ? { ...n, areChildrenCollapsed: !n.areChildrenCollapsed } : n);
     const newHistory = [...history];
     newHistory[historyIndex] = newNodes;
     setHistory(newHistory);
@@ -511,8 +502,7 @@ const AnalysisApp = () => {
       params: { field, operator, value }
     };
 
-    const updatedNodes = nodes.map(n => n.id === parentId ? { ...n, areChildrenCollapsed: false } : n);
-    updateNodes([...updatedNodes, newNode]);
+    updateNodes([...nodes, newNode]);
     setSelectedNodeId(newId);
   };
 
@@ -1153,7 +1143,6 @@ const AnalysisApp = () => {
       if (node.id !== nodeId) return node;
       return {
         ...node,
-        areChildrenCollapsed: false,
         params: { ...node.params, ...assistantUpdate }
       };
     });
@@ -1284,7 +1273,7 @@ const AnalysisApp = () => {
             }`}
             title="Explorations"
           >
-            <FileJson size={20} />
+            <AppsIcon size={20} />
           </div>
           <div className="mt-auto p-2.5 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors relative group">
             <Settings size={20} />
@@ -1409,7 +1398,6 @@ const AnalysisApp = () => {
                 onInsert={insertNode}
                 onRemove={removeNode}
                 onToggleExpand={toggleNodeExpansion}
-                onToggleChildren={toggleChildrenCollapse}
                 onToggleBranch={toggleBranchCollapse}
                 onDrillDown={handleChartDrillDown}
                 onTableCellClick={handleTableCellClick}

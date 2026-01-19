@@ -9,8 +9,6 @@ import {
   Trash2,
   ChevronRight,
   ChevronDown,
-  ChevronsDown,
-  ChevronsUp,
   Sigma,
   TableIcon,
   GitBranch,
@@ -434,7 +432,6 @@ const TreeNode = ({
   onInsert,
   onRemove,
   onToggleExpand,
-  onToggleChildren,
   onToggleBranch,
   onDrillDown,
   onTableCellClick,
@@ -452,7 +449,6 @@ const TreeNode = ({
   const children = getChildren(nodes, nodeId);
   const isActive = selectedNodeId === nodeId;
   const isExpanded = node.isExpanded !== false;
-  const areChildrenCollapsed = node.areChildrenCollapsed === true;
   const isBranchCollapsed = node.isBranchCollapsed === true;
   const addMenuRef = React.useRef(null);
   const insertMenuRef = React.useRef(null);
@@ -660,8 +656,6 @@ const TreeNode = ({
     node.params.yAxis
   ]);
 
-  const hiddenCount = areChildrenCollapsed ? countDescendants(nodes, nodeId) : 0;
-
   // Compact collapsed branch representation.
   if (isBranchCollapsed) {
     return (
@@ -740,16 +734,6 @@ const TreeNode = ({
                 <GitBranch size={16} />
               </button>
 
-              {children.length > 0 && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onToggleChildren(nodeId); }}
-                  className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 transition-colors"
-                  title={areChildrenCollapsed ? "Expand Children" : "Collapse Children"}
-                >
-                  {areChildrenCollapsed ? <ChevronsDown size={16} /> : <ChevronsUp size={16} />}
-                </button>
-              )}
-
               {node.parentId && (
                 <button
                   onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
@@ -783,7 +767,7 @@ const TreeNode = ({
             <div className={`border-t border-gray-100 bg-gray-50 ${contentPaddingClass} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
               {/* TABLE VIEW */}
               {isTablePreview && (
-                <div className="h-full overflow-hidden text-[10px] bg-white border border-gray-200 rounded flex flex-col">
+                <div className="flex-1 min-h-0 overflow-hidden text-[10px] bg-white border border-gray-200 rounded flex flex-col">
                   <div className="flex justify-between text-xs font-bold text-gray-500 mb-2 px-2 pt-2">
                     <span>Preview</span>
                     <span>{result.data.length} rows</span>
@@ -857,7 +841,7 @@ const TreeNode = ({
 
               {/* JOIN VIEW */}
               {node.type === 'JOIN' && (
-                <div className="h-full bg-slate-900 rounded p-3 text-[10px] font-mono text-slate-300 overflow-auto">
+                <div className="flex-none h-32 bg-slate-900 rounded p-3 text-[10px] font-mono text-slate-300 overflow-auto">
                   <div><span className="text-pink-400">SELECT</span> *</div>
                   <div><span className="text-pink-400">FROM</span> [PreviousNode]</div>
                   <div><span className="text-pink-400">{node.params.joinType || 'LEFT'} JOIN</span> {node.params.rightTable || '...'}</div>
@@ -1012,145 +996,94 @@ const TreeNode = ({
       {children.length > 0 && (
         <div className="flex flex-col items-center">
           <div className="w-0.5 h-8 bg-gray-300 rounded-full relative group/line">
-            {!areChildrenCollapsed && (
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity z-30">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowInsertMenuForId(showInsertMenuForId === nodeId ? null : nodeId);
-                  }}
-                  className="w-5 h-5 bg-slate-800 text-white rounded-full flex items-center justify-center shadow-sm hover:scale-110 transition-transform"
-                  title="Insert Step Here"
-                >
-                  <Plus size={12} strokeWidth={3} />
-                </button>
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity z-30">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowInsertMenuForId(showInsertMenuForId === nodeId ? null : nodeId);
+                }}
+                className="w-5 h-5 bg-slate-800 text-white rounded-full flex items-center justify-center shadow-sm hover:scale-110 transition-transform"
+                title="Insert Step Here"
+              >
+                <Plus size={12} strokeWidth={3} />
+              </button>
 
-                {showInsertMenuForId === nodeId && (
-                  <div ref={insertMenuRef} className="absolute top-6 left-1/2 -translate-x-1/2 z-50">
-                    <div className="bg-white rounded-lg shadow-xl border border-gray-100 p-2 w-48 animate-in fade-in slide-in-from-top-1">
-                      <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Insert Step</div>
-                      <button onClick={() => onInsert('FILTER', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-orange-400"></div> Filter
-                      </button>
-                      <button onClick={() => onInsert('AGGREGATE', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400"></div> Aggregate
-                      </button>
-                      <button onClick={() => onInsert('JOIN', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-pink-400"></div> Join
-                      </button>
-                      <div className="h-px bg-gray-100 my-1"></div>
-                      <button onClick={() => onInsert('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
-                        <TableIcon size={12} className="text-gray-400" /> Table
-                      </button>
-                      <button onClick={() => onInsert('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
-                        <TableIcon size={12} className="text-gray-400" /> Pivot Table
-                      </button>
-                      <button onClick={() => onInsert('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
-                        <Share2 size={12} className="text-gray-400" /> AI Assistant
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {areChildrenCollapsed ? (
-            <div className="flex flex-col items-center animate-in fade-in zoom-in-95">
-              <div className="w-0.5 h-4 border-l-2 border-dashed border-gray-300"></div>
-              {children.length > 1 ? (
-                <div className="relative flex flex-col items-center">
-                  <div className="absolute left-full top-0 ml-2 -mt-2 z-20">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onToggleChildren(nodeId); }}
-                      className="flex items-center gap-1 text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full border border-indigo-100 hover:bg-indigo-100 transition-colors whitespace-nowrap shadow-sm"
-                    >
-                      <GitBranch size={10} />
-                      +{children.length - 1} branches
+              {showInsertMenuForId === nodeId && (
+                <div ref={insertMenuRef} className="absolute top-6 left-1/2 -translate-x-1/2 z-50">
+                  <div className="bg-white rounded-lg shadow-xl border border-gray-100 p-2 w-48 animate-in fade-in slide-in-from-top-1">
+                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Insert Step</div>
+                    <button onClick={() => onInsert('FILTER', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-orange-400"></div> Filter
+                    </button>
+                    <button onClick={() => onInsert('AGGREGATE', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-purple-400"></div> Aggregate
+                    </button>
+                    <button onClick={() => onInsert('JOIN', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-pink-400"></div> Join
+                    </button>
+                    <div className="h-px bg-gray-100 my-1"></div>
+                    <button onClick={() => onInsert('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                      <TableIcon size={12} className="text-gray-400" /> Table
+                    </button>
+                    <button onClick={() => onInsert('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                      <TableIcon size={12} className="text-gray-400" /> Pivot Table
+                    </button>
+                    <button onClick={() => onInsert('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                      <Share2 size={12} className="text-gray-400" /> AI Assistant
                     </button>
                   </div>
-                  <TreeNode
-                    nodeId={children[0].id}
-                    nodes={nodes}
-                    selectedNodeId={selectedNodeId}
-                    chainData={chainData}
-                    onSelect={onSelect}
-                    onAdd={onAdd}
-                    onInsert={onInsert}
-                    onRemove={onRemove}
-                    onToggleExpand={onToggleExpand}
-                    onToggleChildren={onToggleChildren}
-                    onToggleBranch={onToggleBranch}
-                    onDrillDown={onDrillDown}
-                    onTableCellClick={onTableCellClick}
-                    onTableSortChange={onTableSortChange}
-                    onAssistantRequest={onAssistantRequest}
-                    showAddMenuForId={showAddMenuForId}
-                    setShowAddMenuForId={setShowAddMenuForId}
-                    showInsertMenuForId={showInsertMenuForId}
-                    setShowInsertMenuForId={setShowInsertMenuForId}
-                  />
-                </div>
-              ) : (
-                <div
-                  onClick={() => onToggleChildren(nodeId)}
-                  className="bg-gray-100 hover:bg-blue-50 text-gray-500 hover:text-blue-600 px-3 py-1 rounded-full text-xs font-medium border border-gray-200 cursor-pointer shadow-sm flex items-center gap-2"
-                >
-                  <span>+ {hiddenCount} steps</span>
                 </div>
               )}
             </div>
+          </div>
+
+          {children.length === 1 ? (
+            <TreeNode
+              nodeId={children[0].id}
+              nodes={nodes}
+              selectedNodeId={selectedNodeId}
+              chainData={chainData}
+              onSelect={onSelect}
+              onAdd={onAdd}
+              onInsert={onInsert}
+              onRemove={onRemove}
+              onToggleExpand={onToggleExpand}
+              onToggleBranch={onToggleBranch}
+              onDrillDown={onDrillDown}
+              onTableCellClick={onTableCellClick}
+              onTableSortChange={onTableSortChange}
+              onAssistantRequest={onAssistantRequest}
+              showAddMenuForId={showAddMenuForId}
+              setShowAddMenuForId={setShowAddMenuForId}
+              showInsertMenuForId={showInsertMenuForId}
+              setShowInsertMenuForId={setShowInsertMenuForId}
+            />
           ) : (
-            children.length === 1 ? (
-              <TreeNode
-                nodeId={children[0].id}
-                nodes={nodes}
-                selectedNodeId={selectedNodeId}
-                chainData={chainData}
-                onSelect={onSelect}
-                onAdd={onAdd}
-                onInsert={onInsert}
-                onRemove={onRemove}
-                onToggleExpand={onToggleExpand}
-                onToggleChildren={onToggleChildren}
-                onToggleBranch={onToggleBranch}
-                onDrillDown={onDrillDown}
-                onTableCellClick={onTableCellClick}
-                onTableSortChange={onTableSortChange}
-                onAssistantRequest={onAssistantRequest}
-                showAddMenuForId={showAddMenuForId}
-                setShowAddMenuForId={setShowAddMenuForId}
-                showInsertMenuForId={showInsertMenuForId}
-                setShowInsertMenuForId={setShowInsertMenuForId}
-              />
-            ) : (
-              <MultiBranchGroup
-                childrenNodes={children}
-                renderChild={(child) => (
-                  <TreeNode
-                    nodeId={child.id}
-                    nodes={nodes}
-                    selectedNodeId={selectedNodeId}
-                    chainData={chainData}
-                    onSelect={onSelect}
-                    onAdd={onAdd}
-                    onInsert={onInsert}
-                    onRemove={onRemove}
-                    onToggleExpand={onToggleExpand}
-                    onToggleChildren={onToggleChildren}
-                    onToggleBranch={onToggleBranch}
-                    onDrillDown={onDrillDown}
-                    onTableCellClick={onTableCellClick}
-                    onTableSortChange={onTableSortChange}
-                    onAssistantRequest={onAssistantRequest}
-                    showAddMenuForId={showAddMenuForId}
-                    setShowAddMenuForId={setShowAddMenuForId}
-                    showInsertMenuForId={showInsertMenuForId}
-                    setShowInsertMenuForId={setShowInsertMenuForId}
-                  />
-                )}
-              />
-            )
+            <MultiBranchGroup
+              childrenNodes={children}
+              renderChild={(child) => (
+                <TreeNode
+                  nodeId={child.id}
+                  nodes={nodes}
+                  selectedNodeId={selectedNodeId}
+                  chainData={chainData}
+                  onSelect={onSelect}
+                  onAdd={onAdd}
+                  onInsert={onInsert}
+                  onRemove={onRemove}
+                  onToggleExpand={onToggleExpand}
+                  onToggleBranch={onToggleBranch}
+                  onDrillDown={onDrillDown}
+                  onTableCellClick={onTableCellClick}
+                  onTableSortChange={onTableSortChange}
+                  onAssistantRequest={onAssistantRequest}
+                  showAddMenuForId={showAddMenuForId}
+                  setShowAddMenuForId={setShowAddMenuForId}
+                  showInsertMenuForId={showInsertMenuForId}
+                  setShowInsertMenuForId={setShowInsertMenuForId}
+                />
+              )}
+            />
           )}
         </div>
       )}

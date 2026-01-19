@@ -9,6 +9,7 @@
     "build": "vite build",
     "preview": "vite preview --port 5174",
     "lint": "eslint .",
+    "generate:fluent-icons": "node scripts/generate-fluent-icons.mjs",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "test": "npm run lint && npm run test:unit && npm run test:e2e"
