@@ -1,12 +1,15 @@
 // src/app/AnalysisApp.js
 // Main application component: ingestion, history, engine, and layout.
 import React, { useState, useMemo, useEffect } from 'react';
+import { Button, Card, Empty, Modal, Space, Tag, Typography } from 'antd';
 import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
 import { TreeNode } from '../components/TreeNode';
-import { Layout, Database, FileJson, Settings, Undo, Redo, TableIcon, X } from '../ui/icons';
+import { Layout, Database, AppsIcon, Settings, Undo, Redo, TableIcon, X, Plus, Trash2, Play, Save } from '../ui/icons';
 import { readFileAsText, readFileAsArrayBuffer, parseCSV, parseXLSX } from '../utils/ingest';
 import { getChildren, getCalculationOrder, getNodeResult } from '../utils/nodeUtils';
+
+const { Title, Text } = Typography;
 
 const createInitialNodes = () => ([
   {
@@ -430,8 +433,7 @@ const AnalysisApp = () => {
       params: getDefaultParams(subtype)
     };
 
-    const updatedNodes = nodes.map(n => n.id === parentId ? { ...n, areChildrenCollapsed: false } : n);
-    updateNodes([...updatedNodes, newNode]);
+    updateNodes([...nodes, newNode]);
     setSelectedNodeId(newId);
     setShowAddMenuForId(null);
   };
@@ -447,8 +449,7 @@ const AnalysisApp = () => {
       params: getDefaultParams(subtype)
     };
 
-    let updatedNodes = nodes.map(n => n.id === parentId ? { ...n, areChildrenCollapsed: false } : n);
-    updatedNodes = updatedNodes.map(n => n.parentId === parentId ? { ...n, parentId: newId } : n);
+    const updatedNodes = nodes.map(n => n.parentId === parentId ? { ...n, parentId: newId } : n);
 
     updateNodes([...updatedNodes, newNode]);
     setSelectedNodeId(newId);
@@ -470,13 +471,6 @@ const AnalysisApp = () => {
 
   const toggleNodeExpansion = (id) => {
     const newNodes = nodes.map(n => n.id === id ? { ...n, isExpanded: !n.isExpanded } : n);
-    const newHistory = [...history];
-    newHistory[historyIndex] = newNodes;
-    setHistory(newHistory);
-  };
-
-  const toggleChildrenCollapse = (id) => {
-    const newNodes = nodes.map(n => n.id === id ? { ...n, areChildrenCollapsed: !n.areChildrenCollapsed } : n);
     const newHistory = [...history];
     newHistory[historyIndex] = newNodes;
     setHistory(newHistory);
@@ -511,8 +505,7 @@ const AnalysisApp = () => {
       params: { field, operator, value }
     };
 
-    const updatedNodes = nodes.map(n => n.id === parentId ? { ...n, areChildrenCollapsed: false } : n);
-    updateNodes([...updatedNodes, newNode]);
+    updateNodes([...nodes, newNode]);
     setSelectedNodeId(newId);
   };
 
@@ -1153,7 +1146,6 @@ const AnalysisApp = () => {
       if (node.id !== nodeId) return node;
       return {
         ...node,
-        areChildrenCollapsed: false,
         params: { ...node.params, ...assistantUpdate }
       };
     });
@@ -1284,7 +1276,7 @@ const AnalysisApp = () => {
             }`}
             title="Explorations"
           >
-            <FileJson size={20} />
+            <AppsIcon size={20} />
           </div>
           <div className="mt-auto p-2.5 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors relative group">
             <Settings size={20} />
@@ -1303,20 +1295,30 @@ const AnalysisApp = () => {
           </div>
           <div className="flex items-center gap-3">
             {viewMode === 'canvas' && (
-              <>
-                <div className="flex items-center bg-gray-100 rounded-lg p-1">
-                  <button onClick={undo} disabled={historyIndex === 0} className="p-1.5 text-gray-600 hover:bg-white rounded disabled:opacity-30 disabled:hover:bg-transparent" title="Undo">
-                    <Undo size={16} />
-                  </button>
-                  <button onClick={redo} disabled={historyIndex === history.length - 1} className="p-1.5 text-gray-600 hover:bg-white rounded disabled:opacity-30 disabled:hover:bg-transparent" title="Redo">
-                    <Redo size={16} />
-                  </button>
-                </div>
-                <button onClick={saveExploration} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm">
+              <Space size="small" align="center">
+                <Button.Group size="middle">
+                  <Button
+                    icon={<Undo size={16} />}
+                    onClick={undo}
+                    disabled={historyIndex === 0}
+                    aria-label="Undo"
+                  />
+                  <Button
+                    icon={<Redo size={16} />}
+                    onClick={redo}
+                    disabled={historyIndex === history.length - 1}
+                    aria-label="Redo"
+                  />
+                </Button.Group>
+                <Button type="primary" icon={<Save size={14} />} onClick={saveExploration}>
                   Save & Exit
-                </button>
-                {saveError && <span className="text-xs text-red-500">{saveError}</span>}
-              </>
+                </Button>
+                {saveError && (
+                  <Text type="danger" style={{ fontSize: 12 }}>
+                    {saveError}
+                  </Text>
+                )}
+              </Space>
             )}
           </div>
         </header>
@@ -1326,29 +1328,28 @@ const AnalysisApp = () => {
             <div className="max-w-6xl mx-auto px-10 py-12 space-y-8">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Explorations</h2>
-                  <p className="text-sm text-gray-500">Pick up where you left off or start something new.</p>
+                  <Title level={2} style={{ margin: 0 }}>Explorations</Title>
+                  <Text type="secondary">Pick up where you left off or start something new.</Text>
                 </div>
-                <button
-                  onClick={startNewExploration}
-                  className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm hover:bg-slate-800"
-                >
+                <Button type="primary" icon={<Plus size={14} />} onClick={startNewExploration}>
                   New Exploration
-                </button>
+                </Button>
               </div>
 
               {explorations.length === 0 ? (
                 <div className="bg-white border border-gray-200 rounded-2xl p-10 text-center shadow-sm">
-                  <div className="text-lg font-semibold text-gray-900">No explorations yet</div>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Upload data, build a workflow, then Save & Exit to see it here.
-                  </p>
-                  <button
-                    onClick={startNewExploration}
-                    className="mt-6 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700"
+                  <Empty
+                    description={
+                      <div className="space-y-1">
+                        <div className="text-base font-semibold text-gray-900">No explorations yet</div>
+                        <Text type="secondary">Upload data, build a workflow, then Save & Exit to see it here.</Text>
+                      </div>
+                    }
                   >
-                    Create your first exploration
-                  </button>
+                    <Button type="primary" icon={<Plus size={14} />} onClick={startNewExploration}>
+                      Create your first exploration
+                    </Button>
+                  </Empty>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1357,33 +1358,47 @@ const AnalysisApp = () => {
                     const tableCount = exp.tableCount ?? order.length;
                     const rowCount = exp.rowCount ?? order.reduce((sum, name) => sum + ((exp.dataModel?.tables?.[name] || []).length), 0);
                     const updated = exp.updatedAt ? new Date(exp.updatedAt).toLocaleString() : '';
+                    const updatedLabel = updated ? `Updated ${updated}` : 'Updated just now';
                     return (
-                      <div key={exp.id} className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="font-semibold text-gray-900 truncate">{exp.name || 'Exploration'}</div>
-                            <div className="text-xs text-gray-400 mt-1">Updated {updated}</div>
-                          </div>
-                          <button
+                      <Card
+                        key={exp.id}
+                        size="small"
+                        className="shadow-sm"
+                        title={
+                          <Text strong ellipsis={{ tooltip: exp.name || 'Exploration' }}>
+                            {exp.name || 'Exploration'}
+                          </Text>
+                        }
+                        extra={
+                          <Button
+                            type="text"
+                            size="small"
+                            danger
+                            icon={<Trash2 size={14} />}
                             onClick={() => deleteExploration(exp.id)}
-                            className="text-[11px] text-gray-400 hover:text-red-500"
                           >
                             Delete
-                          </button>
-                        </div>
-                        <div className="flex items-center gap-4 text-xs text-gray-500">
-                          <span>{tableCount} tables</span>
-                          <span>{rowCount} rows</span>
-                        </div>
-                        <div className="mt-auto flex items-center gap-2">
-                          <button
+                          </Button>
+                        }
+                      >
+                        <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {updatedLabel}
+                          </Text>
+                          <Space size="small" wrap>
+                            <Tag color="blue">{tableCount} tables</Tag>
+                            <Tag>{rowCount} rows</Tag>
+                          </Space>
+                          <Button
+                            type="primary"
+                            block
+                            icon={<Play size={14} />}
                             onClick={() => openExploration(exp)}
-                            className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-blue-700"
                           >
                             Open Exploration
-                          </button>
-                        </div>
-                      </div>
+                          </Button>
+                        </Space>
+                      </Card>
                     );
                   })}
                 </div>
@@ -1409,7 +1424,6 @@ const AnalysisApp = () => {
                 onInsert={insertNode}
                 onRemove={removeNode}
                 onToggleExpand={toggleNodeExpansion}
-                onToggleChildren={toggleChildrenCollapse}
                 onToggleBranch={toggleBranchCollapse}
                 onDrillDown={handleChartDrillDown}
                 onTableCellClick={handleTableCellClick}
@@ -1450,88 +1464,98 @@ const AnalysisApp = () => {
       )}
 
       {/* 5. DATA MODEL MODAL */}
-      {showDataModel && (
-        <div className="absolute inset-0 z-[60] bg-black/50 flex items-center justify-center p-8 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden">
-            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-              <div className="flex items-center gap-3">
-                <div className="bg-blue-100 p-2 rounded text-blue-600"><Database size={20} /></div>
-                <div>
-                  <h2 className="font-bold text-lg text-gray-900">Data Model Preview</h2>
-                  <p className="text-sm text-gray-500">Available tables and schemas</p>
-                </div>
-              </div>
-              <button onClick={() => setShowDataModel(false)} className="p-2 hover:bg-gray-200 rounded-full text-gray-500"><X size={20} /></button>
+      <Modal
+        open={showDataModel}
+        onCancel={() => setShowDataModel(false)}
+        footer={null}
+        width={980}
+        centered
+        closeIcon={<X size={16} />}
+        styles={{ body: { padding: 0 } }}
+        title={
+          <Space align="center">
+            <div className="bg-blue-100 p-2 rounded text-blue-600"><Database size={20} /></div>
+            <div>
+              <div className="font-bold text-base text-gray-900">Data Model Preview</div>
+              <div className="text-xs text-gray-500">Available tables and schemas</div>
             </div>
-            <div className="flex-1 overflow-auto p-8 bg-slate-50">
-              {dataModel.order.length === 0 ? (
-                <div className="text-sm text-gray-500">Upload a CSV/XLSX file to populate the data model.</div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {dataModel.order.map((tableName) => {
-                    const baseRow = (dataModel.tables[tableName] || [])[0] || {};
-                    const rows = Object.keys(baseRow).map((col) => ({
-                      column: col,
-                      sample: String(baseRow[col] ?? '')
-                    }));
-                    const sortState = dataModelSorts[tableName] || { sortBy: '', sortDirection: '' };
-                    const sortedRows = getSortedRows(rows, sortState.sortBy, sortState.sortDirection);
-                    const resolveIndicator = (columnKey) => {
-                      if (sortState.sortBy !== columnKey) return '';
-                      return sortState.sortDirection === 'asc' ? '^' : 'v';
-                    };
-                    return (
-                      <div key={tableName} className="bg-white rounded-lg border border-gray-200 shadow-sm flex flex-col">
-                        <div className="p-4 border-b border-gray-100 font-bold text-gray-800 flex items-center gap-2">
-                          <TableIcon size={16} className="text-gray-400" />
-                          {tableName.toUpperCase()}
-                        </div>
-                        <div className="p-0">
-                          <table className="w-full text-sm text-left">
-                            <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
-                              <tr>
-                                {['column', 'sample'].map((columnKey) => (
-                                  <th
-                                    key={columnKey}
-                                    role="button"
-                                    aria-sort={sortState.sortBy === columnKey
-                                      ? (sortState.sortDirection === 'asc' ? 'ascending' : 'descending')
-                                      : 'none'}
-                                    onClick={() => handleDataModelSort(tableName, columnKey)}
-                                    className="p-3 font-semibold cursor-pointer hover:text-blue-600"
-                                  >
-                                    <span className="inline-flex items-center gap-1">
-                                      {columnKey === 'column' ? 'Column' : 'Sample'}
-                                      {resolveIndicator(columnKey) && (
-                                        <span className="text-[10px] text-gray-400">{resolveIndicator(columnKey)}</span>
-                                      )}
-                                    </span>
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                              {sortedRows.map((row) => (
-                                <tr key={row.column}>
-                                  <td className="p-3 font-medium text-gray-700">{row.column}</td>
-                                  <td className="p-3 text-gray-400 truncate max-w-[100px]">{row.sample}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                        <div className="mt-auto p-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-500 text-center">
-                          {(dataModel.tables[tableName] || []).length} total records
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+          </Space>
+        }
+      >
+        <div className="flex-1 overflow-auto p-8 bg-slate-50">
+          {dataModel.order.length === 0 ? (
+            <Empty description="Upload a CSV/XLSX file to populate the data model." />
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {dataModel.order.map((tableName) => {
+                const baseRow = (dataModel.tables[tableName] || [])[0] || {};
+                const rows = Object.keys(baseRow).map((col) => ({
+                  column: col,
+                  sample: String(baseRow[col] ?? '')
+                }));
+                const sortState = dataModelSorts[tableName] || { sortBy: '', sortDirection: '' };
+                const sortedRows = getSortedRows(rows, sortState.sortBy, sortState.sortDirection);
+                const resolveIndicator = (columnKey) => {
+                  if (sortState.sortBy !== columnKey) return '';
+                  return sortState.sortDirection === 'asc' ? '^' : 'v';
+                };
+                return (
+                  <Card
+                    key={tableName}
+                    size="small"
+                    className="shadow-sm"
+                    bodyStyle={{ padding: 0 }}
+                    title={
+                      <Space size="small">
+                        <TableIcon size={16} className="text-gray-400" />
+                        {tableName.toUpperCase()}
+                      </Space>
+                    }
+                  >
+                    <div className="p-0">
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                          <tr>
+                            {['column', 'sample'].map((columnKey) => (
+                              <th
+                                key={columnKey}
+                                role="button"
+                                aria-sort={sortState.sortBy === columnKey
+                                  ? (sortState.sortDirection === 'asc' ? 'ascending' : 'descending')
+                                  : 'none'}
+                                onClick={() => handleDataModelSort(tableName, columnKey)}
+                                className="p-3 font-semibold cursor-pointer hover:text-blue-600"
+                              >
+                                <span className="inline-flex items-center gap-1">
+                                  {columnKey === 'column' ? 'Column' : 'Sample'}
+                                  {resolveIndicator(columnKey) && (
+                                    <span className="text-[10px] text-gray-400">{resolveIndicator(columnKey)}</span>
+                                  )}
+                                </span>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {sortedRows.map((row) => (
+                            <tr key={row.column}>
+                              <td className="p-3 font-medium text-gray-700">{row.column}</td>
+                              <td className="p-3 text-gray-400 truncate max-w-[100px]">{row.sample}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-auto p-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-500 text-center">
+                      {(dataModel.tables[tableName] || []).length} total records
+                    </div>
+                  </Card>
+                );
+              })}
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </Modal>
     </div>
   );
 };

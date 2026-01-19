@@ -7,3 +7,16 @@ globalThis.localStorage = {
   removeItem: (key) => { storage.delete(key); },
   clear: () => { storage.clear(); }
 };
+
+if (!globalThis.matchMedia) {
+  globalThis.matchMedia = (query) => ({
+    matches: false,
+    media: String(query),
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false
+  });
+}

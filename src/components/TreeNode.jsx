@@ -1,6 +1,7 @@
 // src/components/TreeNode.js
 // Recursive node renderer for the branching analysis canvas.
 import React from 'react';
+import { Alert, Button, Card, Dropdown, Empty, Input, Progress, Space, Statistic, Table, Tag, Tooltip, Typography } from 'antd';
 import {
   Plus,
   Filter,
@@ -9,8 +10,6 @@ import {
   Trash2,
   ChevronRight,
   ChevronDown,
-  ChevronsDown,
-  ChevronsUp,
   Sigma,
   TableIcon,
   GitBranch,
@@ -24,8 +23,6 @@ import { getChildren, countDescendants, getNodeResult, calculateMetric, formatNu
 import VisxChart from '../ui/SimpleChart';
 import WorldMapChart from '../ui/WorldMapChart';
 
-const TABLE_ROW_HEIGHT = 24;
-const TABLE_OVERSCAN = 6;
 const BRANCH_CONNECTOR_HEIGHT = 16;
 const BRANCH_CONNECTOR_STROKE = 2;
 const KPI_LABELS = {
@@ -36,6 +33,8 @@ const KPI_LABELS = {
   min: 'Min',
   max: 'Max'
 };
+
+const { Text, Title } = Typography;
 
 const metricRequiresField = (fn) => ['sum', 'avg', 'min', 'max', 'count_distinct'].includes(fn);
 
@@ -65,120 +64,93 @@ const AssistantPanel = React.memo(({ node, schema, onRun }) => {
   const planSteps = node.params.assistantPlan || [];
 
   return (
-    <div className="bg-white border border-gray-200 rounded p-3 flex flex-col text-[11px] space-y-2">
-      <form onSubmit={handleSubmit} className="flex flex-col gap-2">
-        <textarea
-          className="w-full min-h-[72px] p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none resize-y"
-          placeholder="Ask a question… e.g. 'Show total revenue by region'"
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-        />
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] text-gray-400">
-            {schema.length === 0 ? 'No columns available yet.' : `${schema.length} columns available`}
-          </span>
-          <button
-            type="submit"
-            className="px-3 py-1.5 rounded bg-blue-600 text-white text-[11px] font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={!question.trim() || node.params.assistantStatus === 'loading'}
-          >
-            {node.params.assistantStatus === 'loading' ? 'Thinking…' : 'Build Nodes'}
-          </button>
-        </div>
-      </form>
-      {node.params.assistantStatus === 'loading' && (
-        <div className="text-[11px] text-blue-600 bg-blue-50 border border-blue-100 rounded p-2">
-          Analyzing question and building a plan…
-        </div>
-      )}
-      {node.params.assistantStatus === 'error' && (
-        <div className="text-[11px] text-red-600 bg-red-50 border border-red-100 rounded p-2">
-          {node.params.assistantError || 'I could not build a plan from that question.'}
-        </div>
-      )}
-      {node.params.assistantStatus === 'success' && node.params.assistantSummary && (
-        <div className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded p-2">
-          {node.params.assistantSummary}
-        </div>
-      )}
-      {node.params.assistantLlmError && (
-        <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded p-2">
-          LLM unavailable: {node.params.assistantLlmError}
-        </div>
-      )}
-      {planSteps.length > 0 && (
-        <div className="space-y-1">
-          <div className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Planned Steps</div>
-          <ul className="space-y-1">
-            {planSteps.map((step, idx) => (
-              <li key={`${step}-${idx}`} className="text-gray-600">• {step}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-      {node.params.assistantStatus !== 'success' && node.params.assistantStatus !== 'error' && (
-        <div className="text-[11px] text-gray-400">
-          Ask a question to build a filter, aggregate, and view automatically.
-        </div>
-      )}
-    </div>
+    <Card size="small" title="AI Assistant">
+      <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+        <form onSubmit={handleSubmit}>
+          <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+            <Input.TextArea
+              autoSize={{ minRows: 3, maxRows: 6 }}
+              placeholder="Ask a question… e.g. 'Show total revenue by region'"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+            />
+            <Space align="center" className="w-full justify-between">
+              <Text type="secondary" className="text-xs">
+                {schema.length === 0 ? 'No columns available yet.' : `${schema.length} columns available`}
+              </Text>
+              <Button
+                type="primary"
+                htmlType="submit"
+                size="small"
+                disabled={!question.trim() || node.params.assistantStatus === 'loading'}
+                loading={node.params.assistantStatus === 'loading'}
+              >
+                {node.params.assistantStatus === 'loading' ? 'Thinking…' : 'Build Nodes'}
+              </Button>
+            </Space>
+          </Space>
+        </form>
+        {node.params.assistantStatus === 'loading' && (
+          <Alert type="info" showIcon message="Analyzing question and building a plan…" />
+        )}
+        {node.params.assistantStatus === 'error' && (
+          <Alert type="error" showIcon message={node.params.assistantError || 'I could not build a plan from that question.'} />
+        )}
+        {node.params.assistantStatus === 'success' && node.params.assistantSummary && (
+          <Alert type="success" showIcon message={node.params.assistantSummary} />
+        )}
+        {node.params.assistantLlmError && (
+          <Alert type="warning" showIcon message={`LLM unavailable: ${node.params.assistantLlmError}`} />
+        )}
+        {planSteps.length > 0 && (
+          <Card size="small" title="Planned Steps">
+            <Space orientation="vertical" size="small">
+              {planSteps.map((step, idx) => (
+                <Text key={`${step}-${idx}`} type="secondary">
+                  • {step}
+                </Text>
+              ))}
+            </Space>
+          </Card>
+        )}
+        {node.params.assistantStatus !== 'success' && node.params.assistantStatus !== 'error' && (
+          <Text type="secondary" className="text-xs">
+            Ask a question to build a filter, aggregate, and view automatically.
+          </Text>
+        )}
+      </Space>
+    </Card>
   );
 });
 
 const TablePreview = React.memo(({ data, columns, onCellClick, onSortChange, nodeId, sortBy, sortDirection }) => {
-  const scrollRef = React.useRef(null);
-  const rafRef = React.useRef(null);
-  const [scrollTop, setScrollTop] = React.useState(0);
-  const [viewportHeight, setViewportHeight] = React.useState(0);
-
+  const containerRef = React.useRef(null);
+  const [tableHeight, setTableHeight] = React.useState(220);
   const normalizedSortDirection = sortDirection === 'asc' || sortDirection === 'desc' ? sortDirection : '';
-  const sortedData = React.useMemo(() => {
-    if (!sortBy || !normalizedSortDirection) return data;
-    if (!columns.includes(sortBy)) return data;
-    const withIndex = data.map((row, index) => ({ row, index }));
-    const direction = normalizedSortDirection === 'asc' ? 1 : -1;
-    withIndex.sort((a, b) => {
-      const aRaw = a.row?.[sortBy];
-      const bRaw = b.row?.[sortBy];
-      if (aRaw == null && bRaw == null) return a.index - b.index;
-      if (aRaw == null) return 1;
-      if (bRaw == null) return -1;
-      const aNum = Number(aRaw);
-      const bNum = Number(bRaw);
-      const bothNumeric = !Number.isNaN(aNum) && !Number.isNaN(bNum);
-      if (bothNumeric) {
-        if (aNum === bNum) return a.index - b.index;
-        return (aNum - bNum) * direction;
-      }
-      const aText = String(aRaw);
-      const bText = String(bRaw);
-      const result = aText.localeCompare(bText, undefined, { numeric: true, sensitivity: 'base' });
-      if (result === 0) return a.index - b.index;
-      return result * direction;
-    });
-    return withIndex.map(item => item.row);
-  }, [data, sortBy, normalizedSortDirection, columns]);
 
-  const totalRows = sortedData.length;
-  const maxScrollTop = Math.max(0, totalRows * TABLE_ROW_HEIGHT - viewportHeight);
-  const effectiveScrollTop = Math.min(scrollTop, maxScrollTop);
-  const startIndex = Math.max(0, Math.floor(effectiveScrollTop / TABLE_ROW_HEIGHT) - TABLE_OVERSCAN);
-  const endIndex = Math.min(
-    totalRows,
-    Math.ceil((effectiveScrollTop + viewportHeight) / TABLE_ROW_HEIGHT) + TABLE_OVERSCAN
-  );
-  const visibleRows = sortedData.slice(startIndex, endIndex);
-  const paddingTop = startIndex * TABLE_ROW_HEIGHT;
-  const paddingBottom = Math.max(0, (totalRows - endIndex) * TABLE_ROW_HEIGHT);
-  const columnCount = Math.max(1, columns.length);
+  const compareValues = React.useCallback((aRaw, bRaw) => {
+    if (aRaw == null && bRaw == null) return 0;
+    if (aRaw == null) return 1;
+    if (bRaw == null) return -1;
+    const aNum = Number(aRaw);
+    const bNum = Number(bRaw);
+    const bothNumeric = !Number.isNaN(aNum) && !Number.isNaN(bNum);
+    if (bothNumeric) {
+      if (aNum === bNum) return 0;
+      return aNum - bNum;
+    }
+    const aText = String(aRaw);
+    const bText = String(bRaw);
+    return aText.localeCompare(bText, undefined, { numeric: true, sensitivity: 'base' });
+  }, []);
 
   React.useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
+    const el = containerRef.current;
+    if (!el) return undefined;
 
     const updateHeight = () => {
-      const height = el.getBoundingClientRect().height;
-      setViewportHeight(height);
+      const rect = el.getBoundingClientRect();
+      if (rect.height) setTableHeight(rect.height);
     };
     updateHeight();
 
@@ -192,13 +164,7 @@ const TablePreview = React.memo(({ data, columns, onCellClick, onSortChange, nod
       if (frame) cancelAnimationFrame(frame);
       frame = requestAnimationFrame(updateHeight);
     });
-
-    // Observe the scroll container and the resizable node wrapper.
     observer.observe(el);
-    const resizable = el.closest('[data-node-resize]');
-    if (resizable) observer.observe(resizable);
-    const parent = el.parentElement;
-    if (parent) observer.observe(parent);
 
     return () => {
       observer.disconnect();
@@ -206,18 +172,22 @@ const TablePreview = React.memo(({ data, columns, onCellClick, onSortChange, nod
     };
   }, [data.length, columns.length]);
 
-  React.useEffect(() => () => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-  }, []);
-
-  const handleScroll = (e) => {
-    const nextTop = e.currentTarget.scrollTop;
-    if (rafRef.current) return;
-    rafRef.current = requestAnimationFrame(() => {
-      rafRef.current = null;
-      setScrollTop(nextTop);
+  const sortedData = React.useMemo(() => {
+    if (!sortBy || !normalizedSortDirection) return data;
+    if (!columns.includes(sortBy)) return data;
+    const withIndex = data.map((row, index) => ({ row, index }));
+    const direction = normalizedSortDirection === 'asc' ? 1 : -1;
+    withIndex.sort((a, b) => {
+      const result = compareValues(a.row?.[sortBy], b.row?.[sortBy]);
+      if (result === 0) return a.index - b.index;
+      return result * direction;
     });
-  };
+    return withIndex.map(item => item.row);
+  }, [data, sortBy, normalizedSortDirection, columns, compareValues]);
+
+  if (columns.length === 0) {
+    return <Empty description="No columns available for preview" />;
+  }
 
   const handleHeaderSort = (column) => {
     if (!onSortChange) return;
@@ -234,81 +204,52 @@ const TablePreview = React.memo(({ data, columns, onCellClick, onSortChange, nod
     onSortChange(nodeId, nextSortBy, nextDirection);
   };
 
-  if (columns.length === 0) {
-    return (
-      <div className="flex-1 min-h-0 px-2 pb-2 text-[10px] text-gray-400 flex items-center justify-center">
-        No columns available for preview
-      </div>
-    );
-  }
+  const tableColumns = columns.map((col) => {
+    const isSorted = sortBy === col && normalizedSortDirection;
+    const sortIndicator = isSorted ? (normalizedSortDirection === 'asc' ? '^' : 'v') : '';
+    return {
+      title: (
+        <span className="inline-flex items-center gap-1">
+          {col}
+          {sortIndicator && <span className="text-[10px] text-gray-400">{sortIndicator}</span>}
+        </span>
+      ),
+      dataIndex: col,
+      key: col,
+      ellipsis: true,
+      onHeaderCell: () => ({
+        onClick: (e) => {
+          e.stopPropagation();
+          handleHeaderSort(col);
+        },
+        className: 'cursor-pointer select-none hover:text-blue-600'
+      }),
+      onCell: (record) => ({
+        onClick: (e) => {
+          e.stopPropagation();
+          if (onCellClick) onCellClick(record[col], col, nodeId);
+        },
+        className: 'cursor-pointer hover:bg-blue-50 hover:text-blue-700 transition-colors'
+      })
+    };
+  });
+
+  const dataSource = sortedData.map((row, idx) => ({ __key: idx, ...row }));
+  const bodyHeight = Math.max(140, tableHeight - 38);
 
   return (
-    <div
-      ref={scrollRef}
-      onScroll={handleScroll}
-      className="overflow-auto flex-1 min-h-0 px-2 pb-2"
-    >
-      <table className="min-w-max w-full text-left border-collapse">
-        <thead>
-          <tr className="bg-gray-50 border-b sticky top-0 shadow-sm">
-            {columns.map(col => {
-              const isSorted = sortBy === col && normalizedSortDirection;
-              const sortIndicator = isSorted ? (normalizedSortDirection === 'asc' ? '^' : 'v') : '';
-              const ariaSort = sortBy === col
-                ? (normalizedSortDirection === 'asc' ? 'ascending' : 'descending')
-                : 'none';
-              return (
-                <th
-                  key={col}
-                  role="button"
-                  aria-sort={ariaSort}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleHeaderSort(col);
-                  }}
-                  className="p-1 bg-gray-50 text-gray-600 font-medium whitespace-nowrap cursor-pointer hover:text-blue-600"
-                  title={`Sort by ${col}`}
-                >
-                  <span className="inline-flex items-center gap-1">
-                    {col}
-                    {sortIndicator && <span className="text-[10px] text-gray-400">{sortIndicator}</span>}
-                  </span>
-                </th>
-              );
-            })}
-          </tr>
-        </thead>
-        <tbody>
-          {paddingTop > 0 && (
-            <tr aria-hidden="true">
-              <td className="p-0 border-0" style={{ height: `${paddingTop}px` }} colSpan={columnCount}></td>
-            </tr>
-          )}
-          {visibleRows.map((row, idx) => (
-            <tr
-              key={startIndex + idx}
-              className="border-b hover:bg-blue-50 transition-colors"
-              style={{ height: `${TABLE_ROW_HEIGHT}px` }}
-            >
-              {columns.map(col => (
-                <td
-                  key={col}
-                  className="p-1 truncate cursor-pointer hover:bg-blue-100 hover:text-blue-700 transition-colors max-w-[100px]"
-                  onClick={(e) => { e.stopPropagation(); onCellClick(row[col], col, nodeId); }}
-                  title={`Filter by ${col} = ${row[col]}`}
-                >
-                  {row[col]}
-                </td>
-              ))}
-            </tr>
-          ))}
-          {paddingBottom > 0 && (
-            <tr aria-hidden="true">
-              <td className="p-0 border-0" style={{ height: `${paddingBottom}px` }} colSpan={columnCount}></td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+    <div ref={containerRef} className="h-full">
+      <Table
+        size="small"
+        sticky
+        className="rounded-none"
+        style={{ borderRadius: 0 }}
+        rowKey="__key"
+        pagination={false}
+        columns={tableColumns}
+        dataSource={dataSource}
+        scroll={{ y: bodyHeight, x: 'max-content' }}
+      />
     </div>
   );
 });
@@ -434,7 +375,6 @@ const TreeNode = ({
   onInsert,
   onRemove,
   onToggleExpand,
-  onToggleChildren,
   onToggleBranch,
   onDrillDown,
   onTableCellClick,
@@ -452,7 +392,6 @@ const TreeNode = ({
   const children = getChildren(nodes, nodeId);
   const isActive = selectedNodeId === nodeId;
   const isExpanded = node.isExpanded !== false;
-  const areChildrenCollapsed = node.areChildrenCollapsed === true;
   const isBranchCollapsed = node.isBranchCollapsed === true;
   const addMenuRef = React.useRef(null);
   const insertMenuRef = React.useRef(null);
@@ -472,6 +411,68 @@ const TreeNode = ({
     });
     return () => cancelAnimationFrame(frame);
   }, [showInsertMenuForId, nodeId]);
+
+
+  const handleAddMenuClick = ({ key }) => {
+    if (!onAdd) return;
+    if (key.startsWith('COMPONENT:')) {
+      onAdd('COMPONENT', nodeId, key.split(':')[1]);
+    } else {
+      onAdd(key, nodeId);
+    }
+    setShowAddMenuForId(null);
+  };
+
+  const handleInsertMenuClick = ({ key }) => {
+    if (!onInsert) return;
+    if (key.startsWith('COMPONENT:')) {
+      onInsert('COMPONENT', nodeId, key.split(':')[1]);
+    } else {
+      onInsert(key, nodeId);
+    }
+    setShowInsertMenuForId(null);
+  };
+
+  const addMenuItems = [
+    {
+      type: 'group',
+      label: 'Data Ops',
+      children: [
+        { key: 'FILTER', label: 'Filter', icon: <span className="w-2 h-2 rounded-full bg-orange-400" /> },
+        { key: 'AGGREGATE', label: 'Aggregate', icon: <span className="w-2 h-2 rounded-full bg-purple-400" /> },
+        { key: 'JOIN', label: 'SQL Join', icon: <span className="w-2 h-2 rounded-full bg-pink-400" /> }
+      ]
+    },
+    { type: 'divider' },
+    {
+      type: 'group',
+      label: 'Components',
+      children: [
+        { key: 'COMPONENT:TABLE', label: 'Table', icon: <TableIcon size={14} /> },
+        { key: 'COMPONENT:PIVOT', label: 'Pivot Table', icon: <TableIcon size={14} /> },
+        { key: 'COMPONENT:AI', label: 'AI Assistant', icon: <Share2 size={14} /> },
+        { key: 'COMPONENT:CHART', label: 'Chart', icon: <BarChart3 size={14} /> },
+        { key: 'COMPONENT:KPI', label: 'KPI', icon: <Hash size={14} /> },
+        { key: 'COMPONENT:GAUGE', label: 'Gauge', icon: <Gauge size={14} /> }
+      ]
+    }
+  ];
+
+  const insertMenuItems = [
+    {
+      type: 'group',
+      label: 'Insert Step',
+      children: [
+        { key: 'FILTER', label: 'Filter', icon: <span className="w-1.5 h-1.5 rounded-full bg-orange-400" /> },
+        { key: 'AGGREGATE', label: 'Aggregate', icon: <span className="w-1.5 h-1.5 rounded-full bg-purple-400" /> },
+        { key: 'JOIN', label: 'Join', icon: <span className="w-1.5 h-1.5 rounded-full bg-pink-400" /> },
+        { type: 'divider' },
+        { key: 'COMPONENT:TABLE', label: 'Table', icon: <TableIcon size={12} /> },
+        { key: 'COMPONENT:PIVOT', label: 'Pivot Table', icon: <TableIcon size={12} /> },
+        { key: 'COMPONENT:AI', label: 'AI Assistant', icon: <Share2 size={12} /> }
+      ]
+    }
+  ];
 
   // Resolve icon by node type (and component subtype).
   let Icon = Database;
@@ -507,6 +508,9 @@ const TreeNode = ({
       value: calculateMetric(result.data, metric.field, metric.fn || 'count')
     }));
   }, [node.type, node.params.subtype, node.params.metrics, node.params.fn, node.params.metricField, result]);
+
+  const pivotTableRef = React.useRef(null);
+  const [pivotTableHeight, setPivotTableHeight] = React.useState(220);
 
   const pivotState = React.useMemo(() => {
     if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'PIVOT') return null;
@@ -595,6 +599,34 @@ const TreeNode = ({
     result
   ]);
 
+  React.useEffect(() => {
+    const el = pivotTableRef.current;
+    if (!el) return undefined;
+
+    const updateHeight = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.height) setPivotTableHeight(rect.height);
+    };
+    updateHeight();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateHeight);
+      return () => window.removeEventListener('resize', updateHeight);
+    }
+
+    let frame = null;
+    const observer = new ResizeObserver(() => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updateHeight);
+    });
+    observer.observe(el);
+
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [pivotState?.rowKeys?.length, pivotState?.colKeys?.length]);
+
   const chartType = node.params.chartType || 'bar';
   const chartAggFn = node.params.chartAggFn || 'none';
   const chartYAxis = (chartType !== 'scatter' && chartType !== 'map' && chartAggFn === 'count' && !node.params.yAxis)
@@ -660,25 +692,26 @@ const TreeNode = ({
     node.params.yAxis
   ]);
 
-  const hiddenCount = areChildrenCollapsed ? countDescendants(nodes, nodeId) : 0;
-
   // Compact collapsed branch representation.
   if (isBranchCollapsed) {
     return (
       <div className="flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
         <div className="relative z-10">
-          <div
+          <Button
             onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
-            className="bg-white border border-gray-200 shadow-sm rounded-full px-4 py-2 flex items-center gap-2 cursor-pointer hover:border-blue-400 hover:text-blue-600 transition-all"
-            title="Expand Branch"
+            icon={<GitBranch size={14} />}
+            shape="round"
           >
-            <GitBranch size={14} className="text-indigo-500" />
-            <span className="text-xs font-medium text-gray-600 truncate max-w-[150px]">{node.title}</span>
-            <span className="text-[10px] text-gray-400 bg-gray-50 px-1.5 rounded-full border border-gray-100 flex items-center gap-0.5">
-              <Plus size={8} />
-              {countDescendants(nodes, nodeId) + 1}
-            </span>
-          </div>
+            <Space size="small">
+              <Text className="text-xs">{node.title}</Text>
+              <Tag>
+                <Space size={2}>
+                  <Plus size={8} />
+                  {countDescendants(nodes, nodeId) + 1}
+                </Space>
+              </Tag>
+            </Space>
+          </Button>
         </div>
       </div>
     );
@@ -705,70 +738,60 @@ const TreeNode = ({
         >
           {/* Header */}
           <div className="p-4 flex items-center gap-3">
-            <button
+            <Button
+              type="text"
+              size="small"
+              icon={isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
               onClick={(e) => { e.stopPropagation(); onToggleExpand(nodeId); }}
-              className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded p-0.5 transition-colors"
-            >
-              {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-            </button>
+            />
             <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${isActive ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
               <Icon size={20} />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h4 className="font-bold text-gray-900 text-sm truncate">{node.title}</h4>
+              <Space size="small" align="center">
+                <Text strong className="truncate">{node.title}</Text>
                 {node.branchName && (
-                  <span className="bg-indigo-50 text-indigo-700 text-[9px] font-bold px-1.5 py-0.5 rounded border border-indigo-100 uppercase tracking-tight">
+                  <Tag color="geekblue" className="uppercase text-[9px] font-bold">
                     {node.branchName}
-                  </span>
+                  </Tag>
                 )}
-              </div>
-              <div className="text-xs text-gray-500 truncate mt-0.5">
+              </Space>
+              <Text type="secondary" className="text-xs truncate block mt-0.5">
                 {node.type === 'FILTER' && node.params.field ? `${node.params.field} ${node.params.operator} ${node.params.value}` :
                   node.type === 'AGGREGATE' ? `Group by ${node.params.groupBy}` :
                   node.type === 'JOIN' ? `with ${node.params.rightTable || '...'}` :
                   node.type === 'COMPONENT' ? (node.params.subtype === 'AI' ? 'AI Assistant' : `${node.params.subtype} View`) :
                   node.description || node.type}
-              </div>
+              </Text>
             </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={(e) => { e.stopPropagation(); onAdd('FILTER', nodeId); }}
-                className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 transition-colors"
-                title="Fork Branch"
-              >
-                <GitBranch size={16} />
-              </button>
-
-              {children.length > 0 && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onToggleChildren(nodeId); }}
-                  className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 transition-colors"
-                  title={areChildrenCollapsed ? "Expand Children" : "Collapse Children"}
-                >
-                  {areChildrenCollapsed ? <ChevronsDown size={16} /> : <ChevronsUp size={16} />}
-                </button>
-              )}
+            <Space size="small">
+              <Tooltip title="Fork Branch">
+                <Button
+                  type="text"
+                  icon={<GitBranch size={16} />}
+                  onClick={(e) => { e.stopPropagation(); onAdd('FILTER', nodeId); }}
+                />
+              </Tooltip>
 
               {node.parentId && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
-                  className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-indigo-600 transition-colors"
-                  title="Minimize Node"
-                >
-                  <Minimize2 size={16} />
-                </button>
+                <Tooltip title="Minimize Node">
+                  <Button
+                    type="text"
+                    icon={<Minimize2 size={16} />}
+                    onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
+                  />
+                </Tooltip>
               )}
 
               {node.type !== 'SOURCE' && (
-                <button
+                <Button
+                  type="text"
+                  danger
+                  icon={<Trash2 size={16} />}
                   onClick={(e) => { e.stopPropagation(); onRemove(nodeId); }}
-                  className="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-500 transition-colors"
-                >
-                  <Trash2 size={16} />
-                </button>
+                />
               )}
-            </div>
+            </Space>
           </div>
 
           {/* Content Preview */}
@@ -783,20 +806,22 @@ const TreeNode = ({
             <div className={`border-t border-gray-100 bg-gray-50 ${contentPaddingClass} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
               {/* TABLE VIEW */}
               {isTablePreview && (
-                <div className="h-full overflow-hidden text-[10px] bg-white border border-gray-200 rounded flex flex-col">
-                  <div className="flex justify-between text-xs font-bold text-gray-500 mb-2 px-2 pt-2">
+                <div className="flex-1 min-h-0 flex flex-col">
+                  <div className="flex items-center justify-between text-xs font-medium text-gray-500 px-2 pt-2">
                     <span>Preview</span>
                     <span>{result.data.length} rows</span>
                   </div>
-                  <TablePreview
-                    data={result.data}
-                    columns={visibleColumns}
-                    onCellClick={onTableCellClick}
-                    onSortChange={onTableSortChange}
-                    nodeId={nodeId}
-                    sortBy={node.params.tableSortBy}
-                    sortDirection={node.params.tableSortDirection}
-                  />
+                  <div className="flex-1 min-h-0 px-2 pb-2">
+                    <TablePreview
+                      data={result.data}
+                      columns={visibleColumns}
+                      onCellClick={onTableCellClick}
+                      onSortChange={onTableSortChange}
+                      nodeId={nodeId}
+                      sortBy={node.params.tableSortBy}
+                      sortDirection={node.params.tableSortDirection}
+                    />
+                  </div>
                 </div>
               )}
 
@@ -811,61 +836,61 @@ const TreeNode = ({
 
               {/* PIVOT VIEW */}
               {isPivotPreview && (
-                <div className="h-full overflow-hidden text-[10px] bg-white border border-gray-200 rounded flex flex-col">
-                  <div className="flex justify-between text-xs font-bold text-gray-500 mb-2 px-2 pt-2">
+                <div className="h-full flex flex-col">
+                  <div className="flex items-center justify-between text-xs font-medium text-gray-500 px-2 pt-2">
                     <span>Pivot</span>
                     {pivotState && !pivotState.error && (
                       <span>{pivotState.rowKeys.length} rows × {pivotState.colKeys.length} cols</span>
                     )}
                   </div>
-                  {!pivotState || pivotState.error ? (
-                    <div className="flex-1 min-h-0 px-2 pb-2 text-[10px] text-gray-400 flex items-center justify-center">
-                      {pivotState?.error || 'Configure row and column fields to render the pivot.'}
-                    </div>
-                  ) : (
-                    <div className="overflow-auto flex-1 min-h-0 px-2 pb-2">
-                      <table className="min-w-max w-full text-left border-collapse">
-                        <thead>
-                          <tr className="bg-gray-50 border-b sticky top-0 shadow-sm">
-                            <th className="p-1 bg-gray-50 text-gray-600 font-medium whitespace-nowrap">{pivotState.rowField}</th>
-                            {pivotState.colKeys.map(col => (
-                              <th key={col} className="p-1 bg-gray-50 text-gray-600 font-medium whitespace-nowrap">{col}</th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {pivotState.rowKeys.map((rowKey, rowIdx) => (
-                            <tr key={rowKey} className="border-b">
-                              <td className="p-1 text-gray-600 font-medium whitespace-nowrap">{rowKey}</td>
-                              {pivotState.colKeys.map((colKey, colIdx) => {
-                                const value = pivotState.matrix[rowIdx]?.[colIdx];
-                                const formatted = typeof value === 'number' ? formatNumber(value) : (value ?? '-');
-                                return (
-                                  <td key={`${rowKey}-${colKey}`} className="p-1 text-gray-700 whitespace-nowrap">
-                                    {formatted}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                  <div ref={pivotTableRef} className="flex-1 min-h-0 px-2 pb-2">
+                    {!pivotState || pivotState.error ? (
+                      <Empty description={pivotState?.error || 'Configure row and column fields to render the pivot.'} />
+                    ) : (
+                      (() => {
+                        const pivotColumns = [
+                          { title: pivotState.rowField, dataIndex: 'rowKey', key: 'rowKey', fixed: 'left' },
+                          ...pivotState.colKeys.map((col) => ({ title: col, dataIndex: col, key: col }))
+                        ];
+                        const dataSource = pivotState.rowKeys.map((rowKey, rowIdx) => {
+                          const row = { rowKey };
+                          pivotState.colKeys.forEach((colKey, colIdx) => {
+                            const value = pivotState.matrix[rowIdx]?.[colIdx];
+                            row[colKey] = typeof value === 'number' ? formatNumber(value) : (value ?? '-');
+                          });
+                          return row;
+                        });
+                        return (
+                          <Table
+                            size="small"
+                            className="rounded-none"
+                            style={{ borderRadius: 0 }}
+                            pagination={false}
+                            columns={pivotColumns}
+                            dataSource={dataSource}
+                            scroll={{ x: 'max-content', y: Math.max(140, pivotTableHeight - 38) }}
+                            rowKey="rowKey"
+                          />
+                        );
+                      })()
+                    )}
+                  </div>
                 </div>
               )}
 
               {/* JOIN VIEW */}
               {node.type === 'JOIN' && (
-                <div className="h-full bg-slate-900 rounded p-3 text-[10px] font-mono text-slate-300 overflow-auto">
-                  <div><span className="text-pink-400">SELECT</span> *</div>
-                  <div><span className="text-pink-400">FROM</span> [PreviousNode]</div>
-                  <div><span className="text-pink-400">{node.params.joinType || 'LEFT'} JOIN</span> {node.params.rightTable || '...'}</div>
-                  <div><span className="text-pink-400">ON</span> {node.params.leftKey || '?'} = {node.params.rightKey || '?'}</div>
-                  <div className="mt-2 pt-2 border-t border-slate-700 text-slate-500 italic">
-                    Result: {result.data.length} rows merged
+                <Card size="small" styles={{ body: { padding: 12 } }}>
+                  <div className="bg-slate-900 rounded p-3 text-[10px] font-mono text-slate-300 overflow-auto">
+                    <div><span className="text-pink-400">SELECT</span> *</div>
+                    <div><span className="text-pink-400">FROM</span> [PreviousNode]</div>
+                    <div><span className="text-pink-400">{node.params.joinType || 'LEFT'} JOIN</span> {node.params.rightTable || '...'}</div>
+                    <div><span className="text-pink-400">ON</span> {node.params.leftKey || '?'} = {node.params.rightKey || '?'}</div>
+                    <div className="mt-2 pt-2 border-t border-slate-700 text-slate-500 italic">
+                      Result: {result.data.length} rows merged
+                    </div>
                   </div>
-                </div>
+                </Card>
               )}
 
               {/* CHART VIEW */}
@@ -898,55 +923,53 @@ const TreeNode = ({
 
               {/* KPI VIEW */}
               {node.params.subtype === 'KPI' && (
-                <div className="h-full flex flex-col items-center justify-center bg-white border border-gray-200 rounded p-4 text-center">
+                <Card size="small" className="h-full">
                   {kpiMetrics.length === 0 ? (
-                    <div className="text-xs text-gray-400">Configure KPI metrics to display.</div>
+                    <Empty description="Configure KPI metrics to display." />
                   ) : kpiMetrics.length === 1 ? (
-                    <>
-                      <div className="text-gray-400 text-xs font-medium uppercase tracking-wider mb-2">
+                    <Space orientation="vertical" size="small" style={{ width: '100%', textAlign: 'center' }}>
+                      <Text type="secondary" className="uppercase text-xs">
                         {formatMetricLabel(kpiMetrics[0])}
-                      </div>
-                      <div className="text-4xl font-bold text-blue-600">
+                      </Text>
+                      <Title level={2} style={{ margin: 0 }}>
                         {typeof kpiMetrics[0].value === 'number' ? formatNumber(kpiMetrics[0].value) : kpiMetrics[0].value}
-                      </div>
-                    </>
+                      </Title>
+                    </Space>
                   ) : (
                     <div className="grid grid-cols-2 gap-3 w-full">
                       {kpiMetrics.map((metric, idx) => (
-                        <div key={metric.id || idx} className="bg-white border border-gray-200 rounded-lg p-3 text-left">
-                          <div className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider mb-1">
-                            {formatMetricLabel(metric)}
-                          </div>
-                          <div className="text-lg font-bold text-blue-600">
-                            {typeof metric.value === 'number' ? formatNumber(metric.value) : metric.value}
-                          </div>
-                        </div>
+                        <Card key={metric.id || idx} size="small">
+                          <Statistic
+                            title={formatMetricLabel(metric)}
+                            value={typeof metric.value === 'number' ? formatNumber(metric.value) : metric.value}
+                          />
+                        </Card>
                       ))}
                     </div>
                   )}
-                </div>
+                </Card>
               )}
 
               {/* GAUGE VIEW */}
               {node.params.subtype === 'GAUGE' && (
-                <div className="h-full flex flex-col items-center justify-center bg-white border border-gray-200 rounded p-4">
-                  <div className="w-full flex justify-between text-xs text-gray-500 mb-1">
-                    <span>{node.params.fn}</span>
-                    <span>Target: {node.params.target || 100}</span>
-                  </div>
-                  <div className="text-3xl font-bold text-gray-900 mb-3">
-                    {typeof gaugeMetricValue === 'number' ? formatNumber(gaugeMetricValue) : gaugeMetricValue}
-                  </div>
-                  <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-blue-500 rounded-full transition-all duration-1000 ease-out"
-                      style={{ width: `${Math.min(100, (gaugeMetricValue / (node.params.target || 100)) * 100)}%` }}
-                    ></div>
-                  </div>
-                  <div className="mt-2 text-[10px] text-gray-400">
-                    {Math.round((gaugeMetricValue / (node.params.target || 100)) * 100)}% of target
-                  </div>
-                </div>
+                <Card size="small" className="h-full">
+                  <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                    <Space className="w-full justify-between">
+                      <Text type="secondary">{node.params.fn}</Text>
+                      <Text type="secondary">Target: {node.params.target || 100}</Text>
+                    </Space>
+                    <Title level={3} style={{ margin: 0 }}>
+                      {typeof gaugeMetricValue === 'number' ? formatNumber(gaugeMetricValue) : gaugeMetricValue}
+                    </Title>
+                    <Progress
+                      percent={Math.min(100, Math.round((gaugeMetricValue / (node.params.target || 100)) * 100))}
+                      showInfo={false}
+                    />
+                    <Text type="secondary" className="text-xs">
+                      {Math.round((gaugeMetricValue / (node.params.target || 100)) * 100)}% of target
+                    </Text>
+                  </Space>
+                </Card>
               )}
             </div>
             );
@@ -956,54 +979,20 @@ const TreeNode = ({
         {/* ADD BUTTON - Only show if NO children */}
         {children.length === 0 && (
           <div className={`absolute -bottom-6 left-1/2 -translate-x-1/2 translate-y-full z-20 transition-all ${!isExpanded ? '-mt-4' : ''}`}>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowAddMenuForId(showAddMenuForId === nodeId ? null : nodeId);
-              }}
-              className="w-8 h-8 bg-gray-100 hover:bg-blue-600 hover:text-white rounded-full flex items-center justify-center border-2 border-white shadow-sm transition-colors text-gray-400"
-            >
-              <Plus size={16} strokeWidth={3} />
-            </button>
-
-            {showAddMenuForId === nodeId && (
-              <div ref={addMenuRef} className="absolute top-10 left-1/2 -translate-x-1/2 z-50">
-                <div className="bg-white rounded-xl shadow-xl border border-gray-100 p-2 w-56 animate-in fade-in slide-in-from-top-1">
-                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Data Ops</div>
-                  <button onClick={() => onAdd('FILTER', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-orange-400"></div> Filter
-                  </button>
-                  <button onClick={() => onAdd('AGGREGATE', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-purple-400"></div> Aggregate
-                  </button>
-                  <button onClick={() => onAdd('JOIN', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-pink-400"></div> SQL Join
-                  </button>
-
-                  <div className="h-px bg-gray-100 my-1"></div>
-                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Components</div>
-
-                  <button onClick={() => onAdd('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                    <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Table
-                  </button>
-                  <button onClick={() => onAdd('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                    <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Pivot Table
-                  </button>
-                  <button onClick={() => onAdd('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                    <Share2 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> AI Assistant
-                  </button>
-                  <button onClick={() => onAdd('COMPONENT', nodeId, 'CHART')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                    <BarChart3 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Chart
-                  </button>
-                  <button onClick={() => onAdd('COMPONENT', nodeId, 'KPI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                    <Hash size={14} className="text-gray-400 group-hover/item:text-blue-600" /> KPI
-                  </button>
-                  <button onClick={() => onAdd('COMPONENT', nodeId, 'GAUGE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                    <Gauge size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Gauge
-                  </button>
-                </div>
-              </div>
-            )}
+            <div ref={addMenuRef}>
+              <Dropdown
+                menu={{ items: addMenuItems, onClick: handleAddMenuClick }}
+                trigger={['click']}
+                open={showAddMenuForId === nodeId}
+                onOpenChange={(open) => setShowAddMenuForId(open ? nodeId : null)}
+              >
+                <Button
+                  shape="circle"
+                  icon={<Plus size={16} strokeWidth={3} />}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </Dropdown>
+            </div>
           </div>
         )}
       </div>
@@ -1012,145 +1001,73 @@ const TreeNode = ({
       {children.length > 0 && (
         <div className="flex flex-col items-center">
           <div className="w-0.5 h-8 bg-gray-300 rounded-full relative group/line">
-            {!areChildrenCollapsed && (
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity z-30">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setShowInsertMenuForId(showInsertMenuForId === nodeId ? null : nodeId);
-                  }}
-                  className="w-5 h-5 bg-slate-800 text-white rounded-full flex items-center justify-center shadow-sm hover:scale-110 transition-transform"
-                  title="Insert Step Here"
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity z-30">
+              <div ref={insertMenuRef}>
+                <Dropdown
+                  menu={{ items: insertMenuItems, onClick: handleInsertMenuClick }}
+                  trigger={['click']}
+                  open={showInsertMenuForId === nodeId}
+                  onOpenChange={(open) => setShowInsertMenuForId(open ? nodeId : null)}
                 >
-                  <Plus size={12} strokeWidth={3} />
-                </button>
-
-                {showInsertMenuForId === nodeId && (
-                  <div ref={insertMenuRef} className="absolute top-6 left-1/2 -translate-x-1/2 z-50">
-                    <div className="bg-white rounded-lg shadow-xl border border-gray-100 p-2 w-48 animate-in fade-in slide-in-from-top-1">
-                      <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Insert Step</div>
-                      <button onClick={() => onInsert('FILTER', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-orange-400"></div> Filter
-                      </button>
-                      <button onClick={() => onInsert('AGGREGATE', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400"></div> Aggregate
-                      </button>
-                      <button onClick={() => onInsert('JOIN', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
-                        <div className="w-1.5 h-1.5 rounded-full bg-pink-400"></div> Join
-                      </button>
-                      <div className="h-px bg-gray-100 my-1"></div>
-                      <button onClick={() => onInsert('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
-                        <TableIcon size={12} className="text-gray-400" /> Table
-                      </button>
-                      <button onClick={() => onInsert('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
-                        <TableIcon size={12} className="text-gray-400" /> Pivot Table
-                      </button>
-                      <button onClick={() => onInsert('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
-                        <Share2 size={12} className="text-gray-400" /> AI Assistant
-                      </button>
-                    </div>
-                  </div>
-                )}
+                  <Button
+                    shape="circle"
+                    size="small"
+                    icon={<Plus size={12} strokeWidth={3} />}
+                    title="Insert Step Here"
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </Dropdown>
               </div>
-            )}
+            </div>
           </div>
 
-          {areChildrenCollapsed ? (
-            <div className="flex flex-col items-center animate-in fade-in zoom-in-95">
-              <div className="w-0.5 h-4 border-l-2 border-dashed border-gray-300"></div>
-              {children.length > 1 ? (
-                <div className="relative flex flex-col items-center">
-                  <div className="absolute left-full top-0 ml-2 -mt-2 z-20">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); onToggleChildren(nodeId); }}
-                      className="flex items-center gap-1 text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded-full border border-indigo-100 hover:bg-indigo-100 transition-colors whitespace-nowrap shadow-sm"
-                    >
-                      <GitBranch size={10} />
-                      +{children.length - 1} branches
-                    </button>
-                  </div>
-                  <TreeNode
-                    nodeId={children[0].id}
-                    nodes={nodes}
-                    selectedNodeId={selectedNodeId}
-                    chainData={chainData}
-                    onSelect={onSelect}
-                    onAdd={onAdd}
-                    onInsert={onInsert}
-                    onRemove={onRemove}
-                    onToggleExpand={onToggleExpand}
-                    onToggleChildren={onToggleChildren}
-                    onToggleBranch={onToggleBranch}
-                    onDrillDown={onDrillDown}
-                    onTableCellClick={onTableCellClick}
-                    onTableSortChange={onTableSortChange}
-                    onAssistantRequest={onAssistantRequest}
-                    showAddMenuForId={showAddMenuForId}
-                    setShowAddMenuForId={setShowAddMenuForId}
-                    showInsertMenuForId={showInsertMenuForId}
-                    setShowInsertMenuForId={setShowInsertMenuForId}
-                  />
-                </div>
-              ) : (
-                <div
-                  onClick={() => onToggleChildren(nodeId)}
-                  className="bg-gray-100 hover:bg-blue-50 text-gray-500 hover:text-blue-600 px-3 py-1 rounded-full text-xs font-medium border border-gray-200 cursor-pointer shadow-sm flex items-center gap-2"
-                >
-                  <span>+ {hiddenCount} steps</span>
-                </div>
-              )}
-            </div>
+          {children.length === 1 ? (
+            <TreeNode
+              nodeId={children[0].id}
+              nodes={nodes}
+              selectedNodeId={selectedNodeId}
+              chainData={chainData}
+              onSelect={onSelect}
+              onAdd={onAdd}
+              onInsert={onInsert}
+              onRemove={onRemove}
+              onToggleExpand={onToggleExpand}
+              onToggleBranch={onToggleBranch}
+              onDrillDown={onDrillDown}
+              onTableCellClick={onTableCellClick}
+              onTableSortChange={onTableSortChange}
+              onAssistantRequest={onAssistantRequest}
+              showAddMenuForId={showAddMenuForId}
+              setShowAddMenuForId={setShowAddMenuForId}
+              showInsertMenuForId={showInsertMenuForId}
+              setShowInsertMenuForId={setShowInsertMenuForId}
+            />
           ) : (
-            children.length === 1 ? (
-              <TreeNode
-                nodeId={children[0].id}
-                nodes={nodes}
-                selectedNodeId={selectedNodeId}
-                chainData={chainData}
-                onSelect={onSelect}
-                onAdd={onAdd}
-                onInsert={onInsert}
-                onRemove={onRemove}
-                onToggleExpand={onToggleExpand}
-                onToggleChildren={onToggleChildren}
-                onToggleBranch={onToggleBranch}
-                onDrillDown={onDrillDown}
-                onTableCellClick={onTableCellClick}
-                onTableSortChange={onTableSortChange}
-                onAssistantRequest={onAssistantRequest}
-                showAddMenuForId={showAddMenuForId}
-                setShowAddMenuForId={setShowAddMenuForId}
-                showInsertMenuForId={showInsertMenuForId}
-                setShowInsertMenuForId={setShowInsertMenuForId}
-              />
-            ) : (
-              <MultiBranchGroup
-                childrenNodes={children}
-                renderChild={(child) => (
-                  <TreeNode
-                    nodeId={child.id}
-                    nodes={nodes}
-                    selectedNodeId={selectedNodeId}
-                    chainData={chainData}
-                    onSelect={onSelect}
-                    onAdd={onAdd}
-                    onInsert={onInsert}
-                    onRemove={onRemove}
-                    onToggleExpand={onToggleExpand}
-                    onToggleChildren={onToggleChildren}
-                    onToggleBranch={onToggleBranch}
-                    onDrillDown={onDrillDown}
-                    onTableCellClick={onTableCellClick}
-                    onTableSortChange={onTableSortChange}
-                    onAssistantRequest={onAssistantRequest}
-                    showAddMenuForId={showAddMenuForId}
-                    setShowAddMenuForId={setShowAddMenuForId}
-                    showInsertMenuForId={showInsertMenuForId}
-                    setShowInsertMenuForId={setShowInsertMenuForId}
-                  />
-                )}
-              />
-            )
+            <MultiBranchGroup
+              childrenNodes={children}
+              renderChild={(child) => (
+                <TreeNode
+                  nodeId={child.id}
+                  nodes={nodes}
+                  selectedNodeId={selectedNodeId}
+                  chainData={chainData}
+                  onSelect={onSelect}
+                  onAdd={onAdd}
+                  onInsert={onInsert}
+                  onRemove={onRemove}
+                  onToggleExpand={onToggleExpand}
+                  onToggleBranch={onToggleBranch}
+                  onDrillDown={onDrillDown}
+                  onTableCellClick={onTableCellClick}
+                  onTableSortChange={onTableSortChange}
+                  onAssistantRequest={onAssistantRequest}
+                  showAddMenuForId={showAddMenuForId}
+                  setShowAddMenuForId={setShowAddMenuForId}
+                  showInsertMenuForId={showInsertMenuForId}
+                  setShowInsertMenuForId={setShowInsertMenuForId}
+                />
+              )}
+            />
           )}
         </div>
       )}
