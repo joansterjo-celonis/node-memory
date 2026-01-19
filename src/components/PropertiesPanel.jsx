@@ -183,13 +183,13 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
     <div className="h-full flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/50 w-80 animate-in slide-in-from-right duration-300 z-50">
       {/* Header */}
       <div className="p-5 border-b border-gray-100 bg-white">
-        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={6} style={{ width: '100%' }}>
           <Text type="secondary" className="uppercase tracking-wider text-[11px]">
             {node.type === 'COMPONENT' ? node.params.subtype : node.type} Node
           </Text>
           <Input
             size="middle"
-            bordered={false}
+            variant="borderless"
             value={node.title}
             onChange={(e) => handleMetaChange('title', e.target.value)}
             placeholder="Node title"
@@ -232,7 +232,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
 
             {/* File ingestion controls */}
             <Form.Item label="Upload data (CSV or Excel)">
-              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+              <Space orientation="vertical" size="small" style={{ width: '100%' }}>
                 <Upload
                   multiple
                   accept=".csv,.xlsx,.xls"
@@ -298,7 +298,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
             <Card size="small">
               <Space align="start">
                 <Database size={18} className={isSourceError ? 'text-red-500' : 'text-blue-600'} />
-                <Space direction="vertical" size={0}>
+                <Space orientation="vertical" size={0}>
                   <Text strong type={isSourceError ? 'danger' : undefined}>
                     {sourceStatus?.title || 'No dataset loaded'}
                   </Text>
@@ -572,7 +572,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                   />
                 </Form.Item>
                 <Card size="small" title="OpenAI-Compatible Settings">
-                  <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                  <Space orientation="vertical" size="small" style={{ width: '100%' }}>
                     <Form.Item label="API Base URL">
                       <Input
                         value={llmSettings.baseUrl}
@@ -758,7 +758,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                   </>
                 ) : (
                   <>
-                    <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                    <Space orientation="vertical" size="small" style={{ width: '100%' }}>
                       <Checkbox
                         checked={node.params.chartShowGrid !== false}
                         onChange={(e) => handleChange('chartShowGrid', e.target.checked)}
@@ -861,10 +861,10 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                     Add Metric
                   </Button>
                 </Space>
-                <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Space orientation="vertical" size="small" style={{ width: '100%' }}>
                   {kpiMetrics.map((metric, idx) => (
                     <Card key={metric.id || idx} size="small">
-                      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                      <Space orientation="vertical" size="small" style={{ width: '100%' }}>
                         <Space align="center" style={{ width: '100%' }}>
                           <Input
                             placeholder="Label (optional)"

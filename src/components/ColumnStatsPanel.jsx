@@ -114,7 +114,7 @@ const ColumnStatsPanel = ({ node, schema = [], data = [] }) => {
           <Empty description="No columns available yet." />
         )}
         {node && schema.length > 0 && (
-          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="small" style={{ width: '100%' }}>
             <Text type="secondary">Column</Text>
             <Select
               value={selectedColumn}
@@ -155,7 +155,7 @@ const ColumnStatsPanel = ({ node, schema = [], data = [] }) => {
               {stats.topValues.length === 0 ? (
                 <Text type="secondary">No non-blank values to summarize.</Text>
               ) : (
-                <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Space orientation="vertical" size="small" style={{ width: '100%' }}>
                   {stats.topValues.map((item, index) => {
                     const width = stats.maxCount ? (item.count / stats.maxCount) * 100 : 0;
                     return (

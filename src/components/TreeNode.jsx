@@ -65,9 +65,9 @@ const AssistantPanel = React.memo(({ node, schema, onRun }) => {
 
   return (
     <Card size="small" title="AI Assistant">
-      <Space direction="vertical" size="small" style={{ width: '100%' }}>
+      <Space orientation="vertical" size="small" style={{ width: '100%' }}>
         <form onSubmit={handleSubmit}>
-          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+          <Space orientation="vertical" size="small" style={{ width: '100%' }}>
             <Input.TextArea
               autoSize={{ minRows: 3, maxRows: 6 }}
               placeholder="Ask a question… e.g. 'Show total revenue by region'"
@@ -104,7 +104,7 @@ const AssistantPanel = React.memo(({ node, schema, onRun }) => {
         )}
         {planSteps.length > 0 && (
           <Card size="small" title="Planned Steps">
-            <Space direction="vertical" size="small">
+            <Space orientation="vertical" size="small">
               {planSteps.map((step, idx) => (
                 <Text key={`${step}-${idx}`} type="secondary">
                   • {step}
@@ -927,7 +927,7 @@ const TreeNode = ({
                   {kpiMetrics.length === 0 ? (
                     <Empty description="Configure KPI metrics to display." />
                   ) : kpiMetrics.length === 1 ? (
-                    <Space direction="vertical" size="small" style={{ width: '100%', textAlign: 'center' }}>
+                    <Space orientation="vertical" size="small" style={{ width: '100%', textAlign: 'center' }}>
                       <Text type="secondary" className="uppercase text-xs">
                         {formatMetricLabel(kpiMetrics[0])}
                       </Text>
@@ -953,7 +953,7 @@ const TreeNode = ({
               {/* GAUGE VIEW */}
               {node.params.subtype === 'GAUGE' && (
                 <Card size="small" className="h-full">
-                  <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                  <Space orientation="vertical" size="small" style={{ width: '100%' }}>
                     <Space className="w-full justify-between">
                       <Text type="secondary">{node.params.fn}</Text>
                       <Text type="secondary">Target: {node.params.target || 100}</Text>

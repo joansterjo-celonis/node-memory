@@ -1381,7 +1381,7 @@ const AnalysisApp = () => {
                           </Button>
                         }
                       >
-                        <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                        <Space orientation="vertical" size="small" style={{ width: '100%' }}>
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             {updatedLabel}
                           </Text>
