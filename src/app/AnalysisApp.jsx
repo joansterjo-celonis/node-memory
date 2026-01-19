@@ -1,6 +1,7 @@
 // src/app/AnalysisApp.js
 // Main application component: ingestion, history, engine, and layout.
 import React, { useState, useMemo, useEffect } from 'react';
+import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
 import { TreeNode } from '../components/TreeNode';
 import { Layout, Database, FileJson, Settings, Undo, Redo, TableIcon, X } from '../ui/icons';
@@ -1258,6 +1259,10 @@ const AnalysisApp = () => {
     return { title: 'Connected', detail: `${label} loaded with ${tableCount} tables and ${totalRows} rows.` };
   })();
 
+  const selectedResult = getNodeResult(chainData, selectedNodeId);
+  const selectedSchema = selectedResult?.schema || [];
+  const selectedData = selectedResult?.data || [];
+
   // -------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------
@@ -1422,11 +1427,20 @@ const AnalysisApp = () => {
 
       {/* 3. PROPERTIES PANEL */}
       {viewMode === 'canvas' && (
+        <ColumnStatsPanel
+          node={nodes.find(n => n.id === selectedNodeId)}
+          schema={selectedSchema}
+          data={selectedData}
+        />
+      )}
+
+      {/* 4. PROPERTIES PANEL */}
+      {viewMode === 'canvas' && (
         <PropertiesPanel
           node={nodes.find(n => n.id === selectedNodeId)}
           updateNode={updateNodeFromPanel}
-          schema={getNodeResult(chainData, selectedNodeId)?.schema || []}
-          data={getNodeResult(chainData, selectedNodeId)?.data || []}
+          schema={selectedSchema}
+          data={selectedData}
           dataModel={dataModel}
           sourceStatus={sourceStatus}
           onIngest={ingestPendingFiles}
@@ -1435,7 +1449,7 @@ const AnalysisApp = () => {
         />
       )}
 
-      {/* 4. DATA MODEL MODAL */}
+      {/* 5. DATA MODEL MODAL */}
       {showDataModel && (
         <div className="absolute inset-0 z-[60] bg-black/50 flex items-center justify-center p-8 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden">
