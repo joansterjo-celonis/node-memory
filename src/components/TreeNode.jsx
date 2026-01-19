@@ -856,6 +856,7 @@ const TreeNode = ({
                   valueKey="value"
                   seriesColor={node.params.chartColor}
                   showTooltip={node.params.chartShowTooltip}
+                  onSelect={(code) => onDrillDown({ activePayload: [{ payload: { __x: code } }] }, { xAxis: node.params.xAxis }, nodeId)}
                 />
               ) : (
                 <VisxChart

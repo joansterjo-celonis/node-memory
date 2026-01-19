@@ -5,7 +5,7 @@ import { ParentSize } from '@visx/responsive';
 import { Mercator } from '@visx/geo';
 import { feature } from 'topojson-client';
 import { geoMercator } from 'd3-geo';
-import worldData from 'world-atlas/countries-110m.json';
+import worldData from 'world-atlas/countries-50m.json';
 import countries from 'i18n-iso-countries';
 import enLocale from 'i18n-iso-countries/langs/en.json';
 
@@ -55,9 +55,24 @@ const toNumericIso = (value) => {
   return String(numeric).padStart(3, '0');
 };
 
-const WorldMapChart = ({ data, codeKey = 'code', valueKey = 'value', seriesColor, showTooltip = true }) => {
+const WorldMapChart = ({
+  data,
+  codeKey = 'code',
+  valueKey = 'value',
+  seriesColor,
+  showTooltip = true,
+  onSelect
+}) => {
   const containerRef = React.useRef(null);
   const [tooltip, setTooltip] = React.useState({ visible: false, x: 0, y: 0, width: 0, height: 0, datum: null });
+  const [zoom, setZoom] = React.useState(1);
+  const [panOffset, setPanOffset] = React.useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = React.useState(false);
+  const isPanningRef = React.useRef(false);
+  const pointerDownRef = React.useRef(false);
+  const panStartRef = React.useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
+  const dragDistanceRef = React.useRef(0);
+  const pointerIdRef = React.useRef(null);
 
   const world = React.useMemo(() => {
     const collection = feature(worldData, worldData.objects.countries);
@@ -87,6 +102,7 @@ const WorldMapChart = ({ data, codeKey = 'code', valueKey = 'value', seriesColor
   }, [valueById]);
 
   const handlePointerMove = (event, featureItem, value) => {
+    if (isPanningRef.current || pointerDownRef.current) return;
     if (!containerRef.current) return;
     const sourceEvent = event?.nativeEvent || event;
     if (!sourceEvent?.clientX) return;
@@ -102,8 +118,85 @@ const WorldMapChart = ({ data, codeKey = 'code', valueKey = 'value', seriesColor
   };
 
   const handlePointerLeave = () => {
+    isPanningRef.current = false;
+    setIsPanning(false);
+    pointerDownRef.current = false;
+    pointerIdRef.current = null;
     setTooltip((prev) => (prev.visible ? { ...prev, visible: false, datum: null } : prev));
   };
+
+  const handleSelect = (event, featureItem) => {
+    if (event?.preventDefault) event.preventDefault();
+    if (event?.stopPropagation) event.stopPropagation();
+    if (dragDistanceRef.current > 4 || isPanningRef.current) return;
+    if (!onSelect) return;
+    const numericId = featureItem?.id;
+    if (!numericId) return;
+    const alpha3 = countries.numericToAlpha3?.(numericId);
+    if (!alpha3) return;
+    onSelect(alpha3);
+  };
+
+  const handlePanStart = (event) => {
+    if (!containerRef.current) return;
+    const sourceEvent = event?.nativeEvent || event;
+    if (!sourceEvent?.clientX) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const startX = sourceEvent.clientX - rect.left;
+    const startY = sourceEvent.clientY - rect.top;
+    dragDistanceRef.current = 0;
+    isPanningRef.current = false;
+    setIsPanning(false);
+    pointerDownRef.current = true;
+    pointerIdRef.current = event?.pointerId ?? null;
+    panStartRef.current = {
+      x: startX,
+      y: startY,
+      offsetX: panOffset.x,
+      offsetY: panOffset.y
+    };
+  };
+
+  const handlePanMove = (event) => {
+    if (!pointerDownRef.current || !containerRef.current) return;
+    const sourceEvent = event?.nativeEvent || event;
+    if (!sourceEvent?.clientX) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const currentX = sourceEvent.clientX - rect.left;
+    const currentY = sourceEvent.clientY - rect.top;
+    const dx = currentX - panStartRef.current.x;
+    const dy = currentY - panStartRef.current.y;
+    dragDistanceRef.current = Math.max(dragDistanceRef.current, Math.hypot(dx, dy));
+    if (!isPanningRef.current && dragDistanceRef.current > 4) {
+      isPanningRef.current = true;
+      setIsPanning(true);
+      if (event?.currentTarget?.setPointerCapture && event?.pointerId != null) {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
+    }
+    if (!isPanningRef.current) return;
+    setPanOffset({
+      x: panStartRef.current.offsetX + dx,
+      y: panStartRef.current.offsetY + dy
+    });
+  };
+
+  const handlePanEnd = (event) => {
+    pointerDownRef.current = false;
+    if (isPanningRef.current) {
+      isPanningRef.current = false;
+      setIsPanning(false);
+      if (event?.currentTarget?.releasePointerCapture && pointerIdRef.current != null) {
+        event.currentTarget.releasePointerCapture(pointerIdRef.current);
+      }
+      pointerIdRef.current = null;
+    }
+  };
+
+  const clampZoom = (value) => Math.max(1, Math.min(6, value));
+  const zoomIn = () => setZoom((prev) => clampZoom(prev * 1.25));
+  const zoomOut = () => setZoom((prev) => clampZoom(prev / 1.25));
+  const resetZoom = () => setZoom(1);
 
   const baseColor = seriesColor || DEFAULT_MAP_COLOR;
   const range = valueRange.max - valueRange.min;
@@ -117,11 +210,26 @@ const WorldMapChart = ({ data, codeKey = 'code', valueKey = 'value', seriesColor
           const resolvedWidth = Math.max(width, 240);
           const resolvedHeight = Math.max(height, 200);
           const projection = geoMercator().fitSize([resolvedWidth, resolvedHeight], world.geojson);
-          const scale = projection.scale();
+          const baseScale = projection.scale();
           const translate = projection.translate();
+          const scaledScale = baseScale * zoom;
+          const translated = [translate[0] + panOffset.x, translate[1] + panOffset.y];
+          projection.scale(scaledScale).translate(translated);
           return (
-            <svg width={resolvedWidth} height={resolvedHeight}>
-              <Mercator data={world.features} scale={scale} translate={translate}>
+            <svg
+              width={resolvedWidth}
+              height={resolvedHeight}
+              className={isPanning ? 'cursor-grabbing' : 'cursor-grab'}
+              onPointerDown={handlePanStart}
+              onPointerMove={handlePanMove}
+              onPointerUp={handlePanEnd}
+              onPointerLeave={(event) => {
+                handlePanEnd(event);
+                handlePointerLeave();
+              }}
+              onPointerCancel={handlePanEnd}
+            >
+              <Mercator data={world.features} scale={scaledScale} translate={translated}>
                 {({ features, path }) => (
                   <g>
                     {features.map(({ feature: mapFeature }) => {
@@ -141,8 +249,11 @@ const WorldMapChart = ({ data, codeKey = 'code', valueKey = 'value', seriesColor
                           fill={fill}
                           stroke="#ffffff"
                           strokeWidth={0.5}
+                          strokeLinejoin="round"
+                          strokeLinecap="round"
                           onPointerMove={(event) => handlePointerMove(event, mapFeature, value)}
                           onPointerLeave={handlePointerLeave}
+                          onClick={(event) => handleSelect(event, mapFeature)}
                         />
                       );
                     })}
@@ -153,6 +264,29 @@ const WorldMapChart = ({ data, codeKey = 'code', valueKey = 'value', seriesColor
           );
         }}
       </ParentSize>
+      <div className="absolute right-3 top-3 z-10 flex flex-col gap-1 rounded-lg border border-gray-200 bg-white/90 p-1 shadow-sm">
+        <button
+          onClick={zoomIn}
+          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100"
+          title="Zoom in"
+        >
+          +
+        </button>
+        <button
+          onClick={zoomOut}
+          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100"
+          title="Zoom out"
+        >
+          −
+        </button>
+        <button
+          onClick={resetZoom}
+          className="h-7 w-7 rounded text-[10px] font-semibold text-gray-600 hover:bg-gray-100"
+          title="Reset zoom"
+        >
+          1x
+        </button>
+      </div>
       {showTooltip && tooltip.visible && tooltip.datum && (
         <div
           className="pointer-events-none absolute z-20 rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[11px] text-gray-700 shadow-sm"
