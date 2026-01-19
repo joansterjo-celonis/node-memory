@@ -546,9 +546,9 @@ const TreeNode = ({
             ${isActive ? 'border-blue-500 shadow-xl shadow-blue-500/10 ring-1 ring-blue-500 z-20' : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md'}
           `}
           style={{
-            width: 320,
+            width: 640,
             height: isExpanded ? (node.params.subtype === 'AI' ? 'auto' : 320) : 'auto',
-            minWidth: 260,
+            minWidth: 520,
             minHeight: isExpanded ? (node.params.subtype === 'AI' ? 0 : 180) : 0,
             resize: isExpanded && node.params.subtype !== 'AI' ? 'both' : 'none'
           }}
