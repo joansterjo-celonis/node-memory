@@ -356,19 +356,22 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
               <Radio.Group
                 value={localParams.joinType || 'LEFT'}
                 onChange={(e) => handleLocalChange('joinType', e.target.value)}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  gap: 8
+                }}
               >
-                <Space wrap>
-                  {['INNER', 'LEFT', 'RIGHT', 'FULL'].map((t) => (
-                    <Radio.Button key={t} value={t}>
-                      {t} JOIN
-                    </Radio.Button>
-                  ))}
-                </Space>
+                {['INNER', 'LEFT', 'RIGHT', 'FULL'].map((t) => (
+                  <Radio.Button key={t} value={t} style={{ width: '100%', textAlign: 'center' }}>
+                    {t} JOIN
+                  </Radio.Button>
+                ))}
               </Radio.Group>
             </Form.Item>
 
-            <Space size="small" style={{ width: '100%' }}>
-              <Form.Item label="Left Key" style={{ flex: 1, minWidth: 0 }}>
+            <div className="grid grid-cols-2 gap-2">
+              <Form.Item label="Left Key" style={{ marginBottom: 0 }}>
                 <Select
                   value={localParams.leftKey || ''}
                   onChange={(value) => handleLocalChange('leftKey', value)}
@@ -376,11 +379,10 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                     { label: 'Col...', value: '' },
                     ...schema.map((f) => ({ label: f, value: f }))
                   ]}
-                  {...selectDropdownProps}
-                  style={{ width: '100%' }}
+                  {...fullWidthSelect}
                 />
               </Form.Item>
-              <Form.Item label="Right Key" style={{ flex: 1, minWidth: 0 }}>
+              <Form.Item label="Right Key" style={{ marginBottom: 0 }}>
                 <Select
                   value={localParams.rightKey || ''}
                   onChange={(value) => handleLocalChange('rightKey', value)}
@@ -390,11 +392,10 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                       ? Object.keys(dataModel.tables[localParams.rightTable][0] || {}).map((f) => ({ label: f, value: f }))
                       : [])
                   ]}
-                  {...selectDropdownProps}
-                  style={{ width: '100%' }}
+                  {...fullWidthSelect}
                 />
               </Form.Item>
-            </Space>
+            </div>
 
             <Button type="primary" block icon={<Play size={16} />} onClick={commitJoin}>
               Run Join
@@ -430,6 +431,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                     { label: 'Like', value: 'contains' }
                   ]}
                   {...selectDropdownProps}
+                  style={{ width: '100%' }}
                 />
               </Form.Item>
               <Form.Item label="Value" style={{ flex: 2, minWidth: 0 }}>
@@ -437,6 +439,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                   placeholder={node.params.operator === 'in' ? 'Comma-separated values...' : 'Value...'}
                   value={node.params.value || ''}
                   onChange={(e) => handleChange('value', e.target.value)}
+                  style={{ width: '100%' }}
                 />
               </Form.Item>
             </Space>
@@ -460,12 +463,25 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
 
             <Divider />
             <Form.Item label="Aggregation Function">
-              <Segmented
-                options={KPI_FUNCTIONS.map((fn) => ({ label: fn.label, value: fn.value }))}
+              <Radio.Group
                 value={node.params.fn || 'count'}
-                onChange={(value) => handleChange('fn', value)}
-                block
-              />
+                onChange={(e) => handleChange('fn', e.target.value)}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  gap: 8
+                }}
+              >
+                {KPI_FUNCTIONS.map((fn) => (
+                  <Radio.Button
+                    key={fn.value}
+                    value={fn.value}
+                    style={{ width: '100%', textAlign: 'center' }}
+                  >
+                    {fn.label}
+                  </Radio.Button>
+                ))}
+              </Radio.Group>
             </Form.Item>
 
             {requiresMetricField(node.params.fn || 'count') && (
@@ -520,7 +536,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                       { label: 'None', value: '' },
                       ...schema.map((field) => ({ label: field, value: field }))
                     ]}
-                    style={{ flex: 1, minWidth: 0 }}
+                    style={{ flex: 1, minWidth: 0, width: '100%' }}
                     {...selectDropdownProps}
                   />
                   <Select
@@ -533,7 +549,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                       { label: 'Ascending', value: 'asc' },
                       { label: 'Descending', value: 'desc' }
                     ]}
-                    style={{ flex: 1, minWidth: 0 }}
+                    style={{ flex: 1, minWidth: 0, width: '100%' }}
                   />
                 </Space>
               </Form.Item>
@@ -727,7 +743,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                       />
                     </Form.Item>
                     <Form.Item label="Map Color">
-                      <Space size="small">
+                      <Space size="small" style={{ width: '100%' }}>
                         <ColorPicker
                           value={node.params.chartColor || '#2563eb'}
                           onChange={(color) => handleChange('chartColor', color.toHexString())}
@@ -735,6 +751,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                         <Input
                           value={node.params.chartColor || '#2563eb'}
                           onChange={(e) => handleChange('chartColor', e.target.value)}
+                          style={{ flex: 1, minWidth: 0 }}
                         />
                       </Space>
                     </Form.Item>
@@ -776,6 +793,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                           { label: 'Monotone', value: 'monotone' },
                           { label: 'Step', value: 'step' }
                         ]}
+                        {...fullWidthSelect}
                       />
                     </Form.Item>
                     <Form.Item label="Orientation">
@@ -787,6 +805,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                           { label: 'Vertical (columns)', value: 'vertical' },
                           { label: 'Horizontal (bars)', value: 'horizontal' }
                         ]}
+                        {...fullWidthSelect}
                       />
                       {node.params.chartType !== 'bar' && (
                         <Text type="secondary" className="text-xs">
@@ -816,7 +835,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                       )}
                     </Form.Item>
                     <Form.Item label="Series Color">
-                      <Space size="small">
+                      <Space size="small" style={{ width: '100%' }}>
                         <ColorPicker
                           value={node.params.chartColor || '#2563eb'}
                           onChange={(color) => handleChange('chartColor', color.toHexString())}
@@ -824,6 +843,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                         <Input
                           value={node.params.chartColor || '#2563eb'}
                           onChange={(e) => handleChange('chartColor', e.target.value)}
+                          style={{ flex: 1, minWidth: 0 }}
                         />
                       </Space>
                     </Form.Item>
@@ -845,11 +865,12 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                   {kpiMetrics.map((metric, idx) => (
                     <Card key={metric.id || idx} size="small">
                       <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                        <Space align="center">
+                        <Space align="center" style={{ width: '100%' }}>
                           <Input
                             placeholder="Label (optional)"
                             value={metric.label || ''}
                             onChange={(e) => updateKpiMetric(idx, { label: e.target.value })}
+                            style={{ flex: 1, minWidth: 0 }}
                           />
                           {kpiMetrics.length > 1 && (
                             <Button
@@ -865,7 +886,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                             value={metric.fn || 'count'}
                             onChange={(value) => updateKpiMetric(idx, { fn: value })}
                             options={KPI_FUNCTIONS.map((fn) => ({ label: fn.label, value: fn.value }))}
-                            style={{ flex: 1 }}
+                            style={{ flex: 1, minWidth: 0, width: '100%' }}
                             {...selectDropdownProps}
                           />
                           {requiresMetricField(metric.fn || 'count') && (
@@ -876,7 +897,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                                 { label: 'Select Field...', value: '' },
                                 ...schema.map((f) => ({ label: f, value: f }))
                               ]}
-                              style={{ flex: 1 }}
+                              style={{ flex: 1, minWidth: 0, width: '100%' }}
                               {...selectDropdownProps}
                             />
                           )}
