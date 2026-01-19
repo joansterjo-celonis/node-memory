@@ -206,6 +206,21 @@ const AnalysisApp = () => {
     setSelectedFiles([...pendingFiles]);
   };
 
+  const clearIngestedData = () => {
+    setIsLoadingFile(false);
+    setDataModel({ tables: {}, order: [] });
+    setRawDataName(null);
+    setLoadError(null);
+    setSelectedFiles([]);
+    setPendingFiles([]);
+    setShowDataModel(false);
+
+    const sourceNode = nodes.find(node => node.id === 'node-start');
+    if (sourceNode) {
+      updateNode('node-start', { ...sourceNode.params, table: null, __files: [] });
+    }
+  };
+
   // -------------------------------------------------------------------
   // Tree engine (process the graph of nodes)
   // -------------------------------------------------------------------
@@ -564,7 +579,7 @@ const AnalysisApp = () => {
       return { baseUrl: '', model: '', apiKey: '' };
     }
     try {
-      const raw = window.localStorage.getItem('figma-quiz-llm-settings');
+      const raw = window.localStorage.getItem('node-memory-llm-settings');
       if (!raw) return { baseUrl: '', model: '', apiKey: '' };
       const parsed = JSON.parse(raw);
       return {
@@ -1316,6 +1331,7 @@ const AnalysisApp = () => {
           dataModel={dataModel}
           sourceStatus={sourceStatus}
           onIngest={ingestPendingFiles}
+          onClearData={clearIngestedData}
           onShowDataModel={() => setShowDataModel(true)}
         />
       )}

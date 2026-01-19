@@ -23,7 +23,7 @@ const DEFAULT_LLM_SETTINGS = {
 const readStoredLlmSettings = () => {
   if (typeof window === 'undefined' || !window.localStorage) return { ...DEFAULT_LLM_SETTINGS };
   try {
-    const raw = window.localStorage.getItem('figma-quiz-llm-settings');
+    const raw = window.localStorage.getItem('node-memory-llm-settings');
     if (!raw) return { ...DEFAULT_LLM_SETTINGS };
     const parsed = JSON.parse(raw);
     return { ...DEFAULT_LLM_SETTINGS, ...parsed };
@@ -32,7 +32,7 @@ const readStoredLlmSettings = () => {
   }
 };
 
-const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, onIngest, onShowDataModel }) => {
+const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, onIngest, onClearData, onShowDataModel }) => {
   // Local staging for JOIN config (so user can edit multiple fields then commit).
   const [localParams, setLocalParams] = useState({});
   const [llmSettings, setLlmSettings] = useState(readStoredLlmSettings);
@@ -43,7 +43,7 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.localStorage) return;
-    window.localStorage.setItem('figma-quiz-llm-settings', JSON.stringify(llmSettings));
+    window.localStorage.setItem('node-memory-llm-settings', JSON.stringify(llmSettings));
   }, [llmSettings]);
 
   if (!node) {
@@ -232,6 +232,15 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
               </div>
               {sourceStatus?.loading && <div className="progress-bar" />}
             </div>
+
+            {dataModel.order.length > 0 && (
+              <button
+                onClick={() => onClearData && onClearData()}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-colors border border-red-200 text-red-600 hover:bg-red-50"
+              >
+                Clear data
+              </button>
+            )}
 
             <button
               onClick={() => onShowDataModel && onShowDataModel()}
