@@ -291,6 +291,16 @@ const AnalysisApp = () => {
         const rightTablePrefix = node.params.rightTable;
         const joinedData = [];
         const matchedRightIndices = new Set();
+        const joinType = node.params.joinType || 'LEFT';
+
+        const normalizeJoinValue = (value) => {
+          if (value === undefined || value === null) return null;
+          if (typeof value === 'string') {
+            const trimmed = value.trim();
+            return trimmed === '' ? null : trimmed;
+          }
+          return String(value);
+        };
 
         const prefixColumns = (row, prefix) => {
           return Object.entries(row).reduce((acc, [key, val]) => {
@@ -299,24 +309,32 @@ const AnalysisApp = () => {
           }, {});
         };
 
+        const rightLookup = new Map();
+        rightTableData.forEach((rightRow, rIdx) => {
+          const key = normalizeJoinValue(rightRow[node.params.rightKey]);
+          if (key === null) return;
+          if (!rightLookup.has(key)) rightLookup.set(key, []);
+          rightLookup.get(key).push({ row: rightRow, index: rIdx });
+        });
+
         currentData.forEach(leftRow => {
-          const leftVal = leftRow[node.params.leftKey];
+          const leftKey = normalizeJoinValue(leftRow[node.params.leftKey]);
           let matchesFound = false;
-          if (leftVal !== undefined && leftVal !== null && leftVal !== '') {
-            rightTableData.forEach((rightRow, rIdx) => {
-              if (String(rightRow[node.params.rightKey]) === String(leftVal)) {
-                matchesFound = true;
-                matchedRightIndices.add(rIdx);
-                joinedData.push({ ...leftRow, ...prefixColumns(rightRow, rightTablePrefix) });
-              }
+
+          if (leftKey !== null && rightLookup.has(leftKey)) {
+            matchesFound = true;
+            rightLookup.get(leftKey).forEach(({ row, index }) => {
+              matchedRightIndices.add(index);
+              joinedData.push({ ...leftRow, ...prefixColumns(row, rightTablePrefix) });
             });
           }
-          if (!matchesFound && ['LEFT', 'FULL'].includes(node.params.joinType || 'LEFT')) {
+
+          if (!matchesFound && ['LEFT', 'FULL'].includes(joinType)) {
             joinedData.push({ ...leftRow });
           }
         });
 
-        if (['RIGHT', 'FULL'].includes(node.params.joinType)) {
+        if (['RIGHT', 'FULL'].includes(joinType)) {
           rightTableData.forEach((rightRow, rIdx) => {
             if (!matchedRightIndices.has(rIdx)) {
               joinedData.push({ ...prefixColumns(rightRow, rightTablePrefix) });
@@ -1162,24 +1180,26 @@ const AnalysisApp = () => {
   return (
     <div className="flex h-screen w-full bg-slate-50 font-sans text-slate-900 overflow-hidden">
       {/* 1. LEFT SIDEBAR */}
-      <div className="w-16 flex-shrink-0 bg-white flex flex-col items-center py-6 gap-6 text-slate-500 border-r border-gray-200 z-50">
-        <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-blue-200/60 mb-4 ring-1 ring-white/60">
-          <Layout size={20} />
+      <div className="w-16 flex-shrink-0 bg-white flex flex-col items-center text-slate-500 border-r border-gray-200 z-50">
+        <div className="w-full h-16 bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-sm">
+          <Layout size={22} />
         </div>
-        <div
-          onClick={() => {
-            setShowDataModel(false);
-            setViewMode('landing');
-          }}
-          className={`p-2.5 rounded-lg cursor-pointer transition-colors relative group ${
-            viewMode === 'landing' ? 'bg-slate-100 text-slate-900' : 'hover:bg-slate-100'
-          }`}
-          title="Explorations"
-        >
-          <FileJson size={20} />
-        </div>
-        <div className="mt-auto p-2.5 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors relative group">
-          <Settings size={20} />
+        <div className="flex-1 w-full flex flex-col items-center py-6 gap-6">
+          <div
+            onClick={() => {
+              setShowDataModel(false);
+              setViewMode('landing');
+            }}
+            className={`p-2.5 rounded-lg cursor-pointer transition-colors relative group ${
+              viewMode === 'landing' ? 'bg-slate-100 text-slate-900' : 'hover:bg-slate-100'
+            }`}
+            title="Explorations"
+          >
+            <FileJson size={20} />
+          </div>
+          <div className="mt-auto p-2.5 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors relative group">
+            <Settings size={20} />
+          </div>
         </div>
       </div>
 
