@@ -249,6 +249,16 @@ const AnalysisApp = () => {
           if (node.params.operator === 'gte') return Number(val) >= Number(filterVal);
           if (node.params.operator === 'lte') return Number(val) <= Number(filterVal);
           if (node.params.operator === 'contains') return String(val).toLowerCase().includes(String(filterVal).toLowerCase());
+          if (node.params.operator === 'in') {
+            const list = Array.isArray(filterVal)
+              ? filterVal.map(value => String(value).trim()).filter(Boolean)
+              : String(filterVal)
+                .split(',')
+                .map(value => value.trim())
+                .filter(Boolean);
+            if (list.length === 0) return true;
+            return list.some(value => String(val) == value);
+          }
           return true;
         });
       } else if (node.type === 'AGGREGATE' && node.params.groupBy) {
@@ -377,6 +387,10 @@ const AnalysisApp = () => {
     operator: 'equals',
     fn: 'count',
     chartType: 'bar',
+    chartAggFn: 'sum',
+    chartBarGap: 0.2,
+    chartColor: '#2563eb',
+    chartOrientation: 'vertical',
     chartShowGrid: true,
     chartShowTooltip: true,
     chartShowPoints: false,
@@ -482,12 +496,10 @@ const AnalysisApp = () => {
     setHistory(newHistory);
   };
 
-  const handleChartDrillDown = (data, xAxisField, parentId) => {
-    if (!data || !data.activePayload) return;
-    addNode('FILTER', parentId);
-  };
+  const buildInValue = (values) => values.map((value) => String(value)).join(', ');
 
-  const handleTableCellClick = (value, field, parentId) => {
+  const addFilterNode = ({ parentId, field, operator = 'equals', value }) => {
+    if (!parentId || !field) return;
     const newId = `node-${Date.now()}`;
     const newNode = {
       id: newId,
@@ -495,12 +507,29 @@ const AnalysisApp = () => {
       type: 'FILTER',
       title: 'Filter Data',
       isExpanded: true,
-      params: { field, operator: 'equals', value }
+      params: { field, operator, value }
     };
 
     const updatedNodes = nodes.map(n => n.id === parentId ? { ...n, areChildrenCollapsed: false } : n);
     updateNodes([...updatedNodes, newNode]);
     setSelectedNodeId(newId);
+  };
+
+  const handleChartDrillDown = (data, chartMeta, parentId) => {
+    if (!data || !parentId) return;
+    const xAxisField = chartMeta?.xAxis;
+    if (!xAxisField) return;
+    const payload = data.activePayload?.[0]?.payload;
+    const clickedValue = payload?.__x;
+    const selectionValues = data.selection?.values || (clickedValue !== undefined ? [clickedValue] : []);
+    if (!selectionValues.length) return;
+    const operator = selectionValues.length > 1 ? 'in' : 'equals';
+    const value = operator === 'in' ? buildInValue(selectionValues) : selectionValues[0];
+    addFilterNode({ parentId, field: xAxisField, operator, value });
+  };
+
+  const handleTableCellClick = (value, field, parentId) => {
+    addFilterNode({ parentId, field, operator: 'equals', value });
   };
 
   const handleTableSortChange = (nodeId, sortBy, sortDirection) => {
@@ -1404,6 +1433,7 @@ const AnalysisApp = () => {
           node={nodes.find(n => n.id === selectedNodeId)}
           updateNode={updateNodeFromPanel}
           schema={getNodeResult(chainData, selectedNodeId)?.schema || []}
+          data={getNodeResult(chainData, selectedNodeId)?.data || []}
           dataModel={dataModel}
           sourceStatus={sourceStatus}
           onIngest={ingestPendingFiles}

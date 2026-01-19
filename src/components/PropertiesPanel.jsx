@@ -12,6 +12,11 @@ const KPI_FUNCTIONS = [
   { value: 'max', label: 'Max' }
 ];
 
+const CHART_AGG_FUNCTIONS = [
+  { value: 'none', label: 'None (raw values)' },
+  ...KPI_FUNCTIONS
+];
+
 const requiresMetricField = (fn) => ['sum', 'avg', 'min', 'max', 'count_distinct'].includes(fn);
 const DEFAULT_LLM_SETTINGS = {
   baseUrl: 'https://api.openai.com/v1',
@@ -31,7 +36,7 @@ const readStoredLlmSettings = () => {
   }
 };
 
-const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, onIngest, onClearData, onShowDataModel }) => {
+const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourceStatus, onIngest, onClearData, onShowDataModel }) => {
   // Local staging for JOIN config (so user can edit multiple fields then commit).
   const [localParams, setLocalParams] = useState({});
   const [llmSettings, setLlmSettings] = useState(readStoredLlmSettings);
@@ -44,6 +49,22 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
     if (typeof window === 'undefined' || !window.localStorage) return;
     window.localStorage.setItem('node-memory-llm-settings', JSON.stringify(llmSettings));
   }, [llmSettings]);
+
+  const numericFields = React.useMemo(() => {
+    if (!Array.isArray(data) || data.length === 0) return [];
+    const sample = data.slice(0, 50);
+    return schema.filter((field) => sample.some((row) => {
+      const raw = row?.[field];
+      if (raw === null || raw === undefined || raw === '') return false;
+      const num = Number(raw);
+      return !Number.isNaN(num);
+    }));
+  }, [data, schema]);
+
+  const categoricalFields = React.useMemo(
+    () => schema.filter((field) => !numericFields.includes(field)),
+    [schema, numericFields]
+  );
 
   if (!node) {
     return (
@@ -363,6 +384,7 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
                   <option value="not_equals">!=</option>
                   <option value="gt">&gt;</option>
                   <option value="lt">&lt;</option>
+                  <option value="in">In list</option>
                   <option value="contains">Like</option>
                 </select>
               </div>
@@ -371,7 +393,7 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
                 <input
                   type="text"
                   className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                  placeholder="Value..."
+                  placeholder={node.params.operator === 'in' ? 'Comma-separated values...' : 'Value...'}
                   value={node.params.value || ''}
                   onChange={(e) => handleChange('value', e.target.value)}
                 />
@@ -661,7 +683,19 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
                     onChange={(e) => handleChange('xAxis', e.target.value)}
                   >
                     <option value="">Auto Select</option>
-                    {schema.map(f => <option key={f} value={f}>{f}</option>)}
+                    {categoricalFields.length > 0 && (
+                      <optgroup label="Categorical">
+                        {categoricalFields.map(f => <option key={f} value={f}>{f}</option>)}
+                      </optgroup>
+                    )}
+                    {numericFields.length > 0 && (
+                      <optgroup label="Numeric">
+                        {numericFields.map(f => <option key={f} value={f}>{f}</option>)}
+                      </optgroup>
+                    )}
+                    {categoricalFields.length === 0 && numericFields.length === 0 && (
+                      schema.map(f => <option key={f} value={f}>{f}</option>)
+                    )}
                   </select>
                 </div>
                 <div className="space-y-1">
@@ -672,8 +706,26 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
                     onChange={(e) => handleChange('yAxis', e.target.value)}
                   >
                     <option value="">Auto Select</option>
-                    {schema.map(f => <option key={f} value={f}>{f}</option>)}
+                    {(numericFields.length > 0 ? numericFields : schema).map(f => (
+                      <option key={f} value={f}>{f}</option>
+                    ))}
                   </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-semibold text-gray-700 block">Y Axis Aggregation</label>
+                  <select
+                    className="w-full p-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                    value={node.params.chartAggFn ?? 'none'}
+                    onChange={(e) => handleChange('chartAggFn', e.target.value)}
+                    disabled={node.params.chartType === 'scatter'}
+                  >
+                    {CHART_AGG_FUNCTIONS.map(fn => (
+                      <option key={fn.value} value={fn.value}>{fn.label}</option>
+                    ))}
+                  </select>
+                  {node.params.chartType === 'scatter' && (
+                    <p className="text-[11px] text-gray-400">Aggregation is not applied to scatter charts.</p>
+                  )}
                 </div>
               </div>
             )}
@@ -726,6 +778,59 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
                     <option value="monotone">Monotone</option>
                     <option value="step">Step</option>
                   </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-gray-500 block">Orientation</label>
+                  <select
+                    className="w-full p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                    value={node.params.chartOrientation || 'vertical'}
+                    onChange={(e) => handleChange('chartOrientation', e.target.value)}
+                    disabled={node.params.chartType !== 'bar'}
+                  >
+                    <option value="vertical">Vertical (columns)</option>
+                    <option value="horizontal">Horizontal (bars)</option>
+                  </select>
+                  {node.params.chartType !== 'bar' && (
+                    <p className="text-[11px] text-gray-400">Orientation applies to bar charts.</p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-gray-500 block">Bar Gap</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min="0"
+                      max="0.8"
+                      step="0.05"
+                      className="w-full"
+                      value={node.params.chartBarGap ?? 0.2}
+                      onChange={(e) => handleChange('chartBarGap', Number(e.target.value))}
+                      disabled={node.params.chartType !== 'bar'}
+                    />
+                    <span className="text-[10px] text-gray-400 w-10 text-right">
+                      {(node.params.chartBarGap ?? 0.2).toFixed(2)}
+                    </span>
+                  </div>
+                  {node.params.chartType !== 'bar' && (
+                    <p className="text-[11px] text-gray-400">Bar gap applies to bar charts.</p>
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-gray-500 block">Series Color</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      className="h-8 w-12 border border-gray-200 rounded"
+                      value={node.params.chartColor || '#2563eb'}
+                      onChange={(e) => handleChange('chartColor', e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      className="flex-1 p-2 border border-gray-200 rounded text-xs focus:ring-1 focus:ring-blue-500 outline-none"
+                      value={node.params.chartColor || '#2563eb'}
+                      onChange={(e) => handleChange('chartColor', e.target.value)}
+                    />
+                  </div>
                 </div>
               </div>
             )}

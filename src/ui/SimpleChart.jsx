@@ -34,7 +34,10 @@ const VisxChart = ({
   showPoints = false,
   curveType = 'linear',
   stacked = false,
-  showTooltip = true
+  showTooltip = true,
+  orientation = 'vertical',
+  barGap = 0.2,
+  seriesColor
 }) => {
   if (!xAxis || !yAxis || !data || data.length === 0) {
     return (
@@ -64,17 +67,71 @@ const VisxChart = ({
     );
   }
 
+  const isHorizontal = orientation === 'horizontal' && type === 'bar';
   const sample = prepared.slice(0, 12);
   const numericCount = sample.filter((row) => Number.isFinite(Number(row.__x))).length;
-  const isNumericX = numericCount >= Math.ceil(sample.length / 2);
-  const xAccessor = (row) => (isNumericX ? Number(row.__x) : String(row.__x));
-  const yAccessor = (row) => row.__y;
+  const isNumericX = !isHorizontal && numericCount >= Math.ceil(sample.length / 2);
+  const xAccessor = (row) => (
+    isHorizontal ? row.__y : (isNumericX ? Number(row.__x) : String(row.__x))
+  );
+  const yAccessor = (row) => (isHorizontal ? String(row.__x) : row.__y);
   const curve = curveMap[curveType] || curveLinear;
+  const normalizedGap = Number.isFinite(barGap) ? Math.min(Math.max(barGap, 0), 0.9) : 0.2;
+  const bandScale = {
+    type: 'band',
+    paddingInner: normalizedGap,
+    paddingOuter: Math.min(0.5, normalizedGap / 2)
+  };
+  const xScale = isHorizontal
+    ? { type: 'linear', nice: true, zero: true }
+    : { type: isNumericX ? 'linear' : 'band', ...(isNumericX ? {} : bandScale) };
+  const yScale = isHorizontal
+    ? bandScale
+    : { type: 'linear', nice: true, zero: true };
+  const gridColumns = isHorizontal ? true : !isNumericX;
+  const gridRows = !isHorizontal;
+  const colorAccessor = seriesColor ? (() => seriesColor) : undefined;
+  const categoryValues = React.useMemo(() => {
+    const values = [];
+    const seen = new Set();
+    prepared.forEach((row) => {
+      const key = row.__x;
+      if (seen.has(key)) return;
+      seen.add(key);
+      values.push(key);
+    });
+    return values;
+  }, [prepared]);
+  const dragStartRef = React.useRef(null);
+
+  const handlePointerDown = (event) => {
+    const datum = resolveDatum(event);
+    if (!datum) return;
+    dragStartRef.current = datum.__x;
+  };
+
+  const handlePointerOut = () => {
+    dragStartRef.current = null;
+  };
 
   const handlePointerUp = (event) => {
     const datum = resolveDatum(event);
     if (!datum || !onClick) return;
-    onClick({ activePayload: [{ payload: datum }] });
+    const startValue = dragStartRef.current;
+    const endValue = datum.__x;
+    dragStartRef.current = null;
+    let selection = null;
+    if (startValue !== undefined && startValue !== null && endValue !== undefined && endValue !== null) {
+      if (startValue !== endValue) {
+        const startIndex = categoryValues.findIndex((value) => String(value) === String(startValue));
+        const endIndex = categoryValues.findIndex((value) => String(value) === String(endValue));
+        if (startIndex !== -1 && endIndex !== -1) {
+          const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+          selection = { values: categoryValues.slice(from, to + 1) };
+        }
+      }
+    }
+    onClick({ activePayload: [{ payload: datum }], selection });
   };
 
   return (
@@ -88,11 +145,11 @@ const VisxChart = ({
               width={resolvedWidth}
               height={resolvedHeight}
               margin={{ top: 16, right: 16, bottom: 32, left: 44 }}
-              xScale={{ type: isNumericX ? 'linear' : 'band' }}
-              yScale={{ type: 'linear', nice: true, zero: true }}
+              xScale={xScale}
+              yScale={yScale}
               stacked={stacked}
             >
-              {showGrid && <Grid columns={!isNumericX} rows />}
+              {showGrid && <Grid columns={gridColumns} rows={gridRows} />}
               <Axis orientation="bottom" />
               <Axis orientation="left" />
 
@@ -102,6 +159,9 @@ const VisxChart = ({
                   data={prepared}
                   xAccessor={xAccessor}
                   yAccessor={yAccessor}
+                  colorAccessor={colorAccessor}
+                  onPointerDown={handlePointerDown}
+                  onPointerOut={handlePointerOut}
                   onPointerUp={handlePointerUp}
                 />
               )}
@@ -112,6 +172,9 @@ const VisxChart = ({
                   xAccessor={xAccessor}
                   yAccessor={yAccessor}
                   curve={curve}
+                  colorAccessor={colorAccessor}
+                  onPointerDown={handlePointerDown}
+                  onPointerOut={handlePointerOut}
                   onPointerUp={handlePointerUp}
                 />
               )}
@@ -122,6 +185,9 @@ const VisxChart = ({
                   xAccessor={xAccessor}
                   yAccessor={yAccessor}
                   curve={curve}
+                  colorAccessor={colorAccessor}
+                  onPointerDown={handlePointerDown}
+                  onPointerOut={handlePointerOut}
                   onPointerUp={handlePointerUp}
                 />
               )}
@@ -131,6 +197,9 @@ const VisxChart = ({
                   data={prepared}
                   xAccessor={xAccessor}
                   yAccessor={yAccessor}
+                  colorAccessor={colorAccessor}
+                  onPointerDown={handlePointerDown}
+                  onPointerOut={handlePointerOut}
                   onPointerUp={handlePointerUp}
                 />
               )}
@@ -140,6 +209,9 @@ const VisxChart = ({
                   data={prepared}
                   xAccessor={xAccessor}
                   yAccessor={yAccessor}
+                  colorAccessor={colorAccessor}
+                  onPointerDown={handlePointerDown}
+                  onPointerOut={handlePointerOut}
                   onPointerUp={handlePointerUp}
                 />
               )}

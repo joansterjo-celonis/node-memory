@@ -261,7 +261,10 @@ const TablePreview = React.memo(({ data, columns, onCellClick, onSortChange, nod
                   key={col}
                   role="button"
                   aria-sort={ariaSort}
-                  onClick={() => handleHeaderSort(col)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleHeaderSort(col);
+                  }}
                   className="p-1 bg-gray-50 text-gray-600 font-medium whitespace-nowrap cursor-pointer hover:text-blue-600"
                   title={`Sort by ${col}`}
                 >
@@ -573,6 +576,44 @@ const TreeNode = ({
     result
   ]);
 
+  const chartType = node.params.chartType || 'bar';
+  const chartAggFn = node.params.chartAggFn || 'none';
+  const chartYAxis = (chartType !== 'scatter' && chartAggFn === 'count' && !node.params.yAxis)
+    ? 'Record Count'
+    : node.params.yAxis;
+
+  const chartData = React.useMemo(() => {
+    if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'CHART') return [];
+    const xField = node.params.xAxis;
+    const yField = chartYAxis;
+    if (!xField || !yField) return result.data;
+    const aggFn = chartAggFn;
+    const shouldAggregate = chartType !== 'scatter' && aggFn !== 'none';
+    if (!shouldAggregate) return result.data;
+
+    const groups = new Map();
+    result.data.forEach((row) => {
+      const key = row?.[xField];
+      if (key === null || key === undefined || key === '') return;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    });
+
+    return Array.from(groups.entries()).map(([key, rows]) => ({
+      [xField]: key,
+      [yField]: calculateMetric(rows, yField, aggFn)
+    }));
+  }, [
+    result,
+    node.type,
+    node.params.subtype,
+    chartType,
+    chartAggFn,
+    chartYAxis,
+    node.params.xAxis,
+    node.params.yAxis
+  ]);
+
   const hiddenCount = areChildrenCollapsed ? countDescendants(nodes, nodeId) : 0;
 
   // Compact collapsed branch representation.
@@ -782,16 +823,19 @@ const TreeNode = ({
               {/* CHART VIEW */}
               {node.params.subtype === 'CHART' && (
                 <VisxChart
-                  data={result.data}
+                  data={chartData}
                   xAxis={node.params.xAxis}
-                  yAxis={node.params.yAxis}
-                  type={node.params.chartType || 'bar'}
+                  yAxis={chartYAxis}
+                  type={chartType}
                   showGrid={node.params.chartShowGrid}
                   showPoints={node.params.chartShowPoints}
                   curveType={node.params.chartCurve}
                   stacked={node.params.chartStacked}
                   showTooltip={node.params.chartShowTooltip}
-                  onClick={(d) => onDrillDown(d, node.params.xAxis, nodeId)}
+                  orientation={node.params.chartOrientation || 'vertical'}
+                  barGap={node.params.chartBarGap}
+                  seriesColor={node.params.chartColor}
+                  onClick={(d) => onDrillDown(d, { xAxis: node.params.xAxis }, nodeId)}
                 />
               )}
 
@@ -978,6 +1022,7 @@ const TreeNode = ({
                     onToggleBranch={onToggleBranch}
                     onDrillDown={onDrillDown}
                     onTableCellClick={onTableCellClick}
+                    onTableSortChange={onTableSortChange}
                     onAssistantRequest={onAssistantRequest}
                     showAddMenuForId={showAddMenuForId}
                     setShowAddMenuForId={setShowAddMenuForId}
@@ -1010,6 +1055,7 @@ const TreeNode = ({
                 onToggleBranch={onToggleBranch}
                 onDrillDown={onDrillDown}
                 onTableCellClick={onTableCellClick}
+                onTableSortChange={onTableSortChange}
                 onAssistantRequest={onAssistantRequest}
                 showAddMenuForId={showAddMenuForId}
                 setShowAddMenuForId={setShowAddMenuForId}
@@ -1034,6 +1080,7 @@ const TreeNode = ({
                     onToggleBranch={onToggleBranch}
                     onDrillDown={onDrillDown}
                     onTableCellClick={onTableCellClick}
+                    onTableSortChange={onTableSortChange}
                     onAssistantRequest={onAssistantRequest}
                     showAddMenuForId={showAddMenuForId}
                     setShowAddMenuForId={setShowAddMenuForId}
