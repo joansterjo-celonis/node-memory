@@ -2,7 +2,7 @@
 // Visx chart renderer for richer visualizations.
 import React from 'react';
 import { ParentSize } from '@visx/responsive';
-import { XYChart, Axis, Grid, Tooltip, BarSeries, LineSeries, AreaSeries, GlyphSeries } from '@visx/xychart';
+import { XYChart, Axis, Grid, BarSeries, LineSeries, AreaSeries, GlyphSeries } from '@visx/xychart';
 import { curveLinear, curveMonotoneX, curveStep } from '@visx/curve';
 
 const curveMap = {
@@ -10,6 +10,9 @@ const curveMap = {
   monotone: curveMonotoneX,
   step: curveStep
 };
+
+const DEFAULT_SERIES_COLOR = '#2563eb';
+const LABEL_FONT_SIZE = 10;
 
 const resolveDatum = (event) => {
   if (!event) return null;
@@ -19,9 +22,31 @@ const resolveDatum = (event) => {
   return event;
 };
 
+const resolvePointerEvent = (event) =>
+  event?.event || event?.evt || event?.nativeEvent || event;
+
 const formatValue = (value) => {
   if (value === null || value === undefined || value === '') return '-';
   return value;
+};
+
+const estimateLabelWidth = (label) => String(label).length * (LABEL_FONT_SIZE * 0.6);
+
+const hexToRgb = (color) => {
+  if (!color || typeof color !== 'string') return null;
+  const hex = color.replace('#', '').trim();
+  if (hex.length !== 6) return null;
+  const r = Number.parseInt(hex.slice(0, 2), 16);
+  const g = Number.parseInt(hex.slice(2, 4), 16);
+  const b = Number.parseInt(hex.slice(4, 6), 16);
+  if ([r, g, b].some((val) => Number.isNaN(val))) return null;
+  return { r, g, b };
+};
+
+const toRgba = (color, alpha) => {
+  const rgb = hexToRgb(color);
+  if (!rgb) return color;
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 };
 
 const VisxChart = ({
@@ -67,6 +92,10 @@ const VisxChart = ({
     );
   }
 
+  const containerRef = React.useRef(null);
+  const [tooltip, setTooltip] = React.useState({ visible: false, x: 0, y: 0, width: 0, height: 0, datum: null });
+  const [dragSelection, setDragSelection] = React.useState([]);
+  const dragEndTimer = React.useRef(null);
   const isHorizontal = orientation === 'horizontal' && type === 'bar';
   const sample = prepared.slice(0, 12);
   const numericCount = sample.filter((row) => Number.isFinite(Number(row.__x))).length;
@@ -90,7 +119,6 @@ const VisxChart = ({
     : { type: 'linear', nice: true, zero: true };
   const gridColumns = isHorizontal ? true : !isNumericX;
   const gridRows = !isHorizontal;
-  const colorAccessor = seriesColor ? (() => seriesColor) : undefined;
   const categoryValues = React.useMemo(() => {
     const values = [];
     const seen = new Set();
@@ -104,14 +132,63 @@ const VisxChart = ({
   }, [prepared]);
   const dragStartRef = React.useRef(null);
 
+  const clearDragSelection = React.useCallback(() => {
+    if (dragEndTimer.current) {
+      clearTimeout(dragEndTimer.current);
+      dragEndTimer.current = null;
+    }
+    setDragSelection([]);
+  }, []);
+
+  const hideTooltip = React.useCallback(() => {
+    setTooltip((prev) => (prev.visible ? { ...prev, visible: false, datum: null } : prev));
+  }, []);
+
+  const updateTooltip = React.useCallback((event, datum) => {
+    if (!datum) return;
+    const sourceEvent = resolvePointerEvent(event);
+    if (!sourceEvent || !containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const nextX = sourceEvent.clientX - rect.left;
+    const nextY = sourceEvent.clientY - rect.top;
+    if (Number.isNaN(nextX) || Number.isNaN(nextY)) return;
+    setTooltip({ visible: true, x: nextX, y: nextY, width: rect.width, height: rect.height, datum });
+  }, []);
+
+  const getSelectionRange = React.useCallback((startValue, endValue) => {
+    if (startValue === undefined || startValue === null || endValue === undefined || endValue === null) {
+      return [];
+    }
+    if (startValue === endValue) return [startValue];
+    const startIndex = categoryValues.findIndex((value) => String(value) === String(startValue));
+    const endIndex = categoryValues.findIndex((value) => String(value) === String(endValue));
+    if (startIndex === -1 || endIndex === -1) return [];
+    const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
+    return categoryValues.slice(from, to + 1);
+  }, [categoryValues]);
+
   const handlePointerDown = (event) => {
     const datum = resolveDatum(event);
     if (!datum) return;
+    clearDragSelection();
     dragStartRef.current = datum.__x;
+    setDragSelection([datum.__x]);
   };
 
   const handlePointerOut = () => {
     dragStartRef.current = null;
+    clearDragSelection();
+    hideTooltip();
+  };
+
+  const handlePointerMove = (event) => {
+    const datum = resolveDatum(event);
+    if (!datum) return;
+    updateTooltip(event, datum);
+    if (dragStartRef.current !== null && dragStartRef.current !== undefined) {
+      const range = getSelectionRange(dragStartRef.current, datum.__x);
+      if (range.length) setDragSelection(range);
+    }
   };
 
   const handlePointerUp = (event) => {
@@ -121,36 +198,74 @@ const VisxChart = ({
     const endValue = datum.__x;
     dragStartRef.current = null;
     let selection = null;
-    if (startValue !== undefined && startValue !== null && endValue !== undefined && endValue !== null) {
-      if (startValue !== endValue) {
-        const startIndex = categoryValues.findIndex((value) => String(value) === String(startValue));
-        const endIndex = categoryValues.findIndex((value) => String(value) === String(endValue));
-        if (startIndex !== -1 && endIndex !== -1) {
-          const [from, to] = startIndex <= endIndex ? [startIndex, endIndex] : [endIndex, startIndex];
-          selection = { values: categoryValues.slice(from, to + 1) };
-        }
-      }
-    }
+    const selectionValues = getSelectionRange(startValue, endValue);
+    if (selectionValues.length > 1) selection = { values: selectionValues };
     onClick({ activePayload: [{ payload: datum }], selection });
+    if (selectionValues.length) {
+      setDragSelection(selectionValues);
+      dragEndTimer.current = setTimeout(() => {
+        clearDragSelection();
+      }, 600);
+    } else {
+      clearDragSelection();
+    }
   };
 
   return (
-    <div className="h-full w-full">
+    <div className="h-full w-full relative" ref={containerRef}>
       <ParentSize>
         {({ width, height }) => {
           const resolvedWidth = Math.max(width, 240);
           const resolvedHeight = Math.max(height, 200);
+          const chartMargin = { top: 16, right: 16, bottom: 32, left: 44 };
+          const xTickValues = (!isHorizontal && !isNumericX)
+            ? categoryValues.map((value) => String(value))
+            : undefined;
+          const maxLabelWidth = xTickValues && xTickValues.length > 0
+            ? Math.max(...xTickValues.map(estimateLabelWidth))
+            : 0;
+          const chartInnerWidth = resolvedWidth - chartMargin.left - chartMargin.right;
+          const bandWidth = xTickValues && xTickValues.length > 0
+            ? chartInnerWidth / xTickValues.length
+            : chartInnerWidth;
+          let tickAngle = 0;
+          if (maxLabelWidth > bandWidth * 1.05) tickAngle = 45;
+          if (maxLabelWidth > bandWidth * 1.7) tickAngle = 90;
+          const labelHeight = tickAngle === 0
+            ? LABEL_FONT_SIZE * 1.6
+            : tickAngle === 45
+              ? Math.min(140, maxLabelWidth * 0.75)
+              : Math.min(180, maxLabelWidth * 1.1);
+          chartMargin.bottom = Math.max(chartMargin.bottom, labelHeight + 12);
+          const selectionSet = dragSelection.length
+            ? new Set(dragSelection.map((value) => String(value)))
+            : null;
+          const activeColor = seriesColor || DEFAULT_SERIES_COLOR;
+          const mutedColor = toRgba(activeColor, 0.2);
+          const resolvedColorAccessor = selectionSet
+            ? (row) => (selectionSet.has(String(row.__x)) ? activeColor : mutedColor)
+            : (seriesColor ? (() => seriesColor) : undefined);
           return (
             <XYChart
               width={resolvedWidth}
               height={resolvedHeight}
-              margin={{ top: 16, right: 16, bottom: 32, left: 44 }}
+              margin={chartMargin}
               xScale={xScale}
               yScale={yScale}
               stacked={stacked}
             >
               {showGrid && <Grid columns={gridColumns} rows={gridRows} />}
-              <Axis orientation="bottom" />
+              <Axis
+                orientation="bottom"
+                tickValues={xTickValues}
+                tickLabelProps={() => ({
+                  fontSize: LABEL_FONT_SIZE,
+                  textAnchor: tickAngle === 0 ? 'middle' : 'end',
+                  angle: tickAngle,
+                  dx: tickAngle === 0 ? 0 : -6,
+                  dy: tickAngle === 0 ? 8 : 2
+                })}
+              />
               <Axis orientation="left" />
 
               {type === 'bar' && (
@@ -159,8 +274,9 @@ const VisxChart = ({
                   data={prepared}
                   xAccessor={xAccessor}
                   yAccessor={yAccessor}
-                  colorAccessor={colorAccessor}
+                  colorAccessor={resolvedColorAccessor}
                   onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
                   onPointerOut={handlePointerOut}
                   onPointerUp={handlePointerUp}
                 />
@@ -172,8 +288,9 @@ const VisxChart = ({
                   xAccessor={xAccessor}
                   yAccessor={yAccessor}
                   curve={curve}
-                  colorAccessor={colorAccessor}
+                  colorAccessor={resolvedColorAccessor}
                   onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
                   onPointerOut={handlePointerOut}
                   onPointerUp={handlePointerUp}
                 />
@@ -185,8 +302,9 @@ const VisxChart = ({
                   xAccessor={xAccessor}
                   yAccessor={yAccessor}
                   curve={curve}
-                  colorAccessor={colorAccessor}
+                  colorAccessor={resolvedColorAccessor}
                   onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
                   onPointerOut={handlePointerOut}
                   onPointerUp={handlePointerUp}
                 />
@@ -197,8 +315,9 @@ const VisxChart = ({
                   data={prepared}
                   xAccessor={xAccessor}
                   yAccessor={yAccessor}
-                  colorAccessor={colorAccessor}
+                  colorAccessor={resolvedColorAccessor}
                   onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
                   onPointerOut={handlePointerOut}
                   onPointerUp={handlePointerUp}
                 />
@@ -209,34 +328,29 @@ const VisxChart = ({
                   data={prepared}
                   xAccessor={xAccessor}
                   yAccessor={yAccessor}
-                  colorAccessor={colorAccessor}
+                  colorAccessor={resolvedColorAccessor}
                   onPointerDown={handlePointerDown}
+                  onPointerMove={handlePointerMove}
                   onPointerOut={handlePointerOut}
                   onPointerUp={handlePointerUp}
-                />
-              )}
-
-              {showTooltip && (
-                <Tooltip
-                  snapTooltipToDatumX
-                  snapTooltipToDatumY
-                  showSeriesGlyphs
-                  renderTooltip={({ tooltipData }) => {
-                    const nearest = tooltipData?.nearestDatum?.datum;
-                    if (!nearest) return null;
-                    return (
-                      <div className="text-xs">
-                        <div className="font-semibold text-gray-800">{formatValue(nearest.__x)}</div>
-                        <div className="text-gray-500">{formatValue(nearest.__y)}</div>
-                      </div>
-                    );
-                  }}
                 />
               )}
             </XYChart>
           );
         }}
       </ParentSize>
+      {showTooltip && tooltip.visible && tooltip.datum && (
+        <div
+          className="pointer-events-none absolute z-20 rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[11px] text-gray-700 shadow-sm"
+          style={{
+            left: Math.max(8, Math.min(tooltip.x + 12, (tooltip.width || 0) - 160)),
+            top: Math.max(8, Math.min(tooltip.y + 12, (tooltip.height || 0) - 80))
+          }}
+        >
+          <div className="font-semibold text-gray-800">{formatValue(tooltip.datum.__x)}</div>
+          <div className="text-gray-500">{formatValue(tooltip.datum.__y)}</div>
+        </div>
+      )}
     </div>
   );
 };

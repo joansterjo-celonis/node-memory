@@ -22,6 +22,7 @@ import {
 } from '../ui/icons';
 import { getChildren, countDescendants, getNodeResult, calculateMetric, formatNumber } from '../utils/nodeUtils';
 import VisxChart from '../ui/SimpleChart';
+import WorldMapChart from '../ui/WorldMapChart';
 
 const TABLE_ROW_HEIGHT = 24;
 const TABLE_OVERSCAN = 6;
@@ -578,12 +579,13 @@ const TreeNode = ({
 
   const chartType = node.params.chartType || 'bar';
   const chartAggFn = node.params.chartAggFn || 'none';
-  const chartYAxis = (chartType !== 'scatter' && chartAggFn === 'count' && !node.params.yAxis)
+  const chartYAxis = (chartType !== 'scatter' && chartType !== 'map' && chartAggFn === 'count' && !node.params.yAxis)
     ? 'Record Count'
     : node.params.yAxis;
 
   const chartData = React.useMemo(() => {
     if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'CHART') return [];
+    if (chartType === 'map') return [];
     const xField = node.params.xAxis;
     const yField = chartYAxis;
     if (!xField || !yField) return result.data;
@@ -610,6 +612,32 @@ const TreeNode = ({
     chartType,
     chartAggFn,
     chartYAxis,
+    node.params.xAxis,
+    node.params.yAxis
+  ]);
+
+  const mapData = React.useMemo(() => {
+    if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'CHART' || chartType !== 'map') return [];
+    const mapField = node.params.xAxis;
+    if (!mapField) return [];
+    const aggFn = chartAggFn === 'none' ? 'count' : chartAggFn;
+    const groups = new Map();
+    result.data.forEach((row) => {
+      const key = row?.[mapField];
+      if (key === null || key === undefined || key === '') return;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(row);
+    });
+    return Array.from(groups.entries()).map(([key, rows]) => ({
+      code: key,
+      value: calculateMetric(rows, node.params.yAxis, aggFn)
+    }));
+  }, [
+    result,
+    node.type,
+    node.params.subtype,
+    chartType,
+    chartAggFn,
     node.params.xAxis,
     node.params.yAxis
   ]);
@@ -821,7 +849,15 @@ const TreeNode = ({
               )}
 
               {/* CHART VIEW */}
-              {node.params.subtype === 'CHART' && (
+              {node.params.subtype === 'CHART' && (chartType === 'map' ? (
+                <WorldMapChart
+                  data={mapData}
+                  codeKey="code"
+                  valueKey="value"
+                  seriesColor={node.params.chartColor}
+                  showTooltip={node.params.chartShowTooltip}
+                />
+              ) : (
                 <VisxChart
                   data={chartData}
                   xAxis={node.params.xAxis}
@@ -837,7 +873,7 @@ const TreeNode = ({
                   seriesColor={node.params.chartColor}
                   onClick={(d) => onDrillDown(d, { xAxis: node.params.xAxis }, nodeId)}
                 />
-              )}
+              ))}
 
               {/* KPI VIEW */}
               {node.params.subtype === 'KPI' && (
