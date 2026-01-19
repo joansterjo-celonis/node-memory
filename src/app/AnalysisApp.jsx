@@ -1297,7 +1297,7 @@ const AnalysisApp = () => {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {viewMode === 'canvas' ? (
+            {viewMode === 'canvas' && (
               <>
                 <div className="flex items-center bg-gray-100 rounded-lg p-1">
                   <button onClick={undo} disabled={historyIndex === 0} className="p-1.5 text-gray-600 hover:bg-white rounded disabled:opacity-30 disabled:hover:bg-transparent" title="Undo">
@@ -1312,14 +1312,7 @@ const AnalysisApp = () => {
                 </button>
                 {saveError && <span className="text-xs text-red-500">{saveError}</span>}
               </>
-            ) : (
-              <button onClick={startNewExploration} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm">
-                New Exploration
-              </button>
             )}
-            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-white flex items-center justify-center text-xs font-semibold shadow-md">
-              NMA
-            </div>
           </div>
         </header>
 
