@@ -1,7 +1,10 @@
 // src/components/ColumnStatsPanel.jsx
 // Middle panel showing per-column statistics.
 import React from 'react';
+import { Card, Empty, Progress, Select, Space, Statistic, Typography } from 'antd';
 import { formatNumber } from '../utils/nodeUtils';
+
+const { Text, Title } = Typography;
 
 const MAX_TOP_VALUES = 6;
 
@@ -21,11 +24,10 @@ const formatNumeric = (value) => {
 const formatPercent = (value) => `${Math.round(value)}%`;
 
 const StatCard = ({ label, value, helper }) => (
-  <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-    <div className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">{label}</div>
-    <div className="text-lg font-bold text-gray-900">{value}</div>
-    {helper ? <div className="text-[10px] text-gray-400 mt-1">{helper}</div> : null}
-  </div>
+  <Card size="small">
+    <Statistic title={label} value={value} />
+    {helper ? <Text type="secondary" className="text-xs">{helper}</Text> : null}
+  </Card>
 );
 
 const ColumnStatsPanel = ({ node, schema = [], data = [] }) => {
@@ -96,36 +98,36 @@ const ColumnStatsPanel = ({ node, schema = [], data = [] }) => {
   const hasData = schema.length > 0 && data.length > 0;
   const nullRate = stats && stats.totalRows > 0 ? (stats.nullCount / stats.totalRows) * 100 : 0;
 
+  const selectDropdownProps = { popupMatchSelectWidth: false, dropdownStyle: { minWidth: 320 } };
+
   return (
     <div className="h-full w-72 flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/40 z-40">
       <div className="p-4 border-b border-gray-100 bg-white">
-        <div className="text-xs font-bold uppercase tracking-wider text-blue-600">Column Stats</div>
-        <div className="text-[11px] text-gray-400 mt-1">Summary for the selected column</div>
+        <Title level={5} style={{ margin: 0 }}>Column Stats</Title>
+        <Text type="secondary">Summary for the selected column</Text>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {!node && (
-          <div className="text-xs text-gray-400">Select a node to see column statistics.</div>
+          <Empty description="Select a node to see column statistics." />
         )}
         {node && schema.length === 0 && (
-          <div className="text-xs text-gray-400">No columns available yet.</div>
+          <Empty description="No columns available yet." />
         )}
         {node && schema.length > 0 && (
-          <div className="space-y-2">
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Column</label>
-            <select
-              className="w-full p-2.5 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+            <Text type="secondary">Column</Text>
+            <Select
               value={selectedColumn}
-              onChange={(e) => setSelectedColumn(e.target.value)}
-            >
-              {schema.map((field) => (
-                <option key={field} value={field}>{field}</option>
-              ))}
-            </select>
-          </div>
+              onChange={(value) => setSelectedColumn(value)}
+              options={schema.map((field) => ({ label: field, value: field }))}
+              {...selectDropdownProps}
+              style={{ width: '100%' }}
+            />
+          </Space>
         )}
 
         {node && schema.length > 0 && !hasData && (
-          <div className="text-xs text-gray-400">No rows available yet.</div>
+          <Empty description="No rows available yet." />
         )}
 
         {node && hasData && stats && (
@@ -141,55 +143,36 @@ const ColumnStatsPanel = ({ node, schema = [], data = [] }) => {
               <StatCard label="Distinct" value={formatNumber(stats.distinctCount)} />
             </div>
 
-            <div className="space-y-3">
-              <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Numeric Summary</div>
+            <Card size="small" title="Numeric Summary">
               <div className="grid grid-cols-3 gap-2">
-                <div className="border border-gray-200 rounded-lg p-2 bg-gray-50">
-                  <div className="text-[10px] text-gray-500 uppercase tracking-wider">Min</div>
-                  <div className="text-sm font-semibold text-gray-900">{formatNumeric(stats.min)}</div>
-                </div>
-                <div className="border border-gray-200 rounded-lg p-2 bg-gray-50">
-                  <div className="text-[10px] text-gray-500 uppercase tracking-wider">Max</div>
-                  <div className="text-sm font-semibold text-gray-900">{formatNumeric(stats.max)}</div>
-                </div>
-                <div className="border border-gray-200 rounded-lg p-2 bg-gray-50">
-                  <div className="text-[10px] text-gray-500 uppercase tracking-wider">Avg</div>
-                  <div className="text-sm font-semibold text-gray-900">{formatNumeric(stats.avg)}</div>
-                </div>
+                <Statistic title="Min" value={formatNumeric(stats.min)} />
+                <Statistic title="Max" value={formatNumeric(stats.max)} />
+                <Statistic title="Avg" value={formatNumeric(stats.avg)} />
               </div>
-            </div>
+            </Card>
 
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Top Values</div>
-                <div className="text-[10px] text-gray-400">{stats.distinctCount} distinct</div>
-              </div>
+            <Card size="small" title="Top Values" extra={<Text type="secondary">{stats.distinctCount} distinct</Text>}>
               {stats.topValues.length === 0 ? (
-                <div className="text-xs text-gray-400">No non-blank values to summarize.</div>
+                <Text type="secondary">No non-blank values to summarize.</Text>
               ) : (
-                <div className="space-y-2">
+                <Space direction="vertical" size="small" style={{ width: '100%' }}>
                   {stats.topValues.map((item, index) => {
                     const width = stats.maxCount ? (item.count / stats.maxCount) * 100 : 0;
                     return (
                       <div key={`${item.value}-${index}`} className="flex items-center gap-2">
                         <div className="flex-1 min-w-0">
-                          <div className="text-xs text-gray-700 truncate">{item.value}</div>
-                          <div className="h-1.5 bg-gray-100 rounded">
-                            <div
-                              className="h-1.5 bg-blue-500 rounded"
-                              style={{ width: `${width}%` }}
-                            ></div>
-                          </div>
+                          <Text className="truncate block">{item.value}</Text>
+                          <Progress percent={Math.round(width)} showInfo={false} />
                         </div>
-                        <div className="text-[10px] text-gray-500 w-12 text-right">
+                        <Text type="secondary" className="w-12 text-right text-xs">
                           {formatNumber(item.count)}
-                        </div>
+                        </Text>
                       </div>
                     );
                   })}
-                </div>
+                </Space>
               )}
-            </div>
+            </Card>
           </>
         )}
       </div>
