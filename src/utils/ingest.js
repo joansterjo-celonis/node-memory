@@ -72,7 +72,10 @@ const parseCSV = (csvText) => {
 
 const parseXLSX = (arrayBuffer) => {
   // XLSX must be loaded globally via the CDN in index.html
-  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+  if (!window?.XLSX) {
+    throw new Error('Excel parsing library failed to load. Please refresh and try again.');
+  }
+  const workbook = window.XLSX.read(arrayBuffer, { type: 'array' });
   const tables = {};
   workbook.SheetNames.forEach(sheetName => {
     const sheet = workbook.Sheets[sheetName];
@@ -92,7 +95,7 @@ const buildDataModelFromXLSX = (tables) => {
   return { tables, order };
 };
 
-window.Ingest = {
+export {
   readFileAsText,
   readFileAsArrayBuffer,
   parseCSV,

@@ -12,7 +12,7 @@ Built by Joan Sterjo
 
 Notes:
 - `.nojekyll` is included to avoid Jekyll processing.
-- The workflow publishes the repository root; `index.html` must live at the root.
+- The workflow builds the app and publishes `dist/`.
 
 ## Firebase Leaderboard (optional)
 Set your Firebase Web config in `index.html` via `window.__firebase_config`. Without it, the app uses localStorage.
@@ -29,8 +29,9 @@ Set your Firebase Web config in `index.html` via `window.__firebase_config`. Wit
 ```
 
 ## Local Preview
-Open `index.html` directly or serve locally:
+Install dependencies and run the dev server:
 
 ```bash
-python3 -m http.server 5173 --directory .
+npm install
+npm run dev
 ```

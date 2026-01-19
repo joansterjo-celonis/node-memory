@@ -5,6 +5,9 @@
   "type": "module",
   "description": "Node Memory Analytics prototype",
   "scripts": {
+    "dev": "vite --port 5174",
+    "build": "vite build",
+    "preview": "vite preview --port 5174",
     "lint": "eslint .",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
@@ -15,11 +18,18 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.1",
     "@testing-library/user-event": "^14.6.1",
+    "@vitejs/plugin-react": "^5.1.2",
     "eslint": "^9.7.0",
     "eslint-config-prettier": "^9.1.0",
     "jsdom": "^24.1.0",
-    "react": "^19.2.3",
-    "react-dom": "^19.2.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^7.3.1",
     "vitest": "^4.0.17"
+  },
+  "dependencies": {
+    "@visx/curve": "^3.12.0",
+    "@visx/responsive": "^3.12.0",
+    "@visx/xychart": "^3.12.0"
   }
 }

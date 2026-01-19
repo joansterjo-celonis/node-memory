@@ -8,10 +8,10 @@ export default defineConfig({
   ...(useWebServer
     ? {
         webServer: {
-          command: 'python3 -m http.server 5174 --directory .',
+          command: 'npm run dev -- --host',
           url: baseURL,
           reuseExistingServer: true,
-          timeout: 30000
+          timeout: 60000
         }
       }
     : {}),

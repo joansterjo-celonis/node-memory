@@ -68,7 +68,7 @@ const calculateMetric = (data, field, fn) => {
   return 0;
 };
 
-window.NodeUtils = {
+export {
   NodeType,
   ComponentType,
   getChildren,

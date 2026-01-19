@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { getChildren, getCalculationOrder, calculateMetric } from '../../src/utils/nodeUtils.js';
 
 describe('node utils', () => {
   it('returns children and calculation order', () => {
-    const { getChildren, getCalculationOrder } = window.NodeUtils;
     const nodes = [
       { id: 'root', parentId: null },
       { id: 'child-a', parentId: 'root' },
@@ -15,7 +15,6 @@ describe('node utils', () => {
   });
 
   it('calculates metrics', () => {
-    const { calculateMetric } = window.NodeUtils;
     const data = [{ val: 2 }, { val: 2 }, { val: 5 }];
     expect(calculateMetric(data, 'val', 'count')).toBe(3);
     expect(calculateMetric(data, 'val', 'count_distinct')).toBe(2);

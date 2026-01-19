@@ -26,13 +26,13 @@
   const base = getBasePath();
 
   const files = [
-    'src/ui/icons.js',
+    'src/ui/icons.jsx',
     'src/utils/ingest.js',
     'src/utils/nodeUtils.js',
-    'src/ui/SimpleChart.js',
-    'src/components/PropertiesPanel.js',
-    'src/components/TreeNode.js',
-    'src/app/AnalysisApp.js',
+    'src/ui/SimpleChart.jsx',
+    'src/components/PropertiesPanel.jsx',
+    'src/components/TreeNode.jsx',
+    'src/app/AnalysisApp.jsx',
     'src/main.jsx'
   ];
 

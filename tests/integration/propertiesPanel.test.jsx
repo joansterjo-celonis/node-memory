@@ -1,10 +1,7 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-
-beforeAll(async () => {
-  await import('../../src/components/PropertiesPanel.js');
-});
+import { PropertiesPanel } from '../../src/components/PropertiesPanel.jsx';
 
 afterEach(() => {
   cleanup();
@@ -26,7 +23,7 @@ describe('PropertiesPanel ingestion controls', () => {
     const user = userEvent.setup();
 
     render(
-      <window.PropertiesPanel
+      <PropertiesPanel
         node={baseNode}
         updateNode={vi.fn()}
         schema={[]}
@@ -46,7 +43,7 @@ describe('PropertiesPanel ingestion controls', () => {
 
   it('hides Clear data when no dataset is loaded', () => {
     render(
-      <window.PropertiesPanel
+      <PropertiesPanel
         node={baseNode}
         updateNode={vi.fn()}
         schema={[]}
