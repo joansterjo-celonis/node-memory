@@ -776,9 +776,11 @@ const TreeNode = ({
             const isTablePreview = node.params.subtype === 'TABLE' || (node.type !== 'COMPONENT' && node.type !== 'JOIN');
             const isPivotPreview = node.params.subtype === 'PIVOT';
             const isAssistantPreview = node.params.subtype === 'AI';
+            const isChartPreview = node.params.subtype === 'CHART';
             const hasTableLikePreview = isTablePreview || isPivotPreview || isAssistantPreview;
+            const contentPaddingClass = hasTableLikePreview ? 'p-0' : (isChartPreview ? 'p-1' : 'p-4');
             return (
-            <div className={`border-t border-gray-100 bg-gray-50 ${hasTableLikePreview ? 'p-0' : 'p-4'} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
+            <div className={`border-t border-gray-100 bg-gray-50 ${contentPaddingClass} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
               {/* TABLE VIEW */}
               {isTablePreview && (
                 <div className="h-full overflow-hidden text-[10px] bg-white border border-gray-200 rounded flex flex-col">

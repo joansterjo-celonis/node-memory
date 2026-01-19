@@ -225,18 +225,19 @@ const VisxChart = ({
             ? Math.max(...xTickValues.map(estimateLabelWidth))
             : 0;
           const chartInnerWidth = resolvedWidth - chartMargin.left - chartMargin.right;
-          const bandWidth = xTickValues && xTickValues.length > 0
-            ? chartInnerWidth / xTickValues.length
+          const hasCategoricalXAxis = Boolean(xTickValues && xTickValues.length > 0);
+          const minBandWidth = hasCategoricalXAxis
+            ? Math.max(32, maxLabelWidth + 12)
+            : 0;
+          const desiredInnerWidth = hasCategoricalXAxis
+            ? Math.max(chartInnerWidth, minBandWidth * xTickValues.length)
             : chartInnerWidth;
-          let tickAngle = 0;
-          if (maxLabelWidth > bandWidth * 1.05) tickAngle = 45;
-          if (maxLabelWidth > bandWidth * 1.7) tickAngle = 90;
-          const labelHeight = tickAngle === 0
-            ? LABEL_FONT_SIZE * 1.6
-            : tickAngle === 45
-              ? Math.min(140, maxLabelWidth * 0.75)
-              : Math.min(180, maxLabelWidth * 1.1);
-          chartMargin.bottom = Math.max(chartMargin.bottom, labelHeight + 12);
+          const chartWidth = desiredInnerWidth + chartMargin.left + chartMargin.right;
+          const tickLabelOffset = 12;
+          const labelHeight = LABEL_FONT_SIZE * 1.6;
+          chartMargin.bottom = Math.max(chartMargin.bottom, labelHeight + tickLabelOffset + 6);
+          const scrollbarGutter = hasCategoricalXAxis ? 12 : 0;
+          const chartHeight = Math.max(160, resolvedHeight - scrollbarGutter);
           const selectionSet = dragSelection.length
             ? new Set(dragSelection.map((value) => String(value)))
             : null;
@@ -246,96 +247,103 @@ const VisxChart = ({
             ? (row) => (selectionSet.has(String(row.__x)) ? activeColor : mutedColor)
             : (seriesColor ? (() => seriesColor) : undefined);
           return (
-            <XYChart
-              width={resolvedWidth}
-              height={resolvedHeight}
-              margin={chartMargin}
-              xScale={xScale}
-              yScale={yScale}
-              stacked={stacked}
-            >
-              {showGrid && <Grid columns={gridColumns} rows={gridRows} />}
-              <Axis
-                orientation="bottom"
-                tickValues={xTickValues}
-                tickLabelProps={() => ({
-                  fontSize: LABEL_FONT_SIZE,
-                  textAnchor: tickAngle === 0 ? 'middle' : 'end',
-                  angle: tickAngle,
-                  dx: tickAngle === 0 ? 0 : -6,
-                  dy: tickAngle === 0 ? 8 : 2
-                })}
-              />
-              <Axis orientation="left" />
+            <div className="h-full w-full overflow-x-auto overflow-y-hidden">
+              <div
+                style={{ minWidth: chartWidth, paddingBottom: scrollbarGutter }}
+                className="h-full box-border"
+              >
+                <XYChart
+                  width={chartWidth}
+                  height={chartHeight}
+                  margin={chartMargin}
+                  xScale={xScale}
+                  yScale={yScale}
+                  stacked={stacked}
+                >
+                  {showGrid && <Grid columns={gridColumns} rows={gridRows} />}
+                  <Axis
+                    orientation="bottom"
+                    tickValues={xTickValues}
+                    tickLabelProps={() => ({
+                      fontSize: LABEL_FONT_SIZE,
+                      textAnchor: 'middle',
+                      angle: 0,
+                      dx: 0,
+                      dy: tickLabelOffset
+                    })}
+                  />
+                  <Axis orientation="left" />
 
-              {type === 'bar' && (
-                <BarSeries
-                  dataKey="series"
-                  data={prepared}
-                  xAccessor={xAccessor}
-                  yAccessor={yAccessor}
-                  colorAccessor={resolvedColorAccessor}
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerOut={handlePointerOut}
-                  onPointerUp={handlePointerUp}
-                />
-              )}
-              {type === 'line' && (
-                <LineSeries
-                  dataKey="series"
-                  data={prepared}
-                  xAccessor={xAccessor}
-                  yAccessor={yAccessor}
-                  curve={curve}
-                  colorAccessor={resolvedColorAccessor}
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerOut={handlePointerOut}
-                  onPointerUp={handlePointerUp}
-                />
-              )}
-              {type === 'area' && (
-                <AreaSeries
-                  dataKey="series"
-                  data={prepared}
-                  xAccessor={xAccessor}
-                  yAccessor={yAccessor}
-                  curve={curve}
-                  colorAccessor={resolvedColorAccessor}
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerOut={handlePointerOut}
-                  onPointerUp={handlePointerUp}
-                />
-              )}
-              {type === 'scatter' && (
-                <GlyphSeries
-                  dataKey="series"
-                  data={prepared}
-                  xAccessor={xAccessor}
-                  yAccessor={yAccessor}
-                  colorAccessor={resolvedColorAccessor}
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerOut={handlePointerOut}
-                  onPointerUp={handlePointerUp}
-                />
-              )}
-              {showPoints && type !== 'scatter' && (
-                <GlyphSeries
-                  dataKey="points"
-                  data={prepared}
-                  xAccessor={xAccessor}
-                  yAccessor={yAccessor}
-                  colorAccessor={resolvedColorAccessor}
-                  onPointerDown={handlePointerDown}
-                  onPointerMove={handlePointerMove}
-                  onPointerOut={handlePointerOut}
-                  onPointerUp={handlePointerUp}
-                />
-              )}
-            </XYChart>
+                  {type === 'bar' && (
+                    <BarSeries
+                      dataKey="series"
+                      data={prepared}
+                      xAccessor={xAccessor}
+                      yAccessor={yAccessor}
+                      colorAccessor={resolvedColorAccessor}
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerOut={handlePointerOut}
+                      onPointerUp={handlePointerUp}
+                    />
+                  )}
+                  {type === 'line' && (
+                    <LineSeries
+                      dataKey="series"
+                      data={prepared}
+                      xAccessor={xAccessor}
+                      yAccessor={yAccessor}
+                      curve={curve}
+                      colorAccessor={resolvedColorAccessor}
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerOut={handlePointerOut}
+                      onPointerUp={handlePointerUp}
+                    />
+                  )}
+                  {type === 'area' && (
+                    <AreaSeries
+                      dataKey="series"
+                      data={prepared}
+                      xAccessor={xAccessor}
+                      yAccessor={yAccessor}
+                      curve={curve}
+                      colorAccessor={resolvedColorAccessor}
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerOut={handlePointerOut}
+                      onPointerUp={handlePointerUp}
+                    />
+                  )}
+                  {type === 'scatter' && (
+                    <GlyphSeries
+                      dataKey="series"
+                      data={prepared}
+                      xAccessor={xAccessor}
+                      yAccessor={yAccessor}
+                      colorAccessor={resolvedColorAccessor}
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerOut={handlePointerOut}
+                      onPointerUp={handlePointerUp}
+                    />
+                  )}
+                  {showPoints && type !== 'scatter' && (
+                    <GlyphSeries
+                      dataKey="points"
+                      data={prepared}
+                      xAccessor={xAccessor}
+                      yAccessor={yAccessor}
+                      colorAccessor={resolvedColorAccessor}
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerOut={handlePointerOut}
+                      onPointerUp={handlePointerUp}
+                    />
+                  )}
+                </XYChart>
+              </div>
+            </div>
           );
         }}
       </ParentSize>
