@@ -454,6 +454,24 @@ const TreeNode = ({
   const isExpanded = node.isExpanded !== false;
   const areChildrenCollapsed = node.areChildrenCollapsed === true;
   const isBranchCollapsed = node.isBranchCollapsed === true;
+  const addMenuRef = React.useRef(null);
+  const insertMenuRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (showAddMenuForId !== nodeId || !addMenuRef.current) return undefined;
+    const frame = requestAnimationFrame(() => {
+      addMenuRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [showAddMenuForId, nodeId]);
+
+  React.useEffect(() => {
+    if (showInsertMenuForId !== nodeId || !insertMenuRef.current) return undefined;
+    const frame = requestAnimationFrame(() => {
+      insertMenuRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [showInsertMenuForId, nodeId]);
 
   // Resolve icon by node type (and component subtype).
   let Icon = Database;
@@ -947,39 +965,41 @@ const TreeNode = ({
             </button>
 
             {showAddMenuForId === nodeId && (
-              <div className="absolute top-10 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-xl border border-gray-100 p-2 w-56 z-50 animate-in fade-in slide-in-from-top-1">
-                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Data Ops</div>
-                <button onClick={() => onAdd('FILTER', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-orange-400"></div> Filter
-                </button>
-                <button onClick={() => onAdd('AGGREGATE', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-purple-400"></div> Aggregate
-                </button>
-                <button onClick={() => onAdd('JOIN', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-pink-400"></div> SQL Join
-                </button>
+              <div ref={addMenuRef} className="absolute top-10 left-1/2 -translate-x-1/2 z-50">
+                <div className="bg-white rounded-xl shadow-xl border border-gray-100 p-2 w-56 animate-in fade-in slide-in-from-top-1">
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Data Ops</div>
+                  <button onClick={() => onAdd('FILTER', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-orange-400"></div> Filter
+                  </button>
+                  <button onClick={() => onAdd('AGGREGATE', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-purple-400"></div> Aggregate
+                  </button>
+                  <button onClick={() => onAdd('JOIN', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 capitalize flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-pink-400"></div> SQL Join
+                  </button>
 
-                <div className="h-px bg-gray-100 my-1"></div>
-                <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Components</div>
+                  <div className="h-px bg-gray-100 my-1"></div>
+                  <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Components</div>
 
-                <button onClick={() => onAdd('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                  <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Table
-                </button>
-                <button onClick={() => onAdd('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                  <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Pivot Table
-                </button>
-                <button onClick={() => onAdd('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                  <Share2 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> AI Assistant
-                </button>
-                <button onClick={() => onAdd('COMPONENT', nodeId, 'CHART')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                  <BarChart3 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Chart
-                </button>
-                <button onClick={() => onAdd('COMPONENT', nodeId, 'KPI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                  <Hash size={14} className="text-gray-400 group-hover/item:text-blue-600" /> KPI
-                </button>
-                <button onClick={() => onAdd('COMPONENT', nodeId, 'GAUGE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
-                  <Gauge size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Gauge
-                </button>
+                  <button onClick={() => onAdd('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                    <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Table
+                  </button>
+                  <button onClick={() => onAdd('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                    <TableIcon size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Pivot Table
+                  </button>
+                  <button onClick={() => onAdd('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                    <Share2 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> AI Assistant
+                  </button>
+                  <button onClick={() => onAdd('COMPONENT', nodeId, 'CHART')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                    <BarChart3 size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Chart
+                  </button>
+                  <button onClick={() => onAdd('COMPONENT', nodeId, 'KPI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                    <Hash size={14} className="text-gray-400 group-hover/item:text-blue-600" /> KPI
+                  </button>
+                  <button onClick={() => onAdd('COMPONENT', nodeId, 'GAUGE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-sm text-gray-700 flex items-center gap-2 group/item">
+                    <Gauge size={14} className="text-gray-400 group-hover/item:text-blue-600" /> Gauge
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1004,27 +1024,29 @@ const TreeNode = ({
                 </button>
 
                 {showInsertMenuForId === nodeId && (
-                  <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-white rounded-lg shadow-xl border border-gray-100 p-2 w-48 z-50 animate-in fade-in slide-in-from-top-1">
-                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Insert Step</div>
-                    <button onClick={() => onInsert('FILTER', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-orange-400"></div> Filter
-                    </button>
-                    <button onClick={() => onInsert('AGGREGATE', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-purple-400"></div> Aggregate
-                    </button>
-                    <button onClick={() => onInsert('JOIN', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-pink-400"></div> Join
-                    </button>
-                    <div className="h-px bg-gray-100 my-1"></div>
-                    <button onClick={() => onInsert('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
-                      <TableIcon size={12} className="text-gray-400" /> Table
-                    </button>
-                    <button onClick={() => onInsert('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
-                      <TableIcon size={12} className="text-gray-400" /> Pivot Table
-                    </button>
-                    <button onClick={() => onInsert('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
-                      <Share2 size={12} className="text-gray-400" /> AI Assistant
-                    </button>
+                  <div ref={insertMenuRef} className="absolute top-6 left-1/2 -translate-x-1/2 z-50">
+                    <div className="bg-white rounded-lg shadow-xl border border-gray-100 p-2 w-48 animate-in fade-in slide-in-from-top-1">
+                      <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider px-2 py-1">Insert Step</div>
+                      <button onClick={() => onInsert('FILTER', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-orange-400"></div> Filter
+                      </button>
+                      <button onClick={() => onInsert('AGGREGATE', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-purple-400"></div> Aggregate
+                      </button>
+                      <button onClick={() => onInsert('JOIN', nodeId)} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 capitalize flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 rounded-full bg-pink-400"></div> Join
+                      </button>
+                      <div className="h-px bg-gray-100 my-1"></div>
+                      <button onClick={() => onInsert('COMPONENT', nodeId, 'TABLE')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                        <TableIcon size={12} className="text-gray-400" /> Table
+                      </button>
+                      <button onClick={() => onInsert('COMPONENT', nodeId, 'PIVOT')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                        <TableIcon size={12} className="text-gray-400" /> Pivot Table
+                      </button>
+                      <button onClick={() => onInsert('COMPONENT', nodeId, 'AI')} className="w-full text-left px-3 py-2 hover:bg-gray-50 rounded text-xs text-gray-700 flex items-center gap-2">
+                        <Share2 size={12} className="text-gray-400" /> AI Assistant
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
