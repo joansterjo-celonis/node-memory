@@ -6,8 +6,21 @@ const { useState, useMemo, useEffect } = React;
 const { PropertiesPanel } = window;
 const { TreeNode } = window;
 const { Layout, Database, FileJson, Settings, Undo, Redo, TableIcon, X } = window.Icons;
-const { readFileAsText, readFileAsArrayBuffer, parseCSV, parseXLSX, buildDataModelFromCSV, buildDataModelFromXLSX } = window.Ingest;
+const { readFileAsText, readFileAsArrayBuffer, parseCSV, parseXLSX } = window.Ingest;
 const { getChildren, getCalculationOrder, getNodeResult } = window.NodeUtils;
+
+const createInitialNodes = () => ([
+  {
+    id: 'node-start',
+    parentId: null,
+    type: 'SOURCE',
+    title: 'Load Raw Data',
+    description: 'Upload dataset',
+    branchName: 'Main',
+    isExpanded: true,
+    params: { table: null, __files: [] }
+  }
+]);
 
 const AnalysisApp = () => {
   // -------------------------------------------------------------------
@@ -17,26 +30,13 @@ const AnalysisApp = () => {
   const [rawDataName, setRawDataName] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [pendingFile, setPendingFile] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [pendingFiles, setPendingFiles] = useState([]);
 
   // -------------------------------------------------------------------
   // History state (undo / redo)
   // -------------------------------------------------------------------
-  const [history, setHistory] = useState([
-    [
-      {
-        id: 'node-start',
-        parentId: null,
-        type: 'SOURCE',
-        title: 'Load Raw Data',
-        description: 'Upload dataset',
-        branchName: 'Main',
-        isExpanded: true,
-        params: { table: null, __file: null }
-      }
-    ]
-  ]);
+  const [history, setHistory] = useState([createInitialNodes()]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const nodes = history[historyIndex];
 
@@ -44,6 +44,10 @@ const AnalysisApp = () => {
   const [showAddMenuForId, setShowAddMenuForId] = useState(null);
   const [showInsertMenuForId, setShowInsertMenuForId] = useState(null);
   const [showDataModel, setShowDataModel] = useState(false);
+  const [viewMode, setViewMode] = useState('canvas');
+  const [explorations, setExplorations] = useState([]);
+  const [activeExplorationId, setActiveExplorationId] = useState(null);
+  const [saveError, setSaveError] = useState(null);
 
   // -------------------------------------------------------------------
   // File ingestion pipeline (triggered by explicit "Ingest Data" button)
@@ -52,7 +56,7 @@ const AnalysisApp = () => {
     let cancelled = false;
 
     const run = async () => {
-      if (!selectedFile) {
+      if (!selectedFiles || selectedFiles.length === 0) {
         setIsLoadingFile(false);
         return;
       }
@@ -64,29 +68,55 @@ const AnalysisApp = () => {
         // Allow UI to render progress state
         await new Promise(resolve => setTimeout(resolve, 50));
 
-        const name = selectedFile.name || 'Uploaded file';
-        const lower = name.toLowerCase();
+        const tables = {};
+        const order = [];
+        const fileNames = [];
 
-        let model = { tables: {}, order: [] };
-        if (lower.endsWith('.csv')) {
-          const text = await readFileAsText(selectedFile);
-          const rows = parseCSV(text);
-          if (!rows || rows.length === 0) throw new Error('No rows found in CSV.');
-          model = buildDataModelFromCSV(name, rows);
-        } else if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
-          if (!window.XLSX) throw new Error('Excel parsing library failed to load. Please refresh and try again.');
-          const buf = await readFileAsArrayBuffer(selectedFile);
-          const tables = parseXLSX(buf);
-          const hasRows = Object.values(tables).some(arr => Array.isArray(arr) && arr.length > 0);
-          if (!hasRows) throw new Error('No rows found in workbook.');
-          model = buildDataModelFromXLSX(tables);
-        } else {
-          throw new Error('Unsupported file type. Please upload CSV or XLSX.');
+        const addTable = (name, rows) => {
+          const base = name || 'data';
+          let finalName = base;
+          let suffix = 2;
+          while (tables[finalName]) {
+            finalName = `${base} (${suffix++})`;
+          }
+          tables[finalName] = rows;
+          order.push(finalName);
+        };
+
+        for (const file of selectedFiles) {
+          const name = file.name || 'Uploaded file';
+          const lower = name.toLowerCase();
+          const baseName = name.replace(/\.(csv|xlsx|xls)$/i, '') || 'data';
+          fileNames.push(name);
+
+          if (lower.endsWith('.csv')) {
+            const text = await readFileAsText(file);
+            const rows = parseCSV(text);
+            if (!rows || rows.length === 0) throw new Error(`No rows found in ${name}.`);
+            addTable(baseName, rows);
+          } else if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
+            if (!window.XLSX) throw new Error('Excel parsing library failed to load. Please refresh and try again.');
+            const buf = await readFileAsArrayBuffer(file);
+            const workbookTables = parseXLSX(buf);
+            const hasRows = Object.values(workbookTables).some(arr => Array.isArray(arr) && arr.length > 0);
+            if (!hasRows) throw new Error(`No rows found in ${name}.`);
+            Object.entries(workbookTables).forEach(([sheetName, rows]) => {
+              if (!Array.isArray(rows) || rows.length === 0) return;
+              addTable(`${baseName}:${sheetName}`, rows);
+            });
+          } else {
+            throw new Error('Unsupported file type. Please upload CSV or XLSX.');
+          }
+        }
+
+        if (!order.length) {
+          throw new Error('No rows found in the uploaded files.');
         }
 
         if (!cancelled) {
+          const model = { tables, order };
           setDataModel(model);
-          setRawDataName(name);
+          setRawDataName(fileNames.length === 1 ? fileNames[0] : `${fileNames.length} files`);
 
           // If SOURCE node has no table selected, set default silently.
           const defaultTable = model.order[0] || null;
@@ -103,7 +133,7 @@ const AnalysisApp = () => {
 
     run();
     return () => { cancelled = true; };
-  }, [selectedFile]);
+  }, [selectedFiles]);
 
   // -------------------------------------------------------------------
   // History helpers
@@ -117,6 +147,28 @@ const AnalysisApp = () => {
 
   const undo = () => { if (historyIndex > 0) setHistoryIndex(historyIndex - 1); };
   const redo = () => { if (historyIndex < history.length - 1) setHistoryIndex(historyIndex + 1); };
+
+  const EXPLORATION_STORAGE_KEY = 'nma-explorations';
+  const loadExplorations = () => {
+    if (typeof window === 'undefined' || !window.localStorage) return [];
+    try {
+      const raw = window.localStorage.getItem(EXPLORATION_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (err) {
+      return [];
+    }
+  };
+
+  const persistExplorations = (next) => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem(EXPLORATION_STORAGE_KEY, JSON.stringify(next));
+  };
+
+  useEffect(() => {
+    setExplorations(loadExplorations());
+  }, []);
 
   // -------------------------------------------------------------------
   // Node updates (params + metadata)
@@ -137,21 +189,21 @@ const AnalysisApp = () => {
     }
   };
 
-  // If user selects a file, keep it pending until they click ingest
+  // If user selects files, keep them pending until they click ingest
   const updateNodeFromPanel = (id, params, isMeta = false) => {
-    if (id === 'node-start' && params && Object.prototype.hasOwnProperty.call(params, '__file')) {
-      setPendingFile(params.__file || null);
+    if (id === 'node-start' && params && Object.prototype.hasOwnProperty.call(params, '__files')) {
+      setPendingFiles(params.__files || []);
     }
     updateNode(id, params, isMeta);
   };
 
-  const ingestPendingFile = () => {
-    if (!pendingFile) {
-      setLoadError('Please select a file to ingest.');
+  const ingestPendingFiles = () => {
+    if (!pendingFiles || pendingFiles.length === 0) {
+      setLoadError('Please select one or more files to ingest.');
       return;
     }
     setLoadError(null);
-    setSelectedFile(pendingFile);
+    setSelectedFiles([...pendingFiles]);
   };
 
   // -------------------------------------------------------------------
@@ -408,6 +460,98 @@ const AnalysisApp = () => {
     const updatedNodes = nodes.map(n => n.id === parentId ? { ...n, areChildrenCollapsed: false } : n);
     updateNodes([...updatedNodes, newNode]);
     setSelectedNodeId(newId);
+  };
+
+  const getExplorationStats = (model) => {
+    const order = model?.order || [];
+    const rowCount = order.reduce((sum, name) => sum + ((model.tables?.[name] || []).length), 0);
+    return { tableCount: order.length, rowCount };
+  };
+
+  const sanitizeNodesForStorage = (nodesToSave) =>
+    nodesToSave.map(node => {
+      if (node.type !== 'SOURCE') return node;
+      return { ...node, params: { ...node.params, __files: [] } };
+    });
+
+  const saveExploration = () => {
+    setSaveError(null);
+    const now = new Date().toISOString();
+    const stats = getExplorationStats(dataModel);
+    const existing = explorations.find(exp => exp.id === activeExplorationId);
+    const baseName = rawDataName || 'Exploration';
+    const name = existing?.name || baseName;
+    const payload = {
+      id: existing?.id || `exp-${Date.now()}`,
+      name,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+      nodes: sanitizeNodesForStorage(nodes),
+      dataModel,
+      rawDataName,
+      tableCount: stats.tableCount,
+      rowCount: stats.rowCount
+    };
+    const next = existing
+      ? explorations.map(exp => exp.id === payload.id ? payload : exp)
+      : [payload, ...explorations];
+    try {
+      persistExplorations(next);
+      setExplorations(next);
+      setActiveExplorationId(payload.id);
+      setShowDataModel(false);
+      setViewMode('landing');
+    } catch (err) {
+      setSaveError('Unable to save this exploration. Storage may be full.');
+    }
+  };
+
+  const openExploration = (exploration) => {
+    if (!exploration) return;
+    const nextNodes = exploration.nodes || createInitialNodes();
+    setHistory([nextNodes]);
+    setHistoryIndex(0);
+    setSelectedNodeId(nextNodes[0]?.id || 'node-start');
+    setDataModel(exploration.dataModel || { tables: {}, order: [] });
+    setRawDataName(exploration.rawDataName || exploration.name || null);
+    setLoadError(null);
+    setSelectedFiles([]);
+    setPendingFiles([]);
+    setShowDataModel(false);
+    setShowAddMenuForId(null);
+    setShowInsertMenuForId(null);
+    setActiveExplorationId(exploration.id);
+    setViewMode('canvas');
+  };
+
+  const deleteExploration = (id) => {
+    const next = explorations.filter(exp => exp.id !== id);
+    try {
+      persistExplorations(next);
+    } catch (err) {
+      // Ignore storage errors on delete.
+    }
+    setExplorations(next);
+    if (activeExplorationId === id) {
+      setActiveExplorationId(null);
+    }
+  };
+
+  const startNewExploration = () => {
+    const nextNodes = createInitialNodes();
+    setHistory([nextNodes]);
+    setHistoryIndex(0);
+    setSelectedNodeId(nextNodes[0]?.id || 'node-start');
+    setDataModel({ tables: {}, order: [] });
+    setRawDataName(null);
+    setLoadError(null);
+    setSelectedFiles([]);
+    setPendingFiles([]);
+    setShowDataModel(false);
+    setShowAddMenuForId(null);
+    setShowInsertMenuForId(null);
+    setActiveExplorationId(null);
+    setViewMode('canvas');
   };
 
   // -------------------------------------------------------------------
@@ -986,11 +1130,15 @@ const AnalysisApp = () => {
   // Derived status for SOURCE panel
   // -------------------------------------------------------------------
   const sourceStatus = (() => {
-    if (isLoadingFile) return { title: 'Loading…', detail: 'Parsing file and building table…', loading: true };
+    if (isLoadingFile) return { title: 'Loading…', detail: 'Parsing files and building tables…', loading: true };
     if (loadError) return { title: 'Error', detail: loadError };
-    const table = nodes.find(n => n.id === 'node-start')?.params.table || dataModel.order[0];
-    const count = table ? (dataModel.tables[table] || []).length : 0;
-    return { title: 'Connected', detail: `${rawDataName || 'Dataset'} loaded with ${count} rows.` };
+    const tableCount = dataModel.order.length;
+    const totalRows = dataModel.order.reduce((sum, name) => sum + ((dataModel.tables[name] || []).length), 0);
+    const label = rawDataName || 'Dataset';
+    if (tableCount === 0) {
+      return { title: 'No data', detail: 'Upload a CSV or Excel file to get started.' };
+    }
+    return { title: 'Connected', detail: `${label} loaded with ${tableCount} tables and ${totalRows} rows.` };
   })();
 
   // -------------------------------------------------------------------
@@ -999,14 +1147,23 @@ const AnalysisApp = () => {
   return (
     <div className="flex h-screen w-full bg-slate-50 font-sans text-slate-900 overflow-hidden">
       {/* 1. LEFT SIDEBAR */}
-      <div className="w-16 flex-shrink-0 bg-slate-900 flex flex-col items-center py-6 gap-6 text-slate-400 border-r border-slate-800 z-50">
-        <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-blue-900/50 mb-4 ring-1 ring-white/10">
+      <div className="w-16 flex-shrink-0 bg-white flex flex-col items-center py-6 gap-6 text-slate-500 border-r border-gray-200 z-50">
+        <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-blue-200/60 mb-4 ring-1 ring-white/60">
           <Layout size={20} />
         </div>
-        <div className="p-2.5 hover:bg-slate-800 rounded-lg cursor-pointer transition-colors relative group" title="Saved Analysis">
+        <div
+          onClick={() => {
+            setShowDataModel(false);
+            setViewMode('landing');
+          }}
+          className={`p-2.5 rounded-lg cursor-pointer transition-colors relative group ${
+            viewMode === 'landing' ? 'bg-slate-100 text-slate-900' : 'hover:bg-slate-100'
+          }`}
+          title="Explorations"
+        >
           <FileJson size={20} />
         </div>
-        <div className="mt-auto p-2.5 hover:bg-slate-800 rounded-lg cursor-pointer transition-colors relative group">
+        <div className="mt-auto p-2.5 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors relative group">
           <Settings size={20} />
         </div>
       </div>
@@ -1015,64 +1172,153 @@ const AnalysisApp = () => {
       <div className="flex-1 flex flex-col relative overflow-hidden bg-[#F8FAFC]">
         <header className="h-16 bg-white border-b border-gray-200 flex items-center px-8 justify-between shadow-sm z-40 relative">
           <div className="flex items-center gap-4">
-            <h1 className="font-bold text-gray-900 text-lg">Invoice Analysis <span className="text-gray-400 font-normal mx-2">/</span> Canvas</h1>
+            <div>
+              <div className="font-bold text-gray-900 text-lg">Node Memory Analytics</div>
+              <div className="text-xs text-gray-400">Exploration workspace</div>
+            </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex items-center bg-gray-100 rounded-lg p-1">
-              <button onClick={undo} disabled={historyIndex === 0} className="p-1.5 text-gray-600 hover:bg-white rounded disabled:opacity-30 disabled:hover:bg-transparent" title="Undo">
-                <Undo size={16} />
+            {viewMode === 'canvas' ? (
+              <>
+                <div className="flex items-center bg-gray-100 rounded-lg p-1">
+                  <button onClick={undo} disabled={historyIndex === 0} className="p-1.5 text-gray-600 hover:bg-white rounded disabled:opacity-30 disabled:hover:bg-transparent" title="Undo">
+                    <Undo size={16} />
+                  </button>
+                  <button onClick={redo} disabled={historyIndex === history.length - 1} className="p-1.5 text-gray-600 hover:bg-white rounded disabled:opacity-30 disabled:hover:bg-transparent" title="Redo">
+                    <Redo size={16} />
+                  </button>
+                </div>
+                <button onClick={saveExploration} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm">
+                  Save & Exit
+                </button>
+                {saveError && <span className="text-xs text-red-500">{saveError}</span>}
+              </>
+            ) : (
+              <button onClick={startNewExploration} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm">
+                New Exploration
               </button>
-              <button onClick={redo} disabled={historyIndex === history.length - 1} className="p-1.5 text-gray-600 hover:bg-white rounded disabled:opacity-30 disabled:hover:bg-transparent" title="Redo">
-                <Redo size={16} />
-              </button>
+            )}
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-indigo-500 to-blue-600 text-white flex items-center justify-center text-xs font-semibold shadow-md">
+              NMA
             </div>
-            <button className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm">Save</button>
           </div>
         </header>
 
-        {/* Infinite canvas scroll area */}
-        <div
-          className="flex-1 overflow-auto bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-slate-50 cursor-grab active:cursor-grabbing"
-          onClick={() => {
-            setShowAddMenuForId(null);
-            setShowInsertMenuForId(null);
-          }}
-        >
-          <div className="min-w-full inline-flex justify-center p-20 items-start min-h-full">
-            <TreeNode
-              nodeId="node-start"
-              nodes={nodes}
-              selectedNodeId={selectedNodeId}
-              chainData={chainData}
-              onSelect={handleSelect}
-              onAdd={addNode}
-              onInsert={insertNode}
-              onRemove={removeNode}
-              onToggleExpand={toggleNodeExpansion}
-              onToggleChildren={toggleChildrenCollapse}
-              onToggleBranch={toggleBranchCollapse}
-              onDrillDown={handleChartDrillDown}
-              onTableCellClick={handleTableCellClick}
-              onAssistantRequest={handleAssistantRequest}
-              showAddMenuForId={showAddMenuForId}
-              setShowAddMenuForId={setShowAddMenuForId}
-              showInsertMenuForId={showInsertMenuForId}
-              setShowInsertMenuForId={setShowInsertMenuForId}
-            />
+        {viewMode === 'landing' ? (
+          <div className="flex-1 overflow-auto bg-slate-50">
+            <div className="max-w-6xl mx-auto px-10 py-12 space-y-8">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Explorations</h2>
+                  <p className="text-sm text-gray-500">Pick up where you left off or start something new.</p>
+                </div>
+                <button
+                  onClick={startNewExploration}
+                  className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow-sm hover:bg-slate-800"
+                >
+                  New Exploration
+                </button>
+              </div>
+
+              {explorations.length === 0 ? (
+                <div className="bg-white border border-gray-200 rounded-2xl p-10 text-center shadow-sm">
+                  <div className="text-lg font-semibold text-gray-900">No explorations yet</div>
+                  <p className="text-sm text-gray-500 mt-2">
+                    Upload data, build a workflow, then Save & Exit to see it here.
+                  </p>
+                  <button
+                    onClick={startNewExploration}
+                    className="mt-6 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700"
+                  >
+                    Create your first exploration
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {explorations.map((exp) => {
+                    const order = exp.dataModel?.order || [];
+                    const tableCount = exp.tableCount ?? order.length;
+                    const rowCount = exp.rowCount ?? order.reduce((sum, name) => sum + ((exp.dataModel?.tables?.[name] || []).length), 0);
+                    const updated = exp.updatedAt ? new Date(exp.updatedAt).toLocaleString() : '';
+                    return (
+                      <div key={exp.id} className="bg-white border border-gray-200 rounded-2xl p-5 shadow-sm flex flex-col gap-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-semibold text-gray-900 truncate">{exp.name || 'Exploration'}</div>
+                            <div className="text-xs text-gray-400 mt-1">Updated {updated}</div>
+                          </div>
+                          <button
+                            onClick={() => deleteExploration(exp.id)}
+                            className="text-[11px] text-gray-400 hover:text-red-500"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-4 text-xs text-gray-500">
+                          <span>{tableCount} tables</span>
+                          <span>{rowCount} rows</span>
+                        </div>
+                        <div className="mt-auto flex items-center gap-2">
+                          <button
+                            onClick={() => openExploration(exp)}
+                            className="flex-1 bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-blue-700"
+                          >
+                            Open Exploration
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div
+            className="flex-1 overflow-auto bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-slate-50 cursor-grab active:cursor-grabbing"
+            onClick={() => {
+              setShowAddMenuForId(null);
+              setShowInsertMenuForId(null);
+            }}
+          >
+            <div className="min-w-full inline-flex justify-center p-20 items-start min-h-full">
+              <TreeNode
+                nodeId="node-start"
+                nodes={nodes}
+                selectedNodeId={selectedNodeId}
+                chainData={chainData}
+                onSelect={handleSelect}
+                onAdd={addNode}
+                onInsert={insertNode}
+                onRemove={removeNode}
+                onToggleExpand={toggleNodeExpansion}
+                onToggleChildren={toggleChildrenCollapse}
+                onToggleBranch={toggleBranchCollapse}
+                onDrillDown={handleChartDrillDown}
+                onTableCellClick={handleTableCellClick}
+                onAssistantRequest={handleAssistantRequest}
+                showAddMenuForId={showAddMenuForId}
+                setShowAddMenuForId={setShowAddMenuForId}
+                showInsertMenuForId={showInsertMenuForId}
+                setShowInsertMenuForId={setShowInsertMenuForId}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 3. PROPERTIES PANEL */}
-      <PropertiesPanel
-        node={nodes.find(n => n.id === selectedNodeId)}
-        updateNode={updateNodeFromPanel}
-        schema={getNodeResult(chainData, selectedNodeId)?.schema || []}
-        dataModel={dataModel}
-        sourceStatus={sourceStatus}
-        onIngest={ingestPendingFile}
-        onShowDataModel={() => setShowDataModel(true)}
-      />
+      {viewMode === 'canvas' && (
+        <PropertiesPanel
+          node={nodes.find(n => n.id === selectedNodeId)}
+          updateNode={updateNodeFromPanel}
+          schema={getNodeResult(chainData, selectedNodeId)?.schema || []}
+          dataModel={dataModel}
+          sourceStatus={sourceStatus}
+          onIngest={ingestPendingFiles}
+          onShowDataModel={() => setShowDataModel(true)}
+        />
+      )}
 
       {/* 4. DATA MODEL MODAL */}
       {showDataModel && (

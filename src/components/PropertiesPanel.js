@@ -68,6 +68,27 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
   const commitJoin = () => updateNode(node.id, localParams);
   const handleMetaChange = (key, value) => updateNode(node.id, { [key]: value }, true);
 
+  const currentFiles = node.params?.__files || [];
+  const addPendingFiles = (incoming) => {
+    const merged = [...currentFiles];
+    const seen = new Set(currentFiles.map(file => `${file.name}-${file.size}-${file.lastModified}`));
+    incoming.forEach((file) => {
+      const key = `${file.name}-${file.size}-${file.lastModified}`;
+      if (!seen.has(key)) {
+        merged.push(file);
+        seen.add(key);
+      }
+    });
+    handleChange('__files', merged);
+  };
+
+  const removePendingFile = (index) => {
+    const next = currentFiles.filter((_, idx) => idx !== index);
+    handleChange('__files', next);
+  };
+
+  const clearPendingFiles = () => handleChange('__files', []);
+
   const kpiMetrics = (node.type === 'COMPONENT' && node.params.subtype === 'KPI')
     ? (node.params.metrics && node.params.metrics.length > 0
       ? node.params.metrics
@@ -152,18 +173,47 @@ const PropertiesPanel = ({ node, updateNode, schema, dataModel, sourceStatus, on
               <label className="text-sm font-semibold text-gray-700 block">Upload data (CSV or Excel)</label>
               <input
                 type="file"
+                multiple
                 accept=".csv,.xlsx,.xls"
                 className="block w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                onChange={(e) => handleChange('__file', e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+                onChange={(e) => addPendingFiles(Array.from(e.target.files || []))}
               />
-              <p className="text-xs text-gray-500">Tip: upload replaces the “raw data” feeding the chain.</p>
+              <p className="text-xs text-gray-500">Tip: uploading files replaces the data model feeding the chain.</p>
             </div>
+
+            {currentFiles.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Pending Files</div>
+                <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50 p-2 space-y-2">
+                  {currentFiles.map((file, idx) => (
+                    <div key={`${file.name}-${file.size}-${idx}`} className="flex items-center justify-between gap-2 text-xs">
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-700 truncate">{file.name}</div>
+                        <div className="text-[10px] text-gray-400">{Math.round(file.size / 1024)} KB</div>
+                      </div>
+                      <button
+                        onClick={() => removePendingFile(idx)}
+                        className="text-[10px] text-gray-400 hover:text-red-500"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  onClick={clearPendingFiles}
+                  className="text-[11px] text-gray-500 hover:text-gray-700 underline"
+                >
+                  Clear all
+                </button>
+              </div>
+            )}
 
             <button
               onClick={() => onIngest && onIngest()}
-              disabled={!node.params?.__file || sourceStatus?.loading}
+              disabled={currentFiles.length === 0 || sourceStatus?.loading}
               className={`w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                !node.params?.__file || sourceStatus?.loading
+                currentFiles.length === 0 || sourceStatus?.loading
                   ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                   : 'bg-blue-600 text-white hover:bg-blue-700'
               }`}
