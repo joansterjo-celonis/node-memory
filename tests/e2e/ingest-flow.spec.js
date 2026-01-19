@@ -16,5 +16,5 @@ test('ingest data, save, reopen, and clear', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Clear data' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Clear data' }).click();
-  await expect(page.getByText('No data')).toBeVisible();
+  await expect(page.locator('strong', { hasText: 'No data' })).toBeVisible();
 });
