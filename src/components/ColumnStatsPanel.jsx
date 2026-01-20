@@ -100,7 +100,7 @@ const ColumnStatsPanel = ({ node, schema = [], data = [], rowCount = 0, getColum
   const hasData = schema.length > 0 && totalRows > 0;
   const nullRate = stats && stats.totalRows > 0 ? (stats.nullCount / stats.totalRows) * 100 : 0;
 
-  const selectDropdownProps = { popupMatchSelectWidth: false, dropdownStyle: { minWidth: 320 } };
+  const selectDropdownProps = { popupMatchSelectWidth: false, styles: { popup: { root: { minWidth: 320 } } } };
 
   return (
     <div className="h-full w-72 flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/40 dark:bg-slate-900 dark:border-slate-700 dark:shadow-black/40 z-40">

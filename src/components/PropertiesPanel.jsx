@@ -11,7 +11,6 @@ import {
   Form,
   Input,
   InputNumber,
-  List,
   Progress,
   Radio,
   Select,
@@ -157,7 +156,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
     : [];
 
   const selectedColumns = Array.isArray(node.params?.columns) ? node.params.columns : schema;
-  const selectDropdownProps = { popupMatchSelectWidth: false, dropdownStyle: { minWidth: 320 } };
+  const selectDropdownProps = { popupMatchSelectWidth: false, styles: { popup: { root: { minWidth: 320 } } } };
   const fullWidthSelect = { ...selectDropdownProps, style: { width: '100%' } };
   const isSourceError = sourceStatus?.title === 'Error';
 
@@ -253,31 +252,29 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
 
             {currentFiles.length > 0 && (
               <Card size="small" title="Pending Files">
-                <List
-                  size="small"
-                  dataSource={currentFiles}
-                  locale={{ emptyText: 'No pending files' }}
-                  renderItem={(file, idx) => (
-                    <List.Item
-                      actions={[
-                        <Button
-                          key={`remove-${file.name}-${idx}`}
-                          type="text"
-                          danger
-                          size="small"
-                          onClick={() => removePendingFile(idx)}
-                        >
-                          Remove
-                        </Button>
-                      ]}
-                    >
-                      <List.Item.Meta
-                        title={<Text ellipsis>{file.name}</Text>}
-                        description={<Text type="secondary">{Math.round(file.size / 1024)} KB</Text>}
-                      />
-                    </List.Item>
-                  )}
-                />
+                <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                  {currentFiles.map((file, idx) => (
+                    <div key={`pending-${file.name}-${idx}`} className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <Text ellipsis className="block truncate">
+                          {file.name}
+                        </Text>
+                        <Text type="secondary" className="text-xs">
+                          {Math.round(file.size / 1024)} KB
+                        </Text>
+                      </div>
+                      <Button
+                        key={`remove-${file.name}-${idx}`}
+                        type="text"
+                        danger
+                        size="small"
+                        onClick={() => removePendingFile(idx)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                </Space>
                 <Button type="link" size="small" onClick={clearPendingFiles}>
                   Clear all
                 </Button>

@@ -175,6 +175,7 @@ const TablePreview = React.memo(({
     [rowCount]
   );
   const bodyHeight = Math.max(140, tableHeight - 38);
+  const scrollX = Math.max(320, columns.length * 160);
 
   if (columns.length === 0) {
     return <Empty description="No columns available for preview" />;
@@ -251,7 +252,7 @@ const TablePreview = React.memo(({
         pagination={false}
         columns={tableColumns}
         dataSource={dataSource}
-        scroll={{ y: bodyHeight, x: 'max-content' }}
+        scroll={{ y: bodyHeight, x: scrollX }}
       />
     </div>
   );

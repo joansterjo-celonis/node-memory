@@ -1,6 +1,7 @@
 // src/main.jsx
 // Entry point: boot the React app and surface any runtime errors.
 import 'antd/dist/reset.css';
+import './index.css';
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { App as AntApp, ConfigProvider, theme as antTheme } from 'antd';

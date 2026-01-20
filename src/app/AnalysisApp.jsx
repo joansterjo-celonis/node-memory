@@ -1216,7 +1216,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           <div className="flex items-center gap-3">
             {viewMode === 'canvas' && (
               <Space size="small" align="center">
-                <Button.Group size="middle">
+                <Space.Compact size="middle">
                   <Button
                     icon={<Undo size={16} />}
                     onClick={undo}
@@ -1229,7 +1229,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     disabled={historyIndex === history.length - 1}
                     aria-label="Redo"
                   />
-                </Button.Group>
+                </Space.Compact>
                 <Button type="primary" icon={<Save size={14} />} onClick={saveExploration}>
                   Save & Exit
                 </Button>
