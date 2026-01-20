@@ -14,7 +14,6 @@ import {
   Progress,
   Radio,
   Select,
-  Segmented,
   Slider,
   Space,
   Switch,
@@ -722,18 +721,34 @@ const PropertiesPanel = ({
             {/* Chart Type Selector */}
             {node.params.subtype === 'CHART' && (
               <Form.Item label="Chart Type">
-                <Segmented
+                <Radio.Group
                   value={node.params.chartType || 'bar'}
-                  onChange={(value) => handleChartTypeChange(value)}
-                  options={[
-                    { label: <Space size="small"><BarChart3 size={16} />Bar</Space>, value: 'bar' },
-                    { label: <Space size="small"><TrendingUp size={16} />Line</Space>, value: 'line' },
-                    { label: <Space size="small"><TrendingUp size={16} />Area</Space>, value: 'area' },
-                    { label: <Space size="small"><Hash size={16} />Scatter</Space>, value: 'scatter' },
-                    { label: <Space size="small"><Globe size={16} />Map</Space>, value: 'map' }
-                  ]}
-                  block
-                />
+                  onChange={(e) => handleChartTypeChange(e.target.value)}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                    gap: 8
+                  }}
+                >
+                  {[
+                    { label: 'Bar', value: 'bar', icon: <BarChart3 size={16} /> },
+                    { label: 'Line', value: 'line', icon: <TrendingUp size={16} /> },
+                    { label: 'Area', value: 'area', icon: <TrendingUp size={16} /> },
+                    { label: 'Scatter', value: 'scatter', icon: <Hash size={16} /> },
+                    { label: 'Map', value: 'map', icon: <Globe size={16} /> }
+                  ].map((option) => (
+                    <Radio.Button
+                      key={option.value}
+                      value={option.value}
+                      style={{ width: '100%', textAlign: 'left' }}
+                    >
+                      <Space size="small">
+                        {option.icon}
+                        {option.label}
+                      </Space>
+                    </Radio.Button>
+                  ))}
+                </Radio.Group>
               </Form.Item>
             )}
 
