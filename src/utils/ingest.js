@@ -18,6 +18,8 @@ const readFileAsArrayBuffer = (file) =>
   });
 
 const CSV_STREAMING_THRESHOLD = 5 * 1024 * 1024;
+const MAX_UPLOAD_MB = 30;
+const MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
 const rowsToObjects = (rows) => {
   const trimmed = rows.filter(r => r.some(cell => String(cell).trim() !== ''));
@@ -177,6 +179,8 @@ const buildDataModelFromXLSX = (tables) => {
 };
 
 export {
+  MAX_UPLOAD_MB,
+  MAX_UPLOAD_BYTES,
   readFileAsText,
   readFileAsArrayBuffer,
   parseCSV,

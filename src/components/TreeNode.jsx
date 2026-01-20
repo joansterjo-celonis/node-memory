@@ -174,8 +174,9 @@ const TablePreview = React.memo(({
     () => (rowCount > 0 ? Array.from({ length: rowCount }, (_, idx) => idx) : []),
     [rowCount]
   );
+  const COLUMN_MIN_WIDTH = 220;
   const bodyHeight = Math.max(140, tableHeight - 38);
-  const scrollX = Math.max(320, columns.length * 160);
+  const scrollX = Math.max(480, columns.length * COLUMN_MIN_WIDTH);
 
   if (columns.length === 0) {
     return <Empty description="No columns available for preview" />;
@@ -216,6 +217,7 @@ const TablePreview = React.memo(({
       ),
       dataIndex: col,
       key: col,
+      width: COLUMN_MIN_WIDTH,
       ellipsis: true,
       render: (_value, recordIndex) => {
         const row = resolveRow(recordIndex);
