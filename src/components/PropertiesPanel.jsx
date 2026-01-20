@@ -11,7 +11,6 @@ import {
   Form,
   Input,
   InputNumber,
-  List,
   Progress,
   Radio,
   Select,
@@ -23,6 +22,7 @@ import {
   Upload
 } from 'antd';
 import { Database, Settings, Play, BarChart3, TrendingUp, Hash, Globe, Plus, Trash2 } from '../ui/icons';
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
 
 const { Title, Text } = Typography;
 
@@ -63,6 +63,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
   // Local staging for JOIN config (so user can edit multiple fields then commit).
   const [localParams, setLocalParams] = useState({});
   const [llmSettings, setLlmSettings] = useState(readStoredLlmSettings);
+  const [uploadError, setUploadError] = useState('');
 
   useEffect(() => {
     if (node) setLocalParams(node.params || {});
@@ -130,25 +131,46 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
   const handleMetaChange = (key, value) => updateNode(node.id, { [key]: value }, true);
 
   const currentFiles = node.params?.__files || [];
+  const getTotalBytes = (files = []) => files.reduce((sum, file) => sum + (file?.size || 0), 0);
+  const totalPendingBytes = getTotalBytes(currentFiles);
+  const totalPendingMb = (totalPendingBytes / (1024 * 1024)).toFixed(1);
   const addPendingFiles = (incoming) => {
+    setUploadError('');
     const merged = [...currentFiles];
     const seen = new Set(currentFiles.map(file => `${file.name}-${file.size}-${file.lastModified}`));
+    let skippedOversize = false;
     incoming.forEach((file) => {
+      if ((file?.size || 0) > MAX_UPLOAD_BYTES) {
+        skippedOversize = true;
+        return;
+      }
       const key = `${file.name}-${file.size}-${file.lastModified}`;
       if (!seen.has(key)) {
         merged.push(file);
         seen.add(key);
       }
     });
+    if (skippedOversize) {
+      setUploadError(`Some files exceed the ${MAX_UPLOAD_MB} MB per-file limit and were skipped.`);
+    }
+    const nextTotal = getTotalBytes(merged);
+    if (nextTotal > MAX_UPLOAD_BYTES) {
+      setUploadError(`Total upload size exceeds ${MAX_UPLOAD_MB} MB limit.`);
+      return;
+    }
     handleChange('__files', merged);
   };
 
   const removePendingFile = (index) => {
     const next = currentFiles.filter((_, idx) => idx !== index);
+    setUploadError('');
     handleChange('__files', next);
   };
 
-  const clearPendingFiles = () => handleChange('__files', []);
+  const clearPendingFiles = () => {
+    setUploadError('');
+    handleChange('__files', []);
+  };
 
   const kpiMetrics = (node.type === 'COMPONENT' && node.params.subtype === 'KPI')
     ? (node.params.metrics && node.params.metrics.length > 0
@@ -157,7 +179,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
     : [];
 
   const selectedColumns = Array.isArray(node.params?.columns) ? node.params.columns : schema;
-  const selectDropdownProps = { popupMatchSelectWidth: false, dropdownStyle: { minWidth: 320 } };
+  const selectDropdownProps = { popupMatchSelectWidth: false, styles: { popup: { root: { minWidth: 320 } } } };
   const fullWidthSelect = { ...selectDropdownProps, style: { width: '100%' } };
   const isSourceError = sourceStatus?.title === 'Error';
 
@@ -248,36 +270,42 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                 <Text type="secondary" className="text-xs">
                   Tip: uploading files replaces the data model feeding the chain.
                 </Text>
+                <Text type="secondary" className="text-xs">
+                  Max {MAX_UPLOAD_MB} MB per file / {MAX_UPLOAD_MB} MB total. Selected: {totalPendingMb} MB.
+                </Text>
+                {uploadError && (
+                  <Text type="danger" className="text-xs">
+                    {uploadError}
+                  </Text>
+                )}
               </Space>
             </Form.Item>
 
             {currentFiles.length > 0 && (
               <Card size="small" title="Pending Files">
-                <List
-                  size="small"
-                  dataSource={currentFiles}
-                  locale={{ emptyText: 'No pending files' }}
-                  renderItem={(file, idx) => (
-                    <List.Item
-                      actions={[
-                        <Button
-                          key={`remove-${file.name}-${idx}`}
-                          type="text"
-                          danger
-                          size="small"
-                          onClick={() => removePendingFile(idx)}
-                        >
-                          Remove
-                        </Button>
-                      ]}
-                    >
-                      <List.Item.Meta
-                        title={<Text ellipsis>{file.name}</Text>}
-                        description={<Text type="secondary">{Math.round(file.size / 1024)} KB</Text>}
-                      />
-                    </List.Item>
-                  )}
-                />
+                <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                  {currentFiles.map((file, idx) => (
+                    <div key={`pending-${file.name}-${idx}`} className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <Text ellipsis className="block truncate">
+                          {file.name}
+                        </Text>
+                        <Text type="secondary" className="text-xs">
+                          {Math.round(file.size / 1024)} KB
+                        </Text>
+                      </div>
+                      <Button
+                        key={`remove-${file.name}-${idx}`}
+                        type="text"
+                        danger
+                        size="small"
+                        onClick={() => removePendingFile(idx)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                </Space>
                 <Button type="link" size="small" onClick={clearPendingFiles}>
                   Clear all
                 </Button>

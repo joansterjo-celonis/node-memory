@@ -6,7 +6,7 @@ import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
 import { TreeNode } from '../components/TreeNode';
 import { Layout, Database, AppsIcon, Settings, Undo, Redo, TableIcon, X, Plus, Trash2, Play, Save } from '../ui/icons';
-import { parseCSVFile, readFileAsArrayBuffer, parseXLSX } from '../utils/ingest';
+import { parseCSVFile, readFileAsArrayBuffer, parseXLSX, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
 import { getChildren, getCalculationOrder, getNodeResult } from '../utils/nodeUtils';
 import { createDataEngine } from '../utils/dataEngine';
 
@@ -35,6 +35,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [isLoadingFile, setIsLoadingFile] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [pendingFiles, setPendingFiles] = useState([]);
+
+  const getTotalFileBytes = (files = []) =>
+    files.reduce((sum, file) => sum + (file?.size || 0), 0);
+  const findOversizeFile = (files = []) =>
+    files.find((file) => (file?.size || 0) > MAX_UPLOAD_BYTES);
 
   // -------------------------------------------------------------------
   // History state (undo / redo)
@@ -72,6 +77,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         // Allow UI to render progress state
         await new Promise(resolve => setTimeout(resolve, 50));
 
+        const oversizeFile = findOversizeFile(selectedFiles);
+        if (oversizeFile) {
+          throw new Error(`${oversizeFile.name || 'A file'} exceeds the ${MAX_UPLOAD_MB} MB per-file limit.`);
+        }
+        const totalBytes = getTotalFileBytes(selectedFiles);
+        if (totalBytes > MAX_UPLOAD_BYTES) {
+          throw new Error(`Total upload size exceeds ${MAX_UPLOAD_MB} MB limit.`);
+        }
+
         const tables = {};
         const order = [];
         const fileNames = [];
@@ -92,6 +106,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           const lower = name.toLowerCase();
           const baseName = name.replace(/\.(csv|xlsx|xls)$/i, '') || 'data';
           fileNames.push(name);
+
+          if ((file?.size || 0) > MAX_UPLOAD_BYTES) {
+            throw new Error(`${name} exceeds the ${MAX_UPLOAD_MB} MB per-file limit.`);
+          }
 
           if (lower.endsWith('.csv')) {
             const rows = await parseCSVFile(file);
@@ -204,6 +222,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const ingestPendingFiles = () => {
     if (!pendingFiles || pendingFiles.length === 0) {
       setLoadError('Please select one or more files to ingest.');
+      return;
+    }
+    const oversizeFile = findOversizeFile(pendingFiles);
+    if (oversizeFile) {
+      setLoadError(`${oversizeFile.name || 'A file'} exceeds the ${MAX_UPLOAD_MB} MB per-file limit.`);
+      return;
+    }
+    const totalBytes = getTotalFileBytes(pendingFiles);
+    if (totalBytes > MAX_UPLOAD_BYTES) {
+      setLoadError(`Total upload size exceeds ${MAX_UPLOAD_MB} MB limit.`);
       return;
     }
     setLoadError(null);
@@ -1216,7 +1244,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           <div className="flex items-center gap-3">
             {viewMode === 'canvas' && (
               <Space size="small" align="center">
-                <Button.Group size="middle">
+                <Space.Compact size="middle">
                   <Button
                     icon={<Undo size={16} />}
                     onClick={undo}
@@ -1229,7 +1257,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     disabled={historyIndex === history.length - 1}
                     aria-label="Redo"
                   />
-                </Button.Group>
+                </Space.Compact>
                 <Button type="primary" icon={<Save size={14} />} onClick={saveExploration}>
                   Save & Exit
                 </Button>

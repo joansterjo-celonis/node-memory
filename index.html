@@ -5,57 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Node Memory Analytics</title>
 
-  <!-- UI / styling -->
-  <script>
-    window.tailwindConfig = { darkMode: 'class' };
-    window.tailwind = window.tailwind || {};
-    window.tailwind.config = window.tailwindConfig;
-  </script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = window.tailwindConfig;
-  </script>
-
   <!-- XLSX (Excel parsing) -->
   <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-
-  <style>
-    /* Subtle animation helpers */
-    @keyframes slide-in-from-bottom-4 {
-      from { opacity: 0; transform: translateY(1rem); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .animate-in { animation: slide-in-from-bottom-4 0.5s ease-out; }
-    .fill-mode-backwards { animation-fill-mode: backwards; }
-
-    /* Thin scrollbars for preview tables */
-    .scrollbar-thin { scrollbar-width: thin; }
-    .scrollbar-thumb-gray-200::-webkit-scrollbar { width: 6px; }
-    .scrollbar-thumb-gray-200::-webkit-scrollbar-thumb { background-color: #e5e7eb; border-radius: 3px; }
-
-    /* Indeterminate progress bar for ingestion */
-    .progress-bar {
-      position: relative;
-      height: 8px;
-      background: #dbeafe;
-      border-radius: 9999px;
-      overflow: hidden;
-    }
-    .progress-bar::after {
-      content: '';
-      position: absolute;
-      left: -40%;
-      top: 0;
-      bottom: 0;
-      width: 40%;
-      background: #3b82f6;
-      animation: progress-indeterminate 1s linear infinite;
-    }
-    @keyframes progress-indeterminate {
-      0% { left: -40%; }
-      100% { left: 100%; }
-    }
-  </style>
 </head>
 <body>
   <!-- Visible errors if runtime fails (keeps debugging easy) -->
