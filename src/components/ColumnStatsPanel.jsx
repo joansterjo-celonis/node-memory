@@ -1,7 +1,8 @@
 // src/components/ColumnStatsPanel.jsx
 // Middle panel showing per-column statistics.
 import React from 'react';
-import { Card, Empty, Progress, Select, Space, Statistic, Typography } from 'antd';
+import { Button, Card, Empty, Progress, Select, Space, Statistic, Typography } from 'antd';
+import { LinkIcon, Minimize2, Share2 } from '../ui/icons';
 import { formatNumber } from '../utils/nodeUtils';
 
 const { Text, Title } = Typography;
@@ -30,7 +31,17 @@ const StatCard = ({ label, value, helper }) => (
   </Card>
 );
 
-const ColumnStatsPanel = ({ node, schema = [], data = [], rowCount = 0, getColumnStats }) => {
+const ColumnStatsPanel = ({
+  node,
+  schema = [],
+  data = [],
+  rowCount = 0,
+  getColumnStats,
+  onCollapse,
+  onToggleDetach,
+  isDetached = false,
+  dragHandleProps
+}) => {
   const [selectedColumn, setSelectedColumn] = React.useState('');
 
   React.useEffect(() => {
@@ -102,11 +113,44 @@ const ColumnStatsPanel = ({ node, schema = [], data = [], rowCount = 0, getColum
 
   const selectDropdownProps = { popupMatchSelectWidth: false, styles: { popup: { root: { minWidth: 320 } } } };
 
+  const containerClassName = isDetached ? 'h-full w-full' : 'h-full w-72';
+  const borderClassName = isDetached ? 'border border-transparent' : 'border-l border-gray-200 dark:border-slate-700';
+  const detachTitle = isDetached ? 'Dock panel' : 'Detach panel';
+
   return (
-    <div className="h-full w-72 flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/40 dark:bg-slate-900 dark:border-slate-700 dark:shadow-black/40 z-40">
+    <div className={`${containerClassName} ${borderClassName} flex flex-col bg-white shadow-xl shadow-gray-200/40 dark:bg-slate-900 dark:shadow-black/40 z-40`}>
       <div className="p-4 border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700">
-        <Title level={5} style={{ margin: 0 }}>Column Stats</Title>
-        <Text type="secondary">Summary for the selected column</Text>
+        <div className="flex items-start justify-between gap-3">
+          <div
+            {...(isDetached ? dragHandleProps : undefined)}
+            className={`min-w-0 flex-1 ${isDetached ? 'cursor-move select-none' : ''}`}
+          >
+            <Title level={5} style={{ margin: 0 }}>Column Stats</Title>
+            <Text type="secondary">Summary for the selected column</Text>
+          </div>
+          <div className="flex items-center gap-1">
+            {onToggleDetach && (
+              <Button
+                type="text"
+                size="small"
+                icon={isDetached ? <LinkIcon size={14} /> : <Share2 size={14} />}
+                onClick={onToggleDetach}
+                title={detachTitle}
+                aria-label={detachTitle}
+              />
+            )}
+            {onCollapse && (
+              <Button
+                type="text"
+                size="small"
+                icon={<Minimize2 size={14} />}
+                onClick={onCollapse}
+                title="Collapse panel"
+                aria-label="Collapse panel"
+              />
+            )}
+          </div>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {!node && (

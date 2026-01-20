@@ -14,14 +14,13 @@ import {
   Progress,
   Radio,
   Select,
-  Segmented,
   Slider,
   Space,
   Switch,
   Typography,
   Upload
 } from 'antd';
-import { Database, Settings, Play, BarChart3, TrendingUp, Hash, Globe, Plus, Trash2 } from '../ui/icons';
+import { Database, Settings, Play, BarChart3, TrendingUp, Hash, Globe, Plus, Trash2, Minimize2 } from '../ui/icons';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
 
 const { Title, Text } = Typography;
@@ -59,7 +58,18 @@ const readStoredLlmSettings = () => {
   }
 };
 
-const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourceStatus, onIngest, onClearData, onShowDataModel }) => {
+const PropertiesPanel = ({
+  node,
+  updateNode,
+  schema,
+  data = [],
+  dataModel,
+  sourceStatus,
+  onIngest,
+  onClearData,
+  onShowDataModel,
+  onCollapse
+}) => {
   // Local staging for JOIN config (so user can edit multiple fields then commit).
   const [localParams, setLocalParams] = useState({});
   const [llmSettings, setLlmSettings] = useState(readStoredLlmSettings);
@@ -93,6 +103,23 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
   if (!node) {
     return (
       <div className="h-full flex flex-col bg-white border-l border-gray-200 dark:bg-slate-900 dark:border-slate-700">
+        <div className="p-5 border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700">
+          <div className="flex items-center justify-between gap-3">
+            <Text type="secondary" className="uppercase tracking-wider text-[11px]">
+              Properties
+            </Text>
+            {onCollapse && (
+              <Button
+                type="text"
+                size="small"
+                icon={<Minimize2 size={16} />}
+                onClick={onCollapse}
+                title="Collapse panel"
+                aria-label="Collapse panel"
+              />
+            )}
+          </div>
+        </div>
         <Card className="m-4">
           <Empty
             image={<Settings size={48} className="opacity-20" />}
@@ -205,22 +232,34 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
     <div className="h-full flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/50 dark:bg-slate-900 dark:border-slate-700 dark:shadow-black/40 w-80 animate-in slide-in-from-right duration-300 z-50">
       {/* Header */}
       <div className="p-5 border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700">
-        <Space orientation="vertical" size={6} style={{ width: '100%' }}>
-          <Text type="secondary" className="uppercase tracking-wider text-[11px]">
-            {node.type === 'COMPONENT' ? node.params.subtype : node.type} Node
-          </Text>
-          <Input
-            size="middle"
-            variant="borderless"
-            value={node.title}
-            onChange={(e) => handleMetaChange('title', e.target.value)}
-            placeholder="Node title"
-            style={{ paddingInline: 0, paddingBlock: 0 }}
-          />
-          <Text type="secondary" className="font-mono text-[11px]">
-            ID: {node.id.split('-').pop()}
-          </Text>
-        </Space>
+        <div className="flex items-start justify-between gap-3">
+          <Space orientation="vertical" size={6} style={{ width: '100%' }}>
+            <Text type="secondary" className="uppercase tracking-wider text-[11px]">
+              {node.type === 'COMPONENT' ? node.params.subtype : node.type} Node
+            </Text>
+            <Input
+              size="middle"
+              variant="borderless"
+              value={node.title}
+              onChange={(e) => handleMetaChange('title', e.target.value)}
+              placeholder="Node title"
+              style={{ paddingInline: 0, paddingBlock: 0 }}
+            />
+            <Text type="secondary" className="font-mono text-[11px]">
+              ID: {node.id.split('-').pop()}
+            </Text>
+          </Space>
+          {onCollapse && (
+            <Button
+              type="text"
+              size="small"
+              icon={<Minimize2 size={16} />}
+              onClick={onCollapse}
+              title="Collapse panel"
+              aria-label="Collapse panel"
+            />
+          )}
+        </div>
       </div>
 
       {/* Body */}
@@ -682,18 +721,34 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
             {/* Chart Type Selector */}
             {node.params.subtype === 'CHART' && (
               <Form.Item label="Chart Type">
-                <Segmented
+                <Radio.Group
                   value={node.params.chartType || 'bar'}
-                  onChange={(value) => handleChartTypeChange(value)}
-                  options={[
-                    { label: <Space size="small"><BarChart3 size={16} />Bar</Space>, value: 'bar' },
-                    { label: <Space size="small"><TrendingUp size={16} />Line</Space>, value: 'line' },
-                    { label: <Space size="small"><TrendingUp size={16} />Area</Space>, value: 'area' },
-                    { label: <Space size="small"><Hash size={16} />Scatter</Space>, value: 'scatter' },
-                    { label: <Space size="small"><Globe size={16} />Map</Space>, value: 'map' }
-                  ]}
-                  block
-                />
+                  onChange={(e) => handleChartTypeChange(e.target.value)}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                    gap: 8
+                  }}
+                >
+                  {[
+                    { label: 'Bar', value: 'bar', icon: <BarChart3 size={16} /> },
+                    { label: 'Line', value: 'line', icon: <TrendingUp size={16} /> },
+                    { label: 'Area', value: 'area', icon: <TrendingUp size={16} /> },
+                    { label: 'Scatter', value: 'scatter', icon: <Hash size={16} /> },
+                    { label: 'Map', value: 'map', icon: <Globe size={16} /> }
+                  ].map((option) => (
+                    <Radio.Button
+                      key={option.value}
+                      value={option.value}
+                      style={{ width: '100%', textAlign: 'left' }}
+                    >
+                      <Space size="small">
+                        {option.icon}
+                        {option.label}
+                      </Space>
+                    </Radio.Button>
+                  ))}
+                </Radio.Group>
               </Form.Item>
             )}
 
@@ -842,20 +897,22 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
                       )}
                     </Form.Item>
                     <Form.Item label="Bar Gap">
-                      <Space size="small" style={{ width: '100%' }}>
-                        <Slider
-                          min={0}
-                          max={0.8}
-                          step={0.05}
-                          value={node.params.chartBarGap ?? 0.2}
-                          onChange={(value) => handleChange('chartBarGap', value)}
-                          disabled={node.params.chartType !== 'bar'}
-                          style={{ flex: 1 }}
-                        />
+                      <div className="flex items-center gap-2 w-full">
+                        <div className="flex-1 min-w-0">
+                          <Slider
+                            min={0}
+                            max={0.8}
+                            step={0.05}
+                            value={node.params.chartBarGap ?? 0.2}
+                            onChange={(value) => handleChange('chartBarGap', value)}
+                            disabled={node.params.chartType !== 'bar'}
+                            style={{ width: '100%' }}
+                          />
+                        </div>
                         <Text type="secondary" className="text-xs w-10 text-right">
                           {(node.params.chartBarGap ?? 0.2).toFixed(2)}
                         </Text>
-                      </Space>
+                      </div>
                       {node.params.chartType !== 'bar' && (
                         <Text type="secondary" className="text-xs">
                           Bar gap applies to bar charts.

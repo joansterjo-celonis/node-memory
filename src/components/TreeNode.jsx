@@ -125,46 +125,57 @@ const AssistantPanel = React.memo(({ node, schema, onRun }) => {
 
 const TablePreview = React.memo(({
   rowCount = 0,
-  columns,
+  columns = [],
   getRowAt,
+  sampleRows = [],
   onCellClick,
   onSortChange,
   nodeId,
   sortBy,
-  sortDirection
+  sortDirection,
+  tableDensity = 'comfortable'
 }) => {
   const containerRef = React.useRef(null);
   const rowCacheRef = React.useRef(new Map());
   const [tableHeight, setTableHeight] = React.useState(220);
+  const [headerHeight, setHeaderHeight] = React.useState(38);
   const normalizedSortDirection = sortDirection === 'asc' || sortDirection === 'desc' ? sortDirection : '';
+  const densityClassName = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
 
   React.useEffect(() => {
     const el = containerRef.current;
     if (!el) return undefined;
 
-    const updateHeight = () => {
+    const updateLayoutMetrics = () => {
       const rect = el.getBoundingClientRect();
       if (rect.height) setTableHeight(rect.height);
+      const header = el.querySelector('.ant-table-header') || el.querySelector('.ant-table-thead');
+      if (header) {
+        const nextHeaderHeight = Math.ceil(header.getBoundingClientRect().height);
+        setHeaderHeight((prev) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+      }
     };
-    updateHeight();
+    updateLayoutMetrics();
 
     if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateHeight);
-      return () => window.removeEventListener('resize', updateHeight);
+      window.addEventListener('resize', updateLayoutMetrics);
+      return () => window.removeEventListener('resize', updateLayoutMetrics);
     }
 
     let frame = null;
     const observer = new ResizeObserver(() => {
       if (frame) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(updateHeight);
+      frame = requestAnimationFrame(updateLayoutMetrics);
     });
     observer.observe(el);
+    const header = el.querySelector('.ant-table-header') || el.querySelector('.ant-table-thead');
+    if (header) observer.observe(header);
 
     return () => {
       observer.disconnect();
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [rowCount, columns.length]);
+  }, [rowCount, columns.length, tableDensity]);
 
   React.useEffect(() => {
     rowCacheRef.current.clear();
@@ -174,9 +185,35 @@ const TablePreview = React.memo(({
     () => (rowCount > 0 ? Array.from({ length: rowCount }, (_, idx) => idx) : []),
     [rowCount]
   );
-  const COLUMN_MIN_WIDTH = 220;
-  const bodyHeight = Math.max(140, tableHeight - 38);
-  const scrollX = Math.max(480, columns.length * COLUMN_MIN_WIDTH);
+  const bodyHeight = Math.max(140, tableHeight - headerHeight);
+  const widthSampleRows = React.useMemo(
+    () => (Array.isArray(sampleRows) ? sampleRows.slice(0, 40) : []),
+    [sampleRows]
+  );
+  const estimatedColumnWidths = React.useMemo(() => {
+    const widths = {};
+    const MIN_COL_WIDTH = 120;
+    const MAX_COL_WIDTH = 260;
+    const CHAR_WIDTH = 7;
+    const BASE_PADDING = 32;
+    columns.forEach((col) => {
+      let maxLen = String(col).length;
+      widthSampleRows.forEach((row) => {
+        const value = row?.[col];
+        if (value === null || value === undefined) return;
+        const text = String(value);
+        if (!text) return;
+        const len = Math.min(text.length, 32);
+        if (len > maxLen) maxLen = len;
+      });
+      widths[col] = Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, BASE_PADDING + maxLen * CHAR_WIDTH));
+    });
+    return widths;
+  }, [columns, widthSampleRows]);
+  const scrollX = Math.max(
+    360,
+    columns.reduce((sum, col) => sum + (estimatedColumnWidths[col] || 120), 0)
+  );
 
   if (columns.length === 0) {
     return <Empty description="No columns available for preview" />;
@@ -217,7 +254,7 @@ const TablePreview = React.memo(({
       ),
       dataIndex: col,
       key: col,
-      width: COLUMN_MIN_WIDTH,
+      width: estimatedColumnWidths[col] || 120,
       ellipsis: true,
       render: (_value, recordIndex) => {
         const row = resolveRow(recordIndex);
@@ -248,7 +285,7 @@ const TablePreview = React.memo(({
         size="small"
         sticky
         virtual
-        className="rounded-none"
+        className={`rounded-none ${densityClassName}`}
         style={{ borderRadius: 0 }}
         rowKey={(record) => record}
         pagination={false}
@@ -376,6 +413,7 @@ const TreeNode = ({
   nodes,
   selectedNodeId,
   chainData,
+  tableDensity = 'comfortable',
   onSelect,
   onAdd,
   onInsert,
@@ -399,6 +437,7 @@ const TreeNode = ({
   const isActive = selectedNodeId === nodeId;
   const isExpanded = node.isExpanded !== false;
   const isBranchCollapsed = node.isBranchCollapsed === true;
+  const tableDensityClass = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
   const addMenuRef = React.useRef(null);
   const insertMenuRef = React.useRef(null);
 
@@ -517,6 +556,7 @@ const TreeNode = ({
 
   const pivotTableRef = React.useRef(null);
   const [pivotTableHeight, setPivotTableHeight] = React.useState(220);
+  const [pivotHeaderHeight, setPivotHeaderHeight] = React.useState(38);
 
   const pivotState = React.useMemo(() => {
     if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'PIVOT') return null;
@@ -553,29 +593,36 @@ const TreeNode = ({
     const el = pivotTableRef.current;
     if (!el) return undefined;
 
-    const updateHeight = () => {
+    const updateLayoutMetrics = () => {
       const rect = el.getBoundingClientRect();
       if (rect.height) setPivotTableHeight(rect.height);
+      const header = el.querySelector('.ant-table-header') || el.querySelector('.ant-table-thead');
+      if (header) {
+        const nextHeaderHeight = Math.ceil(header.getBoundingClientRect().height);
+        setPivotHeaderHeight((prev) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+      }
     };
-    updateHeight();
+    updateLayoutMetrics();
 
     if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateHeight);
-      return () => window.removeEventListener('resize', updateHeight);
+      window.addEventListener('resize', updateLayoutMetrics);
+      return () => window.removeEventListener('resize', updateLayoutMetrics);
     }
 
     let frame = null;
     const observer = new ResizeObserver(() => {
       if (frame) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(updateHeight);
+      frame = requestAnimationFrame(updateLayoutMetrics);
     });
     observer.observe(el);
+    const header = el.querySelector('.ant-table-header') || el.querySelector('.ant-table-thead');
+    if (header) observer.observe(header);
 
     return () => {
       observer.disconnect();
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [pivotState?.rowKeys?.length, pivotState?.colKeys?.length]);
+  }, [pivotState?.rowKeys?.length, pivotState?.colKeys?.length, tableDensity]);
 
   const chartType = node.params.chartType || 'bar';
   const chartAggFn = node.params.chartAggFn || 'none';
@@ -767,11 +814,13 @@ const TreeNode = ({
                       rowCount={result.rowCount}
                       columns={visibleColumns}
                       getRowAt={result.getRowAt}
+                      sampleRows={result.sampleRows || result.data || []}
                       onCellClick={onTableCellClick}
                       onSortChange={onTableSortChange}
                       nodeId={nodeId}
                       sortBy={node.params.tableSortBy}
                       sortDirection={node.params.tableSortDirection}
+                      tableDensity={tableDensity}
                     />
                   </div>
                 </div>
@@ -815,12 +864,12 @@ const TreeNode = ({
                         return (
                           <Table
                             size="small"
-                            className="rounded-none"
+                            className={`rounded-none ${tableDensityClass}`}
                             style={{ borderRadius: 0 }}
                             pagination={false}
                             columns={pivotColumns}
                             dataSource={dataSource}
-                            scroll={{ x: 'max-content', y: Math.max(140, pivotTableHeight - 38) }}
+                            scroll={{ x: 'max-content', y: Math.max(140, pivotTableHeight - pivotHeaderHeight) }}
                             rowKey="rowKey"
                           />
                         );
@@ -979,6 +1028,7 @@ const TreeNode = ({
               nodes={nodes}
               selectedNodeId={selectedNodeId}
               chainData={chainData}
+              tableDensity={tableDensity}
               onSelect={onSelect}
               onAdd={onAdd}
               onInsert={onInsert}
@@ -1003,6 +1053,7 @@ const TreeNode = ({
                   nodes={nodes}
                   selectedNodeId={selectedNodeId}
                   chainData={chainData}
+                  tableDensity={tableDensity}
                   onSelect={onSelect}
                   onAdd={onAdd}
                   onInsert={onInsert}
