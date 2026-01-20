@@ -21,7 +21,7 @@ import {
   Typography,
   Upload
 } from 'antd';
-import { Database, Settings, Play, BarChart3, TrendingUp, Hash, Globe, Plus, Trash2 } from '../ui/icons';
+import { Database, Settings, Play, BarChart3, TrendingUp, Hash, Globe, Plus, Trash2, Minimize2 } from '../ui/icons';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
 
 const { Title, Text } = Typography;
@@ -59,7 +59,18 @@ const readStoredLlmSettings = () => {
   }
 };
 
-const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourceStatus, onIngest, onClearData, onShowDataModel }) => {
+const PropertiesPanel = ({
+  node,
+  updateNode,
+  schema,
+  data = [],
+  dataModel,
+  sourceStatus,
+  onIngest,
+  onClearData,
+  onShowDataModel,
+  onCollapse
+}) => {
   // Local staging for JOIN config (so user can edit multiple fields then commit).
   const [localParams, setLocalParams] = useState({});
   const [llmSettings, setLlmSettings] = useState(readStoredLlmSettings);
@@ -93,6 +104,23 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
   if (!node) {
     return (
       <div className="h-full flex flex-col bg-white border-l border-gray-200 dark:bg-slate-900 dark:border-slate-700">
+        <div className="p-5 border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700">
+          <div className="flex items-center justify-between gap-3">
+            <Text type="secondary" className="uppercase tracking-wider text-[11px]">
+              Properties
+            </Text>
+            {onCollapse && (
+              <Button
+                type="text"
+                size="small"
+                icon={<Minimize2 size={16} />}
+                onClick={onCollapse}
+                title="Collapse panel"
+                aria-label="Collapse panel"
+              />
+            )}
+          </div>
+        </div>
         <Card className="m-4">
           <Empty
             image={<Settings size={48} className="opacity-20" />}
@@ -205,22 +233,34 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
     <div className="h-full flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/50 dark:bg-slate-900 dark:border-slate-700 dark:shadow-black/40 w-80 animate-in slide-in-from-right duration-300 z-50">
       {/* Header */}
       <div className="p-5 border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700">
-        <Space orientation="vertical" size={6} style={{ width: '100%' }}>
-          <Text type="secondary" className="uppercase tracking-wider text-[11px]">
-            {node.type === 'COMPONENT' ? node.params.subtype : node.type} Node
-          </Text>
-          <Input
-            size="middle"
-            variant="borderless"
-            value={node.title}
-            onChange={(e) => handleMetaChange('title', e.target.value)}
-            placeholder="Node title"
-            style={{ paddingInline: 0, paddingBlock: 0 }}
-          />
-          <Text type="secondary" className="font-mono text-[11px]">
-            ID: {node.id.split('-').pop()}
-          </Text>
-        </Space>
+        <div className="flex items-start justify-between gap-3">
+          <Space orientation="vertical" size={6} style={{ width: '100%' }}>
+            <Text type="secondary" className="uppercase tracking-wider text-[11px]">
+              {node.type === 'COMPONENT' ? node.params.subtype : node.type} Node
+            </Text>
+            <Input
+              size="middle"
+              variant="borderless"
+              value={node.title}
+              onChange={(e) => handleMetaChange('title', e.target.value)}
+              placeholder="Node title"
+              style={{ paddingInline: 0, paddingBlock: 0 }}
+            />
+            <Text type="secondary" className="font-mono text-[11px]">
+              ID: {node.id.split('-').pop()}
+            </Text>
+          </Space>
+          {onCollapse && (
+            <Button
+              type="text"
+              size="small"
+              icon={<Minimize2 size={16} />}
+              onClick={onCollapse}
+              title="Collapse panel"
+              aria-label="Collapse panel"
+            />
+          )}
+        </div>
       </div>
 
       {/* Body */}

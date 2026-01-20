@@ -125,18 +125,21 @@ const AssistantPanel = React.memo(({ node, schema, onRun }) => {
 
 const TablePreview = React.memo(({
   rowCount = 0,
-  columns,
+  columns = [],
   getRowAt,
+  sampleRows = [],
   onCellClick,
   onSortChange,
   nodeId,
   sortBy,
-  sortDirection
+  sortDirection,
+  tableDensity = 'comfortable'
 }) => {
   const containerRef = React.useRef(null);
   const rowCacheRef = React.useRef(new Map());
   const [tableHeight, setTableHeight] = React.useState(220);
   const normalizedSortDirection = sortDirection === 'asc' || sortDirection === 'desc' ? sortDirection : '';
+  const densityClassName = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
 
   React.useEffect(() => {
     const el = containerRef.current;
@@ -174,9 +177,35 @@ const TablePreview = React.memo(({
     () => (rowCount > 0 ? Array.from({ length: rowCount }, (_, idx) => idx) : []),
     [rowCount]
   );
-  const COLUMN_MIN_WIDTH = 220;
   const bodyHeight = Math.max(140, tableHeight - 38);
-  const scrollX = Math.max(480, columns.length * COLUMN_MIN_WIDTH);
+  const widthSampleRows = React.useMemo(
+    () => (Array.isArray(sampleRows) ? sampleRows.slice(0, 40) : []),
+    [sampleRows]
+  );
+  const estimatedColumnWidths = React.useMemo(() => {
+    const widths = {};
+    const MIN_COL_WIDTH = 120;
+    const MAX_COL_WIDTH = 260;
+    const CHAR_WIDTH = 7;
+    const BASE_PADDING = 32;
+    columns.forEach((col) => {
+      let maxLen = String(col).length;
+      widthSampleRows.forEach((row) => {
+        const value = row?.[col];
+        if (value === null || value === undefined) return;
+        const text = String(value);
+        if (!text) return;
+        const len = Math.min(text.length, 32);
+        if (len > maxLen) maxLen = len;
+      });
+      widths[col] = Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, BASE_PADDING + maxLen * CHAR_WIDTH));
+    });
+    return widths;
+  }, [columns, widthSampleRows]);
+  const scrollX = Math.max(
+    360,
+    columns.reduce((sum, col) => sum + (estimatedColumnWidths[col] || 120), 0)
+  );
 
   if (columns.length === 0) {
     return <Empty description="No columns available for preview" />;
@@ -217,7 +246,7 @@ const TablePreview = React.memo(({
       ),
       dataIndex: col,
       key: col,
-      width: COLUMN_MIN_WIDTH,
+      width: estimatedColumnWidths[col] || 120,
       ellipsis: true,
       render: (_value, recordIndex) => {
         const row = resolveRow(recordIndex);
@@ -248,7 +277,7 @@ const TablePreview = React.memo(({
         size="small"
         sticky
         virtual
-        className="rounded-none"
+        className={`rounded-none ${densityClassName}`}
         style={{ borderRadius: 0 }}
         rowKey={(record) => record}
         pagination={false}
@@ -376,6 +405,7 @@ const TreeNode = ({
   nodes,
   selectedNodeId,
   chainData,
+  tableDensity = 'comfortable',
   onSelect,
   onAdd,
   onInsert,
@@ -399,6 +429,7 @@ const TreeNode = ({
   const isActive = selectedNodeId === nodeId;
   const isExpanded = node.isExpanded !== false;
   const isBranchCollapsed = node.isBranchCollapsed === true;
+  const tableDensityClass = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
   const addMenuRef = React.useRef(null);
   const insertMenuRef = React.useRef(null);
 
@@ -767,11 +798,13 @@ const TreeNode = ({
                       rowCount={result.rowCount}
                       columns={visibleColumns}
                       getRowAt={result.getRowAt}
+                      sampleRows={result.sampleRows || result.data || []}
                       onCellClick={onTableCellClick}
                       onSortChange={onTableSortChange}
                       nodeId={nodeId}
                       sortBy={node.params.tableSortBy}
                       sortDirection={node.params.tableSortDirection}
+                      tableDensity={tableDensity}
                     />
                   </div>
                 </div>
@@ -815,7 +848,7 @@ const TreeNode = ({
                         return (
                           <Table
                             size="small"
-                            className="rounded-none"
+                            className={`rounded-none ${tableDensityClass}`}
                             style={{ borderRadius: 0 }}
                             pagination={false}
                             columns={pivotColumns}
@@ -979,6 +1012,7 @@ const TreeNode = ({
               nodes={nodes}
               selectedNodeId={selectedNodeId}
               chainData={chainData}
+              tableDensity={tableDensity}
               onSelect={onSelect}
               onAdd={onAdd}
               onInsert={onInsert}
@@ -1003,6 +1037,7 @@ const TreeNode = ({
                   nodes={nodes}
                   selectedNodeId={selectedNodeId}
                   chainData={chainData}
+                  tableDensity={tableDensity}
                   onSelect={onSelect}
                   onAdd={onAdd}
                   onInsert={onInsert}

@@ -1,6 +1,6 @@
 // src/app/AnalysisApp.js
 // Main application component: ingestion, history, engine, and layout.
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { Button, Card, Dropdown, Empty, Modal, Space, Tag, Typography } from 'antd';
 import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
@@ -24,6 +24,29 @@ const createInitialNodes = () => ([
     params: { table: null, __files: [] }
   }
 ]);
+
+const TABLE_DENSITY_STORAGE_KEY = 'nma-table-density';
+const DEFAULT_TABLE_DENSITY = 'comfortable';
+const readStoredTableDensity = () => {
+  if (typeof window === 'undefined' || !window.localStorage) return DEFAULT_TABLE_DENSITY;
+  try {
+    const raw = window.localStorage.getItem(TABLE_DENSITY_STORAGE_KEY);
+    if (raw === 'dense' || raw === 'comfortable') return raw;
+  } catch (err) {
+    // Ignore storage errors.
+  }
+  return DEFAULT_TABLE_DENSITY;
+};
+
+const getDefaultStatsPanelRect = () => {
+  const fallback = { x: 64, y: 96, width: 320, height: 520 };
+  if (typeof window === 'undefined') return fallback;
+  const width = fallback.width;
+  const height = fallback.height;
+  const x = Math.max(16, window.innerWidth - width - 32);
+  const y = fallback.y;
+  return { x, y, width, height };
+};
 
 const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   // -------------------------------------------------------------------
@@ -57,6 +80,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [explorations, setExplorations] = useState([]);
   const [activeExplorationId, setActiveExplorationId] = useState(null);
   const [saveError, setSaveError] = useState(null);
+  const [tableDensity, setTableDensity] = useState(readStoredTableDensity);
+  const [isStatsCollapsed, setIsStatsCollapsed] = useState(false);
+  const [isStatsDetached, setIsStatsDetached] = useState(false);
+  const [statsPanelRect, setStatsPanelRect] = useState(getDefaultStatsPanelRect);
+  const [isPropertiesCollapsed, setIsPropertiesCollapsed] = useState(false);
+  const statsDragStateRef = useRef(null);
+  const statsDragFrameRef = useRef(null);
+  const statsResizeStateRef = useRef(null);
+  const statsResizeFrameRef = useRef(null);
 
   // -------------------------------------------------------------------
   // File ingestion pipeline (triggered by explicit "Ingest Data" button)
@@ -192,6 +224,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setExplorations(loadExplorations());
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      window.localStorage.setItem(TABLE_DENSITY_STORAGE_KEY, tableDensity);
+    } catch (err) {
+      // Ignore storage errors.
+    }
+  }, [tableDensity]);
+
   // -------------------------------------------------------------------
   // Node updates (params + metadata)
   // -------------------------------------------------------------------
@@ -253,6 +294,153 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       updateNode('node-start', { ...sourceNode.params, table: null, __files: [] });
     }
   };
+
+  // -------------------------------------------------------------------
+  // Panel controls (collapse + detach)
+  // -------------------------------------------------------------------
+  const clampStatsRect = useCallback((rect) => {
+    if (typeof window === 'undefined') return rect;
+    const padding = 12;
+    const minWidth = 260;
+    const minHeight = 240;
+    const maxWidth = Math.max(minWidth, window.innerWidth - padding * 2);
+    const maxHeight = Math.max(minHeight, window.innerHeight - padding * 2);
+    const width = Math.min(Math.max(rect.width, minWidth), maxWidth);
+    const height = Math.min(Math.max(rect.height, minHeight), maxHeight);
+    const maxX = Math.max(padding, window.innerWidth - width - padding);
+    const maxY = Math.max(padding, window.innerHeight - height - padding);
+    const x = Math.min(Math.max(rect.x, padding), maxX);
+    const y = Math.min(Math.max(rect.y, padding), maxY);
+    return { x, y, width, height };
+  }, []);
+
+  const collapseStatsPanel = useCallback(() => {
+    setIsStatsDetached(false);
+    setIsStatsCollapsed(true);
+  }, []);
+
+  const expandStatsPanel = useCallback(() => {
+    setIsStatsCollapsed(false);
+  }, []);
+
+  const detachStatsPanel = useCallback(() => {
+    setIsStatsDetached(true);
+    setIsStatsCollapsed(false);
+    setStatsPanelRect((prev) => clampStatsRect(prev));
+  }, [clampStatsRect]);
+
+  const dockStatsPanel = useCallback(() => {
+    setIsStatsDetached(false);
+    setIsStatsCollapsed(false);
+  }, []);
+
+  const collapsePropertiesPanel = useCallback(() => {
+    setIsPropertiesCollapsed(true);
+  }, []);
+
+  const expandPropertiesPanel = useCallback(() => {
+    setIsPropertiesCollapsed(false);
+  }, []);
+
+  const handleStatsDragMove = useCallback((event) => {
+    const state = statsDragStateRef.current;
+    if (!state) return;
+    state.lastX = event.clientX;
+    state.lastY = event.clientY;
+    if (statsDragFrameRef.current) return;
+    statsDragFrameRef.current = requestAnimationFrame(() => {
+      statsDragFrameRef.current = null;
+      const latest = statsDragStateRef.current;
+      if (!latest) return;
+      const next = {
+        ...latest.startRect,
+        x: latest.startRect.x + (latest.lastX - latest.startX),
+        y: latest.startRect.y + (latest.lastY - latest.startY)
+      };
+      setStatsPanelRect(clampStatsRect(next));
+    });
+  }, [clampStatsRect]);
+
+  const handleStatsDragEnd = useCallback(() => {
+    if (statsDragFrameRef.current) {
+      cancelAnimationFrame(statsDragFrameRef.current);
+      statsDragFrameRef.current = null;
+    }
+    statsDragStateRef.current = null;
+    window.removeEventListener('pointermove', handleStatsDragMove);
+    window.removeEventListener('pointerup', handleStatsDragEnd);
+  }, [handleStatsDragMove]);
+
+  const handleStatsDragStart = useCallback((event) => {
+    if (!isStatsDetached) return;
+    event.preventDefault();
+    event.stopPropagation();
+    statsDragStateRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      startRect: statsPanelRect
+    };
+    window.addEventListener('pointermove', handleStatsDragMove);
+    window.addEventListener('pointerup', handleStatsDragEnd);
+  }, [isStatsDetached, statsPanelRect, handleStatsDragMove, handleStatsDragEnd]);
+
+  const handleStatsResizeMove = useCallback((event) => {
+    const state = statsResizeStateRef.current;
+    if (!state) return;
+    state.lastX = event.clientX;
+    state.lastY = event.clientY;
+    if (statsResizeFrameRef.current) return;
+    statsResizeFrameRef.current = requestAnimationFrame(() => {
+      statsResizeFrameRef.current = null;
+      const latest = statsResizeStateRef.current;
+      if (!latest) return;
+      const next = {
+        ...latest.startRect,
+        width: latest.startRect.width + (latest.lastX - latest.startX),
+        height: latest.startRect.height + (latest.lastY - latest.startY)
+      };
+      setStatsPanelRect(clampStatsRect(next));
+    });
+  }, [clampStatsRect]);
+
+  const handleStatsResizeEnd = useCallback(() => {
+    if (statsResizeFrameRef.current) {
+      cancelAnimationFrame(statsResizeFrameRef.current);
+      statsResizeFrameRef.current = null;
+    }
+    statsResizeStateRef.current = null;
+    window.removeEventListener('pointermove', handleStatsResizeMove);
+    window.removeEventListener('pointerup', handleStatsResizeEnd);
+  }, [handleStatsResizeMove]);
+
+  const handleStatsResizeStart = useCallback((event) => {
+    if (!isStatsDetached) return;
+    event.preventDefault();
+    event.stopPropagation();
+    statsResizeStateRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      startRect: statsPanelRect
+    };
+    window.addEventListener('pointermove', handleStatsResizeMove);
+    window.addEventListener('pointerup', handleStatsResizeEnd);
+  }, [isStatsDetached, statsPanelRect, handleStatsResizeMove, handleStatsResizeEnd]);
+
+  useEffect(() => {
+    if (!isStatsDetached) return;
+    setStatsPanelRect((prev) => clampStatsRect(prev));
+  }, [isStatsDetached, clampStatsRect]);
+
+  useEffect(() => () => {
+    window.removeEventListener('pointermove', handleStatsDragMove);
+    window.removeEventListener('pointerup', handleStatsDragEnd);
+    window.removeEventListener('pointermove', handleStatsResizeMove);
+    window.removeEventListener('pointerup', handleStatsResizeEnd);
+  }, [handleStatsDragMove, handleStatsDragEnd, handleStatsResizeMove, handleStatsResizeEnd]);
 
   // -------------------------------------------------------------------
   // Tree engine (process the graph of nodes)
@@ -1178,28 +1366,53 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const selectedSchema = selectedResult?.schema || [];
   const selectedData = selectedResult?.sampleRows || selectedResult?.data || [];
 
-  const themeMenu = useMemo(() => ({
+  const settingsMenu = useMemo(() => ({
     items: [
       {
         key: 'theme',
         type: 'group',
         label: 'Theme',
         children: [
-          { key: 'light', label: 'Light' },
-          { key: 'dark', label: 'Dark' },
-          { key: 'auto', label: 'Auto (system)' }
+          { key: 'theme:light', label: 'Light' },
+          { key: 'theme:dark', label: 'Dark' },
+          { key: 'theme:auto', label: 'Auto (system)' }
+        ]
+      },
+      {
+        key: 'density',
+        type: 'group',
+        label: 'Table density',
+        children: [
+          { key: 'density:comfortable', label: 'Less dense' },
+          { key: 'density:dense', label: 'More dense' }
         ]
       }
     ],
     selectable: true,
-    selectedKeys: themePreference ? [themePreference] : [],
+    selectedKeys: [
+      `theme:${themePreference || 'auto'}`,
+      `density:${tableDensity || DEFAULT_TABLE_DENSITY}`
+    ],
     onClick: ({ key }) => {
-      if (!onThemeChange) return;
-      if (key === 'light' || key === 'dark' || key === 'auto') {
-        onThemeChange(key);
+      if (key.startsWith('theme:')) {
+        const nextTheme = key.replace('theme:', '');
+        if (onThemeChange && (nextTheme === 'light' || nextTheme === 'dark' || nextTheme === 'auto')) {
+          onThemeChange(nextTheme);
+        }
+        return;
+      }
+      if (key.startsWith('density:')) {
+        const nextDensity = key.replace('density:', '');
+        if (nextDensity === 'dense' || nextDensity === 'comfortable') {
+          setTableDensity(nextDensity);
+        }
       }
     }
-  }), [themePreference, onThemeChange]);
+  }), [themePreference, onThemeChange, tableDensity]);
+
+  const dataModelCellPadding = tableDensity === 'dense' ? 'p-2' : 'p-3';
+  const dataModelTextSize = tableDensity === 'dense' ? 'text-xs' : 'text-sm';
+  const dataModelHeaderTextSize = tableDensity === 'dense' ? 'text-[11px]' : 'text-xs';
 
   // -------------------------------------------------------------------
   // Render
@@ -1224,7 +1437,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           >
             <AppsIcon size={20} />
           </div>
-          <Dropdown menu={themeMenu} trigger={['click']} placement="rightBottom">
+          <Dropdown menu={settingsMenu} trigger={['click']} placement="rightBottom">
             <div className="mt-auto p-2.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors relative group">
               <Settings size={20} />
             </div>
@@ -1367,6 +1580,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 nodes={nodes}
                 selectedNodeId={selectedNodeId}
                 chainData={chainData}
+                tableDensity={tableDensity}
                 onSelect={handleSelect}
                 onAdd={addNode}
                 onInsert={insertNode}
@@ -1385,21 +1599,39 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
             </div>
           </div>
         )}
+
+        {viewMode === 'canvas' && (isStatsCollapsed || isPropertiesCollapsed) && (
+          <div className="absolute right-4 top-20 flex flex-col gap-2 z-40">
+            {isStatsCollapsed && (
+              <Button size="small" onClick={expandStatsPanel}>
+                Show Stats
+              </Button>
+            )}
+            {isPropertiesCollapsed && (
+              <Button size="small" onClick={expandPropertiesPanel}>
+                Show Properties
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* 3. PROPERTIES PANEL */}
-      {viewMode === 'canvas' && (
+      {/* 3. COLUMN STATS PANEL */}
+      {viewMode === 'canvas' && !isStatsCollapsed && !isStatsDetached && (
         <ColumnStatsPanel
           node={nodes.find(n => n.id === selectedNodeId)}
           schema={selectedSchema}
           data={selectedData}
           rowCount={selectedResult?.rowCount || 0}
           getColumnStats={selectedResult?.getColumnStats}
+          onCollapse={collapseStatsPanel}
+          onToggleDetach={detachStatsPanel}
+          isDetached={false}
         />
       )}
 
       {/* 4. PROPERTIES PANEL */}
-      {viewMode === 'canvas' && (
+      {viewMode === 'canvas' && !isPropertiesCollapsed && (
         <PropertiesPanel
           node={nodes.find(n => n.id === selectedNodeId)}
           updateNode={updateNodeFromPanel}
@@ -1410,7 +1642,36 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           onIngest={ingestPendingFiles}
           onClearData={clearIngestedData}
           onShowDataModel={() => setShowDataModel(true)}
+          onCollapse={collapsePropertiesPanel}
         />
+      )}
+
+      {viewMode === 'canvas' && isStatsDetached && !isStatsCollapsed && (
+        <div
+          className="fixed bg-white border border-gray-200 shadow-2xl rounded-xl overflow-hidden dark:bg-slate-900 dark:border-slate-700 z-50"
+          style={{
+            left: statsPanelRect.x,
+            top: statsPanelRect.y,
+            width: statsPanelRect.width,
+            height: statsPanelRect.height
+          }}
+        >
+          <ColumnStatsPanel
+            node={nodes.find(n => n.id === selectedNodeId)}
+            schema={selectedSchema}
+            data={selectedData}
+            rowCount={selectedResult?.rowCount || 0}
+            getColumnStats={selectedResult?.getColumnStats}
+            onCollapse={collapseStatsPanel}
+            onToggleDetach={dockStatsPanel}
+            isDetached
+            dragHandleProps={{ onPointerDown: handleStatsDragStart }}
+          />
+          <div
+            className="absolute bottom-1 right-1 h-3 w-3 cursor-se-resize bg-gray-200 rounded-sm dark:bg-slate-700"
+            onPointerDown={handleStatsResizeStart}
+          />
+        </div>
       )}
 
       {/* 5. DATA MODEL MODAL */}
@@ -1465,8 +1726,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     }
                   >
                     <div className="p-0">
-                      <table className="w-full text-sm text-left">
-                        <thead className="bg-gray-50 text-gray-500 text-xs uppercase dark:bg-slate-800 dark:text-slate-300">
+                      <table className={`w-full text-left ${dataModelTextSize}`}>
+                        <thead className={`bg-gray-50 text-gray-500 uppercase dark:bg-slate-800 dark:text-slate-300 ${dataModelHeaderTextSize}`}>
                           <tr>
                             {['column', 'sample'].map((columnKey) => (
                               <th
@@ -1476,7 +1737,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                                   ? (sortState.sortDirection === 'asc' ? 'ascending' : 'descending')
                                   : 'none'}
                                 onClick={() => handleDataModelSort(tableName, columnKey)}
-                                className="p-3 font-semibold cursor-pointer hover:text-blue-600 dark:hover:text-blue-300"
+                                className={`${dataModelCellPadding} font-semibold cursor-pointer hover:text-blue-600 dark:hover:text-blue-300`}
                               >
                                 <span className="inline-flex items-center gap-1">
                                   {columnKey === 'column' ? 'Column' : 'Sample'}
@@ -1491,8 +1752,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                         <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                           {sortedRows.map((row) => (
                             <tr key={row.column}>
-                              <td className="p-3 font-medium text-gray-700 dark:text-slate-200">{row.column}</td>
-                              <td className="p-3 text-gray-400 dark:text-slate-400 truncate max-w-[100px]">{row.sample}</td>
+                              <td className={`${dataModelCellPadding} font-medium text-gray-700 dark:text-slate-200`}>{row.column}</td>
+                              <td className={`${dataModelCellPadding} text-gray-400 dark:text-slate-400 truncate max-w-[100px]`}>{row.sample}</td>
                             </tr>
                           ))}
                         </tbody>
