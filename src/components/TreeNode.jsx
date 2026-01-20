@@ -138,6 +138,7 @@ const TablePreview = React.memo(({
   const containerRef = React.useRef(null);
   const rowCacheRef = React.useRef(new Map());
   const [tableHeight, setTableHeight] = React.useState(220);
+  const [headerHeight, setHeaderHeight] = React.useState(38);
   const normalizedSortDirection = sortDirection === 'asc' || sortDirection === 'desc' ? sortDirection : '';
   const densityClassName = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
 
@@ -145,29 +146,36 @@ const TablePreview = React.memo(({
     const el = containerRef.current;
     if (!el) return undefined;
 
-    const updateHeight = () => {
+    const updateLayoutMetrics = () => {
       const rect = el.getBoundingClientRect();
       if (rect.height) setTableHeight(rect.height);
+      const header = el.querySelector('.ant-table-header') || el.querySelector('.ant-table-thead');
+      if (header) {
+        const nextHeaderHeight = Math.ceil(header.getBoundingClientRect().height);
+        setHeaderHeight((prev) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+      }
     };
-    updateHeight();
+    updateLayoutMetrics();
 
     if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateHeight);
-      return () => window.removeEventListener('resize', updateHeight);
+      window.addEventListener('resize', updateLayoutMetrics);
+      return () => window.removeEventListener('resize', updateLayoutMetrics);
     }
 
     let frame = null;
     const observer = new ResizeObserver(() => {
       if (frame) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(updateHeight);
+      frame = requestAnimationFrame(updateLayoutMetrics);
     });
     observer.observe(el);
+    const header = el.querySelector('.ant-table-header') || el.querySelector('.ant-table-thead');
+    if (header) observer.observe(header);
 
     return () => {
       observer.disconnect();
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [rowCount, columns.length]);
+  }, [rowCount, columns.length, tableDensity]);
 
   React.useEffect(() => {
     rowCacheRef.current.clear();
@@ -177,7 +185,7 @@ const TablePreview = React.memo(({
     () => (rowCount > 0 ? Array.from({ length: rowCount }, (_, idx) => idx) : []),
     [rowCount]
   );
-  const bodyHeight = Math.max(140, tableHeight - 38);
+  const bodyHeight = Math.max(140, tableHeight - headerHeight);
   const widthSampleRows = React.useMemo(
     () => (Array.isArray(sampleRows) ? sampleRows.slice(0, 40) : []),
     [sampleRows]
@@ -548,6 +556,7 @@ const TreeNode = ({
 
   const pivotTableRef = React.useRef(null);
   const [pivotTableHeight, setPivotTableHeight] = React.useState(220);
+  const [pivotHeaderHeight, setPivotHeaderHeight] = React.useState(38);
 
   const pivotState = React.useMemo(() => {
     if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'PIVOT') return null;
@@ -584,29 +593,36 @@ const TreeNode = ({
     const el = pivotTableRef.current;
     if (!el) return undefined;
 
-    const updateHeight = () => {
+    const updateLayoutMetrics = () => {
       const rect = el.getBoundingClientRect();
       if (rect.height) setPivotTableHeight(rect.height);
+      const header = el.querySelector('.ant-table-header') || el.querySelector('.ant-table-thead');
+      if (header) {
+        const nextHeaderHeight = Math.ceil(header.getBoundingClientRect().height);
+        setPivotHeaderHeight((prev) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+      }
     };
-    updateHeight();
+    updateLayoutMetrics();
 
     if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateHeight);
-      return () => window.removeEventListener('resize', updateHeight);
+      window.addEventListener('resize', updateLayoutMetrics);
+      return () => window.removeEventListener('resize', updateLayoutMetrics);
     }
 
     let frame = null;
     const observer = new ResizeObserver(() => {
       if (frame) cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(updateHeight);
+      frame = requestAnimationFrame(updateLayoutMetrics);
     });
     observer.observe(el);
+    const header = el.querySelector('.ant-table-header') || el.querySelector('.ant-table-thead');
+    if (header) observer.observe(header);
 
     return () => {
       observer.disconnect();
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [pivotState?.rowKeys?.length, pivotState?.colKeys?.length]);
+  }, [pivotState?.rowKeys?.length, pivotState?.colKeys?.length, tableDensity]);
 
   const chartType = node.params.chartType || 'bar';
   const chartAggFn = node.params.chartAggFn || 'none';
@@ -853,7 +869,7 @@ const TreeNode = ({
                             pagination={false}
                             columns={pivotColumns}
                             dataSource={dataSource}
-                            scroll={{ x: 'max-content', y: Math.max(140, pivotTableHeight - 38) }}
+                            scroll={{ x: 'max-content', y: Math.max(140, pivotTableHeight - pivotHeaderHeight) }}
                             rowKey="rowKey"
                           />
                         );
