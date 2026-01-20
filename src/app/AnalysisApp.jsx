@@ -1,7 +1,7 @@
 // src/app/AnalysisApp.js
 // Main application component: ingestion, history, engine, and layout.
 import React, { useState, useMemo, useEffect } from 'react';
-import { Button, Card, Empty, Modal, Space, Tag, Typography } from 'antd';
+import { Button, Card, Dropdown, Empty, Modal, Space, Tag, Typography } from 'antd';
 import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
 import { TreeNode } from '../components/TreeNode';
@@ -24,7 +24,7 @@ const createInitialNodes = () => ([
   }
 ]);
 
-const AnalysisApp = () => {
+const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   // -------------------------------------------------------------------
   // Ingestion state
   // -------------------------------------------------------------------
@@ -1255,13 +1255,36 @@ const AnalysisApp = () => {
   const selectedSchema = selectedResult?.schema || [];
   const selectedData = selectedResult?.data || [];
 
+  const themeMenu = useMemo(() => ({
+    items: [
+      {
+        key: 'theme',
+        type: 'group',
+        label: 'Theme',
+        children: [
+          { key: 'light', label: 'Light' },
+          { key: 'dark', label: 'Dark' },
+          { key: 'auto', label: 'Auto (system)' }
+        ]
+      }
+    ],
+    selectable: true,
+    selectedKeys: themePreference ? [themePreference] : [],
+    onClick: ({ key }) => {
+      if (!onThemeChange) return;
+      if (key === 'light' || key === 'dark' || key === 'auto') {
+        onThemeChange(key);
+      }
+    }
+  }), [themePreference, onThemeChange]);
+
   // -------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------
   return (
-    <div className="flex h-screen w-full bg-slate-50 font-sans text-slate-900 overflow-hidden">
+    <div className="flex h-screen w-full bg-slate-50 font-sans text-slate-900 dark:bg-slate-950 dark:text-slate-100 overflow-hidden">
       {/* 1. LEFT SIDEBAR */}
-      <div className="w-16 flex-shrink-0 bg-white flex flex-col items-center text-slate-500 border-r border-gray-200 z-50">
+      <div className="w-16 flex-shrink-0 bg-white flex flex-col items-center text-slate-500 border-r border-gray-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-700 z-50">
         <div className="w-full h-16 bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-sm">
           <Layout size={22} />
         </div>
@@ -1272,25 +1295,27 @@ const AnalysisApp = () => {
               setViewMode('landing');
             }}
             className={`p-2.5 rounded-lg cursor-pointer transition-colors relative group ${
-              viewMode === 'landing' ? 'bg-slate-100 text-slate-900' : 'hover:bg-slate-100'
+              viewMode === 'landing' ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100' : 'hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
             title="Explorations"
           >
             <AppsIcon size={20} />
           </div>
-          <div className="mt-auto p-2.5 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors relative group">
-            <Settings size={20} />
-          </div>
+          <Dropdown menu={themeMenu} trigger={['click']} placement="rightBottom">
+            <div className="mt-auto p-2.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors relative group">
+              <Settings size={20} />
+            </div>
+          </Dropdown>
         </div>
       </div>
 
       {/* 2. MAIN CANVAS AREA */}
-      <div className="flex-1 flex flex-col relative overflow-hidden bg-[#F8FAFC]">
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center px-8 justify-between shadow-sm z-40 relative">
+      <div className="flex-1 flex flex-col relative overflow-hidden bg-[#F8FAFC] dark:bg-slate-950">
+        <header className="h-16 bg-white border-b border-gray-200 flex items-center px-8 justify-between shadow-sm z-40 relative dark:bg-slate-900 dark:border-slate-700">
           <div className="flex items-center gap-4">
             <div>
-              <div className="font-bold text-gray-900 text-lg">Node Memory Analytics</div>
-              <div className="text-xs text-gray-400">Exploration workspace</div>
+              <div className="font-bold text-gray-900 text-lg dark:text-slate-100">Node Memory Analytics</div>
+              <div className="text-xs text-gray-400 dark:text-slate-400">Exploration workspace</div>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -1324,7 +1349,7 @@ const AnalysisApp = () => {
         </header>
 
         {viewMode === 'landing' ? (
-          <div className="flex-1 overflow-auto bg-slate-50">
+          <div className="flex-1 overflow-auto bg-slate-50 dark:bg-slate-950">
             <div className="max-w-6xl mx-auto px-10 py-12 space-y-8">
               <div className="flex items-center justify-between">
                 <div>
@@ -1337,11 +1362,11 @@ const AnalysisApp = () => {
               </div>
 
               {explorations.length === 0 ? (
-                <div className="bg-white border border-gray-200 rounded-2xl p-10 text-center shadow-sm">
+                <div className="bg-white border border-gray-200 rounded-2xl p-10 text-center shadow-sm dark:bg-slate-900 dark:border-slate-700">
                   <Empty
                     description={
                       <div className="space-y-1">
-                        <div className="text-base font-semibold text-gray-900">No explorations yet</div>
+                        <div className="text-base font-semibold text-gray-900 dark:text-slate-100">No explorations yet</div>
                         <Text type="secondary">Upload data, build a workflow, then Save & Exit to see it here.</Text>
                       </div>
                     }
@@ -1407,7 +1432,7 @@ const AnalysisApp = () => {
           </div>
         ) : (
           <div
-            className="flex-1 overflow-auto bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-slate-50 cursor-grab active:cursor-grabbing"
+            className="flex-1 overflow-auto bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-slate-50 dark:bg-slate-950 dark:bg-none cursor-grab active:cursor-grabbing"
             onClick={() => {
               setShowAddMenuForId(null);
               setShowInsertMenuForId(null);
@@ -1474,15 +1499,17 @@ const AnalysisApp = () => {
         styles={{ body: { padding: 0 } }}
         title={
           <Space align="center">
-            <div className="bg-blue-100 p-2 rounded text-blue-600"><Database size={20} /></div>
+            <div className="bg-blue-100 p-2 rounded text-blue-600 dark:bg-blue-500/20 dark:text-blue-300">
+              <Database size={20} />
+            </div>
             <div>
-              <div className="font-bold text-base text-gray-900">Data Model Preview</div>
-              <div className="text-xs text-gray-500">Available tables and schemas</div>
+              <div className="font-bold text-base text-gray-900 dark:text-slate-100">Data Model Preview</div>
+              <div className="text-xs text-gray-500 dark:text-slate-400">Available tables and schemas</div>
             </div>
           </Space>
         }
       >
-        <div className="flex-1 overflow-auto p-8 bg-slate-50">
+        <div className="flex-1 overflow-auto p-8 bg-slate-50 dark:bg-slate-950">
           {dataModel.order.length === 0 ? (
             <Empty description="Upload a CSV/XLSX file to populate the data model." />
           ) : (
@@ -1507,14 +1534,14 @@ const AnalysisApp = () => {
                     bodyStyle={{ padding: 0 }}
                     title={
                       <Space size="small">
-                        <TableIcon size={16} className="text-gray-400" />
+                        <TableIcon size={16} className="text-gray-400 dark:text-slate-500" />
                         {tableName.toUpperCase()}
                       </Space>
                     }
                   >
                     <div className="p-0">
                       <table className="w-full text-sm text-left">
-                        <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                        <thead className="bg-gray-50 text-gray-500 text-xs uppercase dark:bg-slate-800 dark:text-slate-300">
                           <tr>
                             {['column', 'sample'].map((columnKey) => (
                               <th
@@ -1524,29 +1551,29 @@ const AnalysisApp = () => {
                                   ? (sortState.sortDirection === 'asc' ? 'ascending' : 'descending')
                                   : 'none'}
                                 onClick={() => handleDataModelSort(tableName, columnKey)}
-                                className="p-3 font-semibold cursor-pointer hover:text-blue-600"
+                                className="p-3 font-semibold cursor-pointer hover:text-blue-600 dark:hover:text-blue-300"
                               >
                                 <span className="inline-flex items-center gap-1">
                                   {columnKey === 'column' ? 'Column' : 'Sample'}
                                   {resolveIndicator(columnKey) && (
-                                    <span className="text-[10px] text-gray-400">{resolveIndicator(columnKey)}</span>
+                                    <span className="text-[10px] text-gray-400 dark:text-slate-500">{resolveIndicator(columnKey)}</span>
                                   )}
                                 </span>
                               </th>
                             ))}
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody className="divide-y divide-gray-100 dark:divide-slate-700">
                           {sortedRows.map((row) => (
                             <tr key={row.column}>
-                              <td className="p-3 font-medium text-gray-700">{row.column}</td>
-                              <td className="p-3 text-gray-400 truncate max-w-[100px]">{row.sample}</td>
+                              <td className="p-3 font-medium text-gray-700 dark:text-slate-200">{row.column}</td>
+                              <td className="p-3 text-gray-400 dark:text-slate-400 truncate max-w-[100px]">{row.sample}</td>
                             </tr>
                           ))}
                         </tbody>
                       </table>
                     </div>
-                    <div className="mt-auto p-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-500 text-center">
+                    <div className="mt-auto p-3 bg-gray-50 border-t border-gray-100 text-xs text-gray-500 text-center dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400">
                       {(dataModel.tables[tableName] || []).length} total records
                     </div>
                   </Card>

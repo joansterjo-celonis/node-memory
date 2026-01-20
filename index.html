@@ -6,7 +6,15 @@
   <title>Node Memory Analytics</title>
 
   <!-- UI / styling -->
+  <script>
+    window.tailwindConfig = { darkMode: 'class' };
+    window.tailwind = window.tailwind || {};
+    window.tailwind.config = window.tailwindConfig;
+  </script>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = window.tailwindConfig;
+  </script>
 
   <!-- XLSX (Excel parsing) -->
   <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>

@@ -211,7 +211,7 @@ const TablePreview = React.memo(({ data, columns, onCellClick, onSortChange, nod
       title: (
         <span className="inline-flex items-center gap-1">
           {col}
-          {sortIndicator && <span className="text-[10px] text-gray-400">{sortIndicator}</span>}
+          {sortIndicator && <span className="text-[10px] text-gray-400 dark:text-slate-500">{sortIndicator}</span>}
         </span>
       ),
       dataIndex: col,
@@ -323,7 +323,7 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
       >
         {hasLayout && (
           <svg
-            className="absolute top-0 left-0 w-full text-gray-300 pointer-events-none"
+            className="absolute top-0 left-0 w-full text-gray-300 dark:text-slate-600 pointer-events-none"
             height={BRANCH_CONNECTOR_HEIGHT}
             aria-hidden="true"
           >
@@ -724,8 +724,10 @@ const TreeNode = ({
         <div
           onClick={(e) => { e.stopPropagation(); onSelect(nodeId); }}
           className={`
-            bg-white rounded-xl border-2 transition-all cursor-pointer overflow-hidden relative flex flex-col
-            ${isActive ? 'border-blue-500 shadow-xl shadow-blue-500/10 ring-1 ring-blue-500 z-20' : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md'}
+            bg-white dark:bg-slate-900 rounded-xl border-2 transition-all cursor-pointer overflow-hidden relative flex flex-col
+            ${isActive
+              ? 'border-blue-500 shadow-xl shadow-blue-500/10 ring-1 ring-blue-500 z-20 dark:shadow-blue-500/20'
+              : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md dark:border-slate-700 dark:hover:border-slate-600 dark:shadow-black/40'}
           `}
           style={{
             width: 640,
@@ -744,7 +746,7 @@ const TreeNode = ({
               icon={isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
               onClick={(e) => { e.stopPropagation(); onToggleExpand(nodeId); }}
             />
-            <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${isActive ? 'bg-blue-100 text-blue-600' : 'bg-gray-100 text-gray-500'}`}>
+            <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${isActive ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-slate-800 dark:text-slate-400'}`}>
               <Icon size={20} />
             </div>
             <div className="flex-1 min-w-0">
@@ -803,11 +805,11 @@ const TreeNode = ({
             const hasTableLikePreview = isTablePreview || isPivotPreview || isAssistantPreview;
             const contentPaddingClass = hasTableLikePreview ? 'p-0' : (isChartPreview ? 'p-1' : 'p-4');
             return (
-            <div className={`border-t border-gray-100 bg-gray-50 ${contentPaddingClass} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
+            <div className={`border-t border-gray-100 bg-gray-50 dark:border-slate-700 dark:bg-slate-800 ${contentPaddingClass} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
               {/* TABLE VIEW */}
               {isTablePreview && (
                 <div className="flex-1 min-h-0 flex flex-col">
-                  <div className="flex items-center justify-between text-xs font-medium text-gray-500 px-2 pt-2">
+                  <div className="flex items-center justify-between text-xs font-medium text-gray-500 dark:text-slate-400 px-2 pt-2">
                     <span>Preview</span>
                     <span>{result.data.length} rows</span>
                   </div>
@@ -837,7 +839,7 @@ const TreeNode = ({
               {/* PIVOT VIEW */}
               {isPivotPreview && (
                 <div className="h-full flex flex-col">
-                  <div className="flex items-center justify-between text-xs font-medium text-gray-500 px-2 pt-2">
+                  <div className="flex items-center justify-between text-xs font-medium text-gray-500 dark:text-slate-400 px-2 pt-2">
                     <span>Pivot</span>
                     {pivotState && !pivotState.error && (
                       <span>{pivotState.rowKeys.length} rows × {pivotState.colKeys.length} cols</span>
@@ -886,7 +888,7 @@ const TreeNode = ({
                     <div><span className="text-pink-400">FROM</span> [PreviousNode]</div>
                     <div><span className="text-pink-400">{node.params.joinType || 'LEFT'} JOIN</span> {node.params.rightTable || '...'}</div>
                     <div><span className="text-pink-400">ON</span> {node.params.leftKey || '?'} = {node.params.rightKey || '?'}</div>
-                    <div className="mt-2 pt-2 border-t border-slate-700 text-slate-500 italic">
+                    <div className="mt-2 pt-2 border-t border-slate-700 text-slate-500 dark:text-slate-400 italic">
                       Result: {result.data.length} rows merged
                     </div>
                   </div>
@@ -1000,7 +1002,7 @@ const TreeNode = ({
       {/* CONNECTORS & CHILDREN */}
       {children.length > 0 && (
         <div className="flex flex-col items-center">
-          <div className="w-0.5 h-8 bg-gray-300 rounded-full relative group/line">
+          <div className="w-0.5 h-8 bg-gray-300 dark:bg-slate-600 rounded-full relative group/line">
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity z-30">
               <div ref={insertMenuRef}>
                 <Dropdown
