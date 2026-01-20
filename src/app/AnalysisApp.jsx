@@ -6,8 +6,9 @@ import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
 import { TreeNode } from '../components/TreeNode';
 import { Layout, Database, AppsIcon, Settings, Undo, Redo, TableIcon, X, Plus, Trash2, Play, Save } from '../ui/icons';
-import { readFileAsText, readFileAsArrayBuffer, parseCSV, parseXLSX } from '../utils/ingest';
+import { parseCSVFile, readFileAsArrayBuffer, parseXLSX } from '../utils/ingest';
 import { getChildren, getCalculationOrder, getNodeResult } from '../utils/nodeUtils';
+import { createDataEngine } from '../utils/dataEngine';
 
 const { Title, Text } = Typography;
 
@@ -93,8 +94,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           fileNames.push(name);
 
           if (lower.endsWith('.csv')) {
-            const text = await readFileAsText(file);
-            const rows = parseCSV(text);
+            const rows = await parseCSVFile(file);
             if (!rows || rows.length === 0) throw new Error(`No rows found in ${name}.`);
             addTable(baseName, rows);
           } else if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
@@ -229,159 +229,54 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   // -------------------------------------------------------------------
   // Tree engine (process the graph of nodes)
   // -------------------------------------------------------------------
+  const dataEngine = useMemo(() => createDataEngine(dataModel), [dataModel]);
+
   const chainData = useMemo(() => {
     const order = getCalculationOrder(nodes);
-    const resultsMap = new Map();
+    const results = [];
+    const validIds = new Set(nodes.map((node) => node.id));
 
-    for (const node of order) {
-      let currentData = node.parentId && resultsMap.has(node.parentId)
-        ? [...resultsMap.get(node.parentId).data]
-        : [];
+    order.forEach((node) => {
+      const parentKey = node.parentId ? dataEngine.getQueryKey(node.parentId) : '';
+      let spec = null;
 
       if (node.type === 'SOURCE') {
         const table = node.params.table || dataModel.order[0];
-        currentData = table ? [...(dataModel.tables[table] || [])] : [];
-      } else if (node.type === 'FILTER' && node.params.field) {
-        currentData = currentData.filter(item => {
-          const val = item[node.params.field];
-          const filterVal = node.params.value;
-          if (!filterVal && filterVal !== 0) return true;
-          if (node.params.operator === 'equals') return String(val) == String(filterVal);
-          if (node.params.operator === 'not_equals') return String(val) != String(filterVal);
-          if (node.params.operator === 'gt') return Number(val) > Number(filterVal);
-          if (node.params.operator === 'lt') return Number(val) < Number(filterVal);
-          if (node.params.operator === 'gte') return Number(val) >= Number(filterVal);
-          if (node.params.operator === 'lte') return Number(val) <= Number(filterVal);
-          if (node.params.operator === 'contains') return String(val).toLowerCase().includes(String(filterVal).toLowerCase());
-          if (node.params.operator === 'in') {
-            const list = Array.isArray(filterVal)
-              ? filterVal.map(value => String(value).trim()).filter(Boolean)
-              : String(filterVal)
-                .split(',')
-                .map(value => value.trim())
-                .filter(Boolean);
-            if (list.length === 0) return true;
-            return list.some(value => String(val) == value);
-          }
-          return true;
-        });
-      } else if (node.type === 'AGGREGATE' && node.params.groupBy) {
-        const groups = {};
-        currentData.forEach(item => {
-          const key = item[node.params.groupBy];
-          if (!groups[key]) {
-            groups[key] = {
-              [node.params.groupBy]: key,
-              _count: 0,
-              _sum: 0,
-              _min: null,
-              _max: null,
-              _distinct: new Set()
-            };
-          }
-          groups[key]._count++;
-          if (node.params.metricField) {
-            const rawValue = item[node.params.metricField];
-            const value = Number(rawValue);
-            if (!Number.isNaN(value)) {
-              groups[key]._sum += value;
-              groups[key]._min = groups[key]._min === null ? value : Math.min(groups[key]._min, value);
-              groups[key]._max = groups[key]._max === null ? value : Math.max(groups[key]._max, value);
-            }
-            groups[key]._distinct.add(rawValue);
-          }
-        });
-        currentData = Object.values(groups).map((g) => {
-          const res = { [node.params.groupBy]: g[node.params.groupBy] };
-          if (node.params.fn === 'sum') res[node.params.metricField] = g._sum;
-          else if (node.params.fn === 'avg') res[node.params.metricField] = g._count ? g._sum / g._count : 0;
-          else if (node.params.fn === 'min') res[node.params.metricField] = g._min ?? 0;
-          else if (node.params.fn === 'max') res[node.params.metricField] = g._max ?? 0;
-          else if (node.params.fn === 'count_distinct') res[node.params.metricField] = g._distinct.size;
-          else res['Record Count'] = g._count;
-          return res;
-        });
-      } else if (node.type === 'JOIN' && node.params.rightTable && node.params.leftKey && node.params.rightKey) {
-        const rightTableData = dataModel.tables[node.params.rightTable] || [];
-        const rightTablePrefix = node.params.rightTable;
-        const joinedData = [];
-        const matchedRightIndices = new Set();
-        const joinType = node.params.joinType || 'LEFT';
-
-        const normalizeJoinValue = (value) => {
-          if (value === undefined || value === null) return null;
-          if (typeof value === 'string') {
-            const trimmed = value.trim();
-            return trimmed === '' ? null : trimmed;
-          }
-          return String(value);
-        };
-
-        const prefixColumns = (row, prefix) => {
-          return Object.entries(row).reduce((acc, [key, val]) => {
-            acc[`${prefix}_${key}`] = val;
-            return acc;
-          }, {});
-        };
-
-        const rightLookup = new Map();
-        rightTableData.forEach((rightRow, rIdx) => {
-          const key = normalizeJoinValue(rightRow[node.params.rightKey]);
-          if (key === null) return;
-          if (!rightLookup.has(key)) rightLookup.set(key, []);
-          rightLookup.get(key).push({ row: rightRow, index: rIdx });
-        });
-
-        currentData.forEach(leftRow => {
-          const leftKey = normalizeJoinValue(leftRow[node.params.leftKey]);
-          let matchesFound = false;
-
-          if (leftKey !== null && rightLookup.has(leftKey)) {
-            matchesFound = true;
-            rightLookup.get(leftKey).forEach(({ row, index }) => {
-              matchedRightIndices.add(index);
-              joinedData.push({ ...leftRow, ...prefixColumns(row, rightTablePrefix) });
-            });
-          }
-
-          if (!matchesFound && ['LEFT', 'FULL'].includes(joinType)) {
-            joinedData.push({ ...leftRow });
-          }
-        });
-
-        if (['RIGHT', 'FULL'].includes(joinType)) {
-          rightTableData.forEach((rightRow, rIdx) => {
-            if (!matchedRightIndices.has(rIdx)) {
-              joinedData.push({ ...prefixColumns(rightRow, rightTablePrefix) });
-            }
-          });
-        }
-
-        currentData = joinedData;
+        spec = { type: 'SOURCE', table };
+      } else if (node.type === 'FILTER') {
+        spec = { type: 'FILTER', parentId: node.parentId, parentKey, params: node.params };
+      } else if (node.type === 'AGGREGATE') {
+        spec = { type: 'AGGREGATE', parentId: node.parentId, parentKey, params: node.params };
+      } else if (node.type === 'JOIN') {
+        spec = { type: 'JOIN', parentId: node.parentId, parentKey, params: node.params };
+      } else {
+        spec = { type: 'FILTER', parentId: node.parentId, parentKey, params: {} };
       }
 
-      // Schema extraction (robust for joins/empties)
-      const uniqueKeys = new Set();
-      if (currentData.length > 0) {
-        currentData.slice(0, 10).forEach(row => {
-          Object.keys(row).forEach(k => uniqueKeys.add(k));
-        });
-      }
+      const query = dataEngine.ensureQuery(node.id, spec);
+      const sampleRows = dataEngine.getSampleRows(node.id, dataEngine.DEFAULT_SAMPLE_SIZE);
 
-      if (node.type === 'JOIN' && node.params.rightTable) {
-        const proto = (dataModel.tables[node.params.rightTable] || [])[0];
-        if (proto) Object.keys(proto).forEach(k => uniqueKeys.add(`${node.params.rightTable}_${k}`));
-      }
-
-      resultsMap.set(node.id, {
+      results.push({
         nodeId: node.id,
-        data: currentData,
-        schema: Array.from(uniqueKeys)
+        queryId: node.id,
+        schema: query.schema || [],
+        rowCount: query.rowCount || 0,
+        data: sampleRows,
+        sampleRows,
+        getRowAt: (index, sortBy, sortDirection) => dataEngine.getRowAt(node.id, index, sortBy, sortDirection),
+        getRows: (range, sortBy, sortDirection) =>
+          dataEngine.getRows(node.id, { ...range, sortBy, sortDirection }),
+        getMetric: (fn, field) => dataEngine.getMetric(node.id, fn, field),
+        getPivotData: (specArgs) => dataEngine.getPivotData(node.id, specArgs),
+        getAggregatedRows: (specArgs) => dataEngine.getAggregatedRows(node.id, specArgs),
+        getSampleRows: (size, sortBy, sortDirection) => dataEngine.getSampleRows(node.id, size, sortBy, sortDirection),
+        getColumnStats: (field) => dataEngine.getColumnStats(node.id, field)
       });
-    }
+    });
 
-    return Array.from(resultsMap.values());
-  }, [nodes, dataModel]);
+    dataEngine.pruneQueries(validIds);
+    return results;
+  }, [nodes, dataModel, dataEngine]);
 
   // -------------------------------------------------------------------
   // Node operations (add/insert/remove/toggle)
@@ -1183,7 +1078,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     if (!node) return;
     const result = getNodeResult(chainData, nodeId);
     const schema = result?.schema || [];
-    const data = result?.data || [];
+    const data = result?.sampleRows || result?.data || [];
     const llmAttempted = node.params.assistantUseLLM === true;
     applyAssistantPlan(nodeId, [], {
       assistantQuestion: question,
@@ -1253,7 +1148,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
   const selectedResult = getNodeResult(chainData, selectedNodeId);
   const selectedSchema = selectedResult?.schema || [];
-  const selectedData = selectedResult?.data || [];
+  const selectedData = selectedResult?.sampleRows || selectedResult?.data || [];
 
   const themeMenu = useMemo(() => ({
     items: [
@@ -1470,6 +1365,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           node={nodes.find(n => n.id === selectedNodeId)}
           schema={selectedSchema}
           data={selectedData}
+          rowCount={selectedResult?.rowCount || 0}
+          getColumnStats={selectedResult?.getColumnStats}
         />
       )}
 
