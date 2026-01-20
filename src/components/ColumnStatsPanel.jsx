@@ -30,7 +30,7 @@ const StatCard = ({ label, value, helper }) => (
   </Card>
 );
 
-const ColumnStatsPanel = ({ node, schema = [], data = [] }) => {
+const ColumnStatsPanel = ({ node, schema = [], data = [], rowCount = 0, getColumnStats }) => {
   const [selectedColumn, setSelectedColumn] = React.useState('');
 
   React.useEffect(() => {
@@ -43,6 +43,7 @@ const ColumnStatsPanel = ({ node, schema = [], data = [] }) => {
 
   const stats = React.useMemo(() => {
     if (!selectedColumn) return null;
+    if (getColumnStats) return getColumnStats(selectedColumn);
     const totalRows = data.length;
     let nullCount = 0;
     const valueCounts = new Map();
@@ -93,9 +94,10 @@ const ColumnStatsPanel = ({ node, schema = [], data = [] }) => {
       topValues,
       maxCount
     };
-  }, [data, selectedColumn]);
+  }, [data, selectedColumn, getColumnStats]);
 
-  const hasData = schema.length > 0 && data.length > 0;
+  const totalRows = stats?.totalRows ?? rowCount ?? data.length;
+  const hasData = schema.length > 0 && totalRows > 0;
   const nullRate = stats && stats.totalRows > 0 ? (stats.nullCount / stats.totalRows) * 100 : 0;
 
   const selectDropdownProps = { popupMatchSelectWidth: false, dropdownStyle: { minWidth: 320 } };

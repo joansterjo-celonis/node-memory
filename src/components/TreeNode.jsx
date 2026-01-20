@@ -19,7 +19,7 @@ import {
   Minimize2,
   Share2
 } from '../ui/icons';
-import { getChildren, countDescendants, getNodeResult, calculateMetric, formatNumber } from '../utils/nodeUtils';
+import { getChildren, countDescendants, getNodeResult, formatNumber } from '../utils/nodeUtils';
 import VisxChart from '../ui/SimpleChart';
 import WorldMapChart from '../ui/WorldMapChart';
 
@@ -123,26 +123,20 @@ const AssistantPanel = React.memo(({ node, schema, onRun }) => {
   );
 });
 
-const TablePreview = React.memo(({ data, columns, onCellClick, onSortChange, nodeId, sortBy, sortDirection }) => {
+const TablePreview = React.memo(({
+  rowCount = 0,
+  columns,
+  getRowAt,
+  onCellClick,
+  onSortChange,
+  nodeId,
+  sortBy,
+  sortDirection
+}) => {
   const containerRef = React.useRef(null);
+  const rowCacheRef = React.useRef(new Map());
   const [tableHeight, setTableHeight] = React.useState(220);
   const normalizedSortDirection = sortDirection === 'asc' || sortDirection === 'desc' ? sortDirection : '';
-
-  const compareValues = React.useCallback((aRaw, bRaw) => {
-    if (aRaw == null && bRaw == null) return 0;
-    if (aRaw == null) return 1;
-    if (bRaw == null) return -1;
-    const aNum = Number(aRaw);
-    const bNum = Number(bRaw);
-    const bothNumeric = !Number.isNaN(aNum) && !Number.isNaN(bNum);
-    if (bothNumeric) {
-      if (aNum === bNum) return 0;
-      return aNum - bNum;
-    }
-    const aText = String(aRaw);
-    const bText = String(bRaw);
-    return aText.localeCompare(bText, undefined, { numeric: true, sensitivity: 'base' });
-  }, []);
 
   React.useEffect(() => {
     const el = containerRef.current;
@@ -170,20 +164,17 @@ const TablePreview = React.memo(({ data, columns, onCellClick, onSortChange, nod
       observer.disconnect();
       if (frame) cancelAnimationFrame(frame);
     };
-  }, [data.length, columns.length]);
+  }, [rowCount, columns.length]);
 
-  const sortedData = React.useMemo(() => {
-    if (!sortBy || !normalizedSortDirection) return data;
-    if (!columns.includes(sortBy)) return data;
-    const withIndex = data.map((row, index) => ({ row, index }));
-    const direction = normalizedSortDirection === 'asc' ? 1 : -1;
-    withIndex.sort((a, b) => {
-      const result = compareValues(a.row?.[sortBy], b.row?.[sortBy]);
-      if (result === 0) return a.index - b.index;
-      return result * direction;
-    });
-    return withIndex.map(item => item.row);
-  }, [data, sortBy, normalizedSortDirection, columns, compareValues]);
+  React.useEffect(() => {
+    rowCacheRef.current.clear();
+  }, [rowCount, sortBy, normalizedSortDirection]);
+
+  const dataSource = React.useMemo(
+    () => (rowCount > 0 ? Array.from({ length: rowCount }, (_, idx) => idx) : []),
+    [rowCount]
+  );
+  const bodyHeight = Math.max(140, tableHeight - 38);
 
   if (columns.length === 0) {
     return <Empty description="No columns available for preview" />;
@@ -204,6 +195,14 @@ const TablePreview = React.memo(({ data, columns, onCellClick, onSortChange, nod
     onSortChange(nodeId, nextSortBy, nextDirection);
   };
 
+  const resolveRow = (index) => {
+    const cache = rowCacheRef.current;
+    if (cache.has(index)) return cache.get(index);
+    const row = getRowAt ? getRowAt(index, sortBy, normalizedSortDirection) : null;
+    cache.set(index, row);
+    return row;
+  };
+
   const tableColumns = columns.map((col) => {
     const isSorted = sortBy === col && normalizedSortDirection;
     const sortIndicator = isSorted ? (normalizedSortDirection === 'asc' ? '^' : 'v') : '';
@@ -217,6 +216,10 @@ const TablePreview = React.memo(({ data, columns, onCellClick, onSortChange, nod
       dataIndex: col,
       key: col,
       ellipsis: true,
+      render: (_value, recordIndex) => {
+        const row = resolveRow(recordIndex);
+        return row?.[col] ?? '';
+      },
       onHeaderCell: () => ({
         onClick: (e) => {
           e.stopPropagation();
@@ -224,27 +227,27 @@ const TablePreview = React.memo(({ data, columns, onCellClick, onSortChange, nod
         },
         className: 'cursor-pointer select-none hover:text-blue-600'
       }),
-      onCell: (record) => ({
+      onCell: (recordIndex) => ({
         onClick: (e) => {
           e.stopPropagation();
-          if (onCellClick) onCellClick(record[col], col, nodeId);
+          if (!onCellClick) return;
+          const row = resolveRow(recordIndex);
+          onCellClick(row?.[col], col, nodeId);
         },
         className: 'cursor-pointer hover:bg-blue-50 hover:text-blue-700 transition-colors'
       })
     };
   });
 
-  const dataSource = sortedData.map((row, idx) => ({ __key: idx, ...row }));
-  const bodyHeight = Math.max(140, tableHeight - 38);
-
   return (
     <div ref={containerRef} className="h-full">
       <Table
         size="small"
         sticky
+        virtual
         className="rounded-none"
         style={{ borderRadius: 0 }}
-        rowKey="__key"
+        rowKey={(record) => record}
         pagination={false}
         columns={tableColumns}
         dataSource={dataSource}
@@ -490,7 +493,7 @@ const TreeNode = ({
 
   // KPI/Gauge metric calculation (derived from node output).
   const gaugeMetricValue = (node.type === 'COMPONENT' && node.params.subtype === 'GAUGE' && result)
-    ? calculateMetric(result.data, node.params.metricField, node.params.fn || 'count')
+    ? (result.getMetric ? result.getMetric(node.params.fn || 'count', node.params.metricField) : 0)
     : 0;
 
   // Columns for table preview (user-selected or default schema).
@@ -505,7 +508,7 @@ const TreeNode = ({
       : [{ id: 'metric-default', label: '', fn: node.params.fn || 'count', field: node.params.metricField || '' }];
     return rawMetrics.map(metric => ({
       ...metric,
-      value: calculateMetric(result.data, metric.field, metric.fn || 'count')
+      value: result.getMetric ? result.getMetric(metric.fn || 'count', metric.field) : 0
     }));
   }, [node.type, node.params.subtype, node.params.metrics, node.params.fn, node.params.metricField, result]);
 
@@ -524,71 +527,15 @@ const TreeNode = ({
     if (metricRequiresField(fn) && !valueField) {
       return { error: 'Select a value field for this aggregation.' };
     }
-
-    const normalizeKey = (value) => (value === null || value === undefined || value === '' ? '(blank)' : String(value));
-    const rowKeys = [];
-    const colKeys = [];
-    const rowIndex = new Map();
-    const colIndex = new Map();
-    const cells = new Map();
-    const getCellKey = (rowKey, colKey) => `${rowKey}::${colKey}`;
-
-    const ensureRow = (key) => {
-      if (!rowIndex.has(key)) {
-        rowIndex.set(key, rowKeys.length);
-        rowKeys.push(key);
-      }
-    };
-
-    const ensureCol = (key) => {
-      if (!colIndex.has(key)) {
-        colIndex.set(key, colKeys.length);
-        colKeys.push(key);
-      }
-    };
-
-    const ensureCell = (rowKey, colKey) => {
-      const key = getCellKey(rowKey, colKey);
-      if (!cells.has(key)) {
-        cells.set(key, { count: 0, sum: 0, min: null, max: null, distinct: new Set() });
-      }
-      return cells.get(key);
-    };
-
-    result.data.forEach(row => {
-      const rowKey = normalizeKey(row[rowField]);
-      const colKey = normalizeKey(row[columnField]);
-      ensureRow(rowKey);
-      ensureCol(colKey);
-      const cell = ensureCell(rowKey, colKey);
-      cell.count += 1;
-      if (valueField) {
-        const rawValue = row[valueField];
-        if (fn === 'count_distinct') cell.distinct.add(rawValue);
-        const value = Number(rawValue);
-        if (!Number.isNaN(value)) {
-          cell.sum += value;
-          cell.min = cell.min === null ? value : Math.min(cell.min, value);
-          cell.max = cell.max === null ? value : Math.max(cell.max, value);
-        }
-      }
+    if (!result.getPivotData) {
+      return { rowKeys: [], colKeys: [], matrix: [], fn, rowField, columnField };
+    }
+    return result.getPivotData({
+      rowField,
+      columnField,
+      valueField,
+      fn
     });
-
-    const matrix = rowKeys.map(rowKey => (
-      colKeys.map(colKey => {
-        const cell = cells.get(getCellKey(rowKey, colKey));
-        if (!cell) return null;
-        if (fn === 'count') return cell.count;
-        if (fn === 'count_distinct') return cell.distinct.size;
-        if (fn === 'sum') return cell.sum;
-        if (fn === 'avg') return cell.count ? cell.sum / cell.count : 0;
-        if (fn === 'min') return cell.min ?? 0;
-        if (fn === 'max') return cell.max ?? 0;
-        return 0;
-      })
-    ));
-
-    return { rowKeys, colKeys, matrix, fn, rowField, columnField };
   }, [
     node.type,
     node.params.subtype,
@@ -633,28 +580,29 @@ const TreeNode = ({
     ? 'Record Count'
     : node.params.yAxis;
 
-  const chartData = React.useMemo(() => {
-    if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'CHART') return [];
-    if (chartType === 'map') return [];
+  const chartDataInfo = React.useMemo(() => {
+    if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'CHART') {
+      return { data: [], yField: chartYAxis };
+    }
+    if (chartType === 'map') return { data: [], yField: chartYAxis };
     const xField = node.params.xAxis;
     const yField = chartYAxis;
-    if (!xField || !yField) return result.data;
+    if (!xField || !yField) {
+      const fallback = result.getSampleRows ? result.getSampleRows(5000) : (result.data || []);
+      return { data: fallback, yField };
+    }
     const aggFn = chartAggFn;
     const shouldAggregate = chartType !== 'scatter' && aggFn !== 'none';
-    if (!shouldAggregate) return result.data;
-
-    const groups = new Map();
-    result.data.forEach((row) => {
-      const key = row?.[xField];
-      if (key === null || key === undefined || key === '') return;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(row);
-    });
-
-    return Array.from(groups.entries()).map(([key, rows]) => ({
-      [xField]: key,
-      [yField]: calculateMetric(rows, yField, aggFn)
-    }));
+    if (!shouldAggregate) {
+      const fallback = result.getSampleRows ? result.getSampleRows(5000) : (result.data || []);
+      return { data: fallback, yField };
+    }
+    if (!result.getAggregatedRows) return { data: [], yField };
+    const aggregated = result.getAggregatedRows({ groupBy: xField, fn: aggFn, metricField: yField });
+    return {
+      data: aggregated.rows || [],
+      yField: aggregated.outputField || yField
+    };
   }, [
     result,
     node.type,
@@ -662,8 +610,7 @@ const TreeNode = ({
     chartType,
     chartAggFn,
     chartYAxis,
-    node.params.xAxis,
-    node.params.yAxis
+    node.params.xAxis
   ]);
 
   const mapData = React.useMemo(() => {
@@ -671,16 +618,12 @@ const TreeNode = ({
     const mapField = node.params.xAxis;
     if (!mapField) return [];
     const aggFn = chartAggFn === 'none' ? 'count' : chartAggFn;
-    const groups = new Map();
-    result.data.forEach((row) => {
-      const key = row?.[mapField];
-      if (key === null || key === undefined || key === '') return;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(row);
-    });
-    return Array.from(groups.entries()).map(([key, rows]) => ({
-      code: key,
-      value: calculateMetric(rows, node.params.yAxis, aggFn)
+    if (!result.getAggregatedRows) return [];
+    const aggregated = result.getAggregatedRows({ groupBy: mapField, fn: aggFn, metricField: node.params.yAxis });
+    const valueField = aggregated.outputField || node.params.yAxis || 'Record Count';
+    return (aggregated.rows || []).map((row) => ({
+      code: row?.[mapField],
+      value: row?.[valueField]
     }));
   }, [
     result,
@@ -691,6 +634,9 @@ const TreeNode = ({
     node.params.xAxis,
     node.params.yAxis
   ]);
+
+  const chartData = chartDataInfo.data;
+  const resolvedChartYAxis = chartDataInfo.yField;
 
   // Compact collapsed branch representation.
   if (isBranchCollapsed) {
@@ -811,12 +757,13 @@ const TreeNode = ({
                 <div className="flex-1 min-h-0 flex flex-col">
                   <div className="flex items-center justify-between text-xs font-medium text-gray-500 dark:text-slate-400 px-2 pt-2">
                     <span>Preview</span>
-                    <span>{result.data.length} rows</span>
+                    <span>{result.rowCount} rows</span>
                   </div>
                   <div className="flex-1 min-h-0 px-2 pb-2">
                     <TablePreview
-                      data={result.data}
+                      rowCount={result.rowCount}
                       columns={visibleColumns}
+                      getRowAt={result.getRowAt}
                       onCellClick={onTableCellClick}
                       onSortChange={onTableSortChange}
                       nodeId={nodeId}
@@ -889,7 +836,7 @@ const TreeNode = ({
                     <div><span className="text-pink-400">{node.params.joinType || 'LEFT'} JOIN</span> {node.params.rightTable || '...'}</div>
                     <div><span className="text-pink-400">ON</span> {node.params.leftKey || '?'} = {node.params.rightKey || '?'}</div>
                     <div className="mt-2 pt-2 border-t border-slate-700 text-slate-500 dark:text-slate-400 italic">
-                      Result: {result.data.length} rows merged
+                      Result: {result.rowCount} rows merged
                     </div>
                   </div>
                 </Card>
@@ -909,7 +856,7 @@ const TreeNode = ({
                 <VisxChart
                   data={chartData}
                   xAxis={node.params.xAxis}
-                  yAxis={chartYAxis}
+                  yAxis={resolvedChartYAxis}
                   type={chartType}
                   showGrid={node.params.chartShowGrid}
                   showPoints={node.params.chartShowPoints}
@@ -1077,4 +1024,4 @@ const TreeNode = ({
   );
 };
 
-export { TreeNode };
+export { TreeNode, TablePreview };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCSV, buildDataModelFromCSV, buildDataModelFromXLSX } from '../../src/utils/ingest.js';
+import { parseCSV, parseCSVFile, buildDataModelFromCSV, buildDataModelFromXLSX } from '../../src/utils/ingest.js';
 
 describe('ingest utils', () => {
   it('parses CSV rows with quotes and commas', () => {
@@ -8,6 +8,12 @@ describe('ingest utils', () => {
       { name: 'Jane, D', age: '30' },
       { name: 'Bob', age: '25' }
     ]);
+  });
+
+  it('parses CSV files with the file helper', async () => {
+    const file = new File(['name,age\nAda,34\n'], 'sample.csv', { type: 'text/csv' });
+    const rows = await parseCSVFile(file);
+    expect(rows).toEqual([{ name: 'Ada', age: '34' }]);
   });
 
   it('builds data model from CSV rows', () => {
