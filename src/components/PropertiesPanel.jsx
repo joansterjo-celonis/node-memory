@@ -897,20 +897,22 @@ const PropertiesPanel = ({
                       )}
                     </Form.Item>
                     <Form.Item label="Bar Gap">
-                      <Space size="small" style={{ width: '100%' }}>
-                        <Slider
-                          min={0}
-                          max={0.8}
-                          step={0.05}
-                          value={node.params.chartBarGap ?? 0.2}
-                          onChange={(value) => handleChange('chartBarGap', value)}
-                          disabled={node.params.chartType !== 'bar'}
-                          style={{ flex: 1 }}
-                        />
+                      <div className="flex items-center gap-2 w-full">
+                        <div className="flex-1 min-w-0">
+                          <Slider
+                            min={0}
+                            max={0.8}
+                            step={0.05}
+                            value={node.params.chartBarGap ?? 0.2}
+                            onChange={(value) => handleChange('chartBarGap', value)}
+                            disabled={node.params.chartType !== 'bar'}
+                            style={{ width: '100%' }}
+                          />
+                        </div>
                         <Text type="secondary" className="text-xs w-10 text-right">
                           {(node.params.chartBarGap ?? 0.2).toFixed(2)}
                         </Text>
-                      </Space>
+                      </div>
                       {node.params.chartType !== 'bar' && (
                         <Text type="secondary" className="text-xs">
                           Bar gap applies to bar charts.
