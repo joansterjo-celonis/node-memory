@@ -101,8 +101,8 @@ const ColumnStatsPanel = ({ node, schema = [], data = [] }) => {
   const selectDropdownProps = { popupMatchSelectWidth: false, dropdownStyle: { minWidth: 320 } };
 
   return (
-    <div className="h-full w-72 flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/40 z-40">
-      <div className="p-4 border-b border-gray-100 bg-white">
+    <div className="h-full w-72 flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/40 dark:bg-slate-900 dark:border-slate-700 dark:shadow-black/40 z-40">
+      <div className="p-4 border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700">
         <Title level={5} style={{ margin: 0 }}>Column Stats</Title>
         <Text type="secondary">Summary for the selected column</Text>
       </div>

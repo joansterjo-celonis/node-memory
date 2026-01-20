@@ -264,24 +264,24 @@ const WorldMapChart = ({
           );
         }}
       </ParentSize>
-      <div className="absolute right-3 top-3 z-10 flex flex-col gap-1 rounded-lg border border-gray-200 bg-white/90 p-1 shadow-sm">
+      <div className="absolute right-3 top-3 z-10 flex flex-col gap-1 rounded-lg border border-gray-200 bg-white/90 p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
         <button
           onClick={zoomIn}
-          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100"
+          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800"
           title="Zoom in"
         >
           +
         </button>
         <button
           onClick={zoomOut}
-          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100"
+          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800"
           title="Zoom out"
         >
           −
         </button>
         <button
           onClick={resetZoom}
-          className="h-7 w-7 rounded text-[10px] font-semibold text-gray-600 hover:bg-gray-100"
+          className="h-7 w-7 rounded text-[10px] font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800"
           title="Reset zoom"
         >
           1x
@@ -289,18 +289,18 @@ const WorldMapChart = ({
       </div>
       {showTooltip && tooltip.visible && tooltip.datum && (
         <div
-          className="pointer-events-none absolute z-20 rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[11px] text-gray-700 shadow-sm"
+          className="pointer-events-none absolute z-20 rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[11px] text-gray-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-200"
           style={{
             left: Math.max(8, Math.min(tooltip.x + 12, (tooltip.width || 0) - 160)),
             top: Math.max(8, Math.min(tooltip.y + 12, (tooltip.height || 0) - 80))
           }}
         >
-          <div className="font-semibold text-gray-800">
+          <div className="font-semibold text-gray-800 dark:text-slate-100">
             {tooltip.datum.feature?.properties?.name
               || countries.numericToAlpha3?.(tooltip.datum.feature?.id)
               || 'Unknown'}
           </div>
-          <div className="text-gray-500">{formatValue(tooltip.datum.value)}</div>
+          <div className="text-gray-500 dark:text-slate-400">{formatValue(tooltip.datum.value)}</div>
         </div>
       )}
     </div>

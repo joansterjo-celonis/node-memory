@@ -91,7 +91,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
 
   if (!node) {
     return (
-      <div className="h-full flex flex-col bg-white border-l border-gray-200">
+      <div className="h-full flex flex-col bg-white border-l border-gray-200 dark:bg-slate-900 dark:border-slate-700">
         <Card className="m-4">
           <Empty
             image={<Settings size={48} className="opacity-20" />}
@@ -180,9 +180,9 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
   };
 
   return (
-    <div className="h-full flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/50 w-80 animate-in slide-in-from-right duration-300 z-50">
+    <div className="h-full flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/50 dark:bg-slate-900 dark:border-slate-700 dark:shadow-black/40 w-80 animate-in slide-in-from-right duration-300 z-50">
       {/* Header */}
-      <div className="p-5 border-b border-gray-100 bg-white">
+      <div className="p-5 border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700">
         <Space orientation="vertical" size={6} style={{ width: '100%' }}>
           <Text type="secondary" className="uppercase tracking-wider text-[11px]">
             {node.type === 'COMPONENT' ? node.params.subtype : node.type} Node
@@ -671,7 +671,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
 
             {/* Axis Config for Charts */}
             {node.params.subtype === 'CHART' && (
-              <div className="space-y-4 pt-2 border-t border-gray-100">
+              <div className="space-y-4 pt-2 border-t border-gray-100 dark:border-slate-700">
                 <Form.Item
                   label={node.params.chartType === 'map' ? 'Map Field (ISO-3)' : 'X Axis (Category)'}
                 >
@@ -732,7 +732,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
             )}
 
             {node.params.subtype === 'CHART' && (
-              <div className="space-y-4 pt-2 border-t border-gray-100">
+              <div className="space-y-4 pt-2 border-t border-gray-100 dark:border-slate-700">
                 <Title level={5} style={{ margin: 0 }}>Chart Options</Title>
                 {node.params.chartType === 'map' ? (
                   <>
@@ -938,7 +938,7 @@ const PropertiesPanel = ({ node, updateNode, schema, data = [], dataModel, sourc
 
             {/* Gauge target */}
             {node.params.subtype === 'GAUGE' && (
-              <div className="space-y-1 pt-2 border-t border-gray-100">
+              <div className="space-y-1 pt-2 border-t border-gray-100 dark:border-slate-700">
                 <Form.Item label="Target Value (Max)">
                   <InputNumber
                     min={0}

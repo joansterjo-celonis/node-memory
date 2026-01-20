@@ -66,7 +66,7 @@ const VisxChart = ({
 }) => {
   if (!xAxis || !yAxis || !data || data.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-xs text-gray-400">
+      <div className="h-full flex items-center justify-center text-xs text-gray-400 dark:text-slate-500">
         Configure axes to view a chart
       </div>
     );
@@ -86,7 +86,7 @@ const VisxChart = ({
 
   if (prepared.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-xs text-gray-400">
+      <div className="h-full flex items-center justify-center text-xs text-gray-400 dark:text-slate-500">
         No numeric values available for this chart
       </div>
     );
@@ -349,14 +349,14 @@ const VisxChart = ({
       </ParentSize>
       {showTooltip && tooltip.visible && tooltip.datum && (
         <div
-          className="pointer-events-none absolute z-20 rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[11px] text-gray-700 shadow-sm"
+          className="pointer-events-none absolute z-20 rounded-md border border-gray-200 bg-white/95 px-2 py-1 text-[11px] text-gray-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-200"
           style={{
             left: Math.max(8, Math.min(tooltip.x + 12, (tooltip.width || 0) - 160)),
             top: Math.max(8, Math.min(tooltip.y + 12, (tooltip.height || 0) - 80))
           }}
         >
-          <div className="font-semibold text-gray-800">{formatValue(tooltip.datum.__x)}</div>
-          <div className="text-gray-500">{formatValue(tooltip.datum.__y)}</div>
+          <div className="font-semibold text-gray-800 dark:text-slate-100">{formatValue(tooltip.datum.__x)}</div>
+          <div className="text-gray-500 dark:text-slate-400">{formatValue(tooltip.datum.__y)}</div>
         </div>
       )}
     </div>
