@@ -14,19 +14,7 @@ Notes:
 - `.nojekyll` is included to avoid Jekyll processing.
 - The workflow builds the app and publishes `dist/`.
 
-## Firebase Leaderboard (optional)
-Set your Firebase Web config in `index.html` via `window.__firebase_config`. Without it, the app uses localStorage.
 
-```html
-<script>
-  window.__firebase_config = JSON.stringify({
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    projectId: "YOUR_PROJECT_ID",
-    appId: "YOUR_WEB_APP_ID"
-  });
-</script>
-```
 
 ## Local Preview
 Install dependencies and run the dev server:
