@@ -9,6 +9,7 @@ import { Layout, Database, AppsIcon, Settings, Undo, Redo, TableIcon, X, Plus, T
 import { parseCSVFile, readFileAsArrayBuffer, parseXLSX, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
 import { getChildren, getCalculationOrder, getNodeResult } from '../utils/nodeUtils';
 import { createDataEngine } from '../utils/dataEngine';
+import { normalizeFilters } from '../utils/filterUtils';
 
 const { Title, Text } = Typography;
 
@@ -128,13 +129,23 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [statsPanelRect, setStatsPanelRect] = useState(getDefaultStatsPanelRect);
   const [isPropertiesCollapsed, setIsPropertiesCollapsed] = useState(false);
   const [branchSelectionByNodeId, setBranchSelectionByNodeId] = useState({});
+  const [activeFilterTarget, setActiveFilterTarget] = useState(null);
   const statsDragStateRef = useRef(null);
   const statsDragFrameRef = useRef(null);
   const statsResizeStateRef = useRef(null);
   const statsResizeFrameRef = useRef(null);
   const nodeIdCounterRef = useRef(0);
+  const filterIdCounterRef = useRef(0);
 
   const createNodeId = useCallback(() => `node-${Date.now()}-${nodeIdCounterRef.current++}`, []);
+  const createFilterId = useCallback(() => `filter-${Date.now()}-${filterIdCounterRef.current++}`, []);
+
+  useEffect(() => {
+    if (!activeFilterTarget) return;
+    if (activeFilterTarget.nodeId !== selectedNodeId) {
+      setActiveFilterTarget(null);
+    }
+  }, [activeFilterTarget, selectedNodeId]);
 
   // -------------------------------------------------------------------
   // File ingestion pipeline (triggered by explicit "Ingest Data" button)
@@ -733,36 +744,58 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setShowAddMenuForId(null);
   };
 
-  const insertNode = (type, parentId, subtype = 'TABLE') => {
+  const insertNode = (type, parentId, subtype = 'TABLE', childId = null, insertPosition = null) => {
     const parent = findNodeById(parentId);
     if (!parent) return;
     const fallbackTitle = getDefaultNodeTitle(type, subtype);
     const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
     const newId = createNodeId();
     const entangledRootId = parent.entangledRootId;
-    const newNode = {
-      id: newId,
-      parentId,
+    const targetChild = childId ? findNodeById(childId) : null;
+    const shouldTargetChild = !!targetChild && targetChild.parentId === parentId;
+    const nextPosition = (insertPosition && Number.isFinite(insertPosition.x) && Number.isFinite(insertPosition.y))
+      ? { x: insertPosition.x, y: insertPosition.y }
+      : null;
+    const nodeTemplate = {
       type,
       title,
       titleIsCustom: false,
       isExpanded: true,
       params: getDefaultParams(subtype)
     };
+    const newNode = {
+      id: newId,
+      parentId,
+      ...nodeTemplate,
+      ...(nextPosition ? { position: nextPosition } : {})
+    };
 
-    let updatedNodes = nodes.map(n => n.parentId === parentId ? { ...n, parentId: newId } : n);
+    let updatedNodes = nodes.map((node) => {
+      if (shouldTargetChild) {
+        return node.id === targetChild.id ? { ...node, parentId: newId } : node;
+      }
+      return node.parentId === parentId ? { ...node, parentId: newId } : node;
+    });
 
     if (parent.entangledPeerId) {
       const peerParentId = parent.entangledPeerId;
       const peerId = createNodeId();
       const peerTitle = resolveNodeTitle(peerParentId, undefined, fallbackTitle);
+      const peerTargetChildId = shouldTargetChild ? targetChild.entangledPeerId : null;
+      const peerTargetChild = peerTargetChildId ? findNodeById(peerTargetChildId) : null;
+      const shouldTargetPeerChild = !!peerTargetChild && peerTargetChild.parentId === peerParentId;
       newNode.entangledPeerId = peerId;
       newNode.entangledRootId = entangledRootId;
-      updatedNodes = updatedNodes.map(n => n.parentId === peerParentId ? { ...n, parentId: peerId } : n);
+      updatedNodes = updatedNodes.map((node) => {
+        if (shouldTargetPeerChild) {
+          return node.id === peerTargetChildId ? { ...node, parentId: peerId } : node;
+        }
+        return node.parentId === peerParentId ? { ...node, parentId: peerId } : node;
+      });
       updatedNodes.push({
-        ...newNode,
         id: peerId,
         parentId: peerParentId,
+        ...nodeTemplate,
         title: peerTitle,
         entangledPeerId: newId,
         entangledRootId
@@ -801,8 +834,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setHistory(newHistory);
   };
 
-  const handleSelect = (id) => {
+  const handleSelect = (id, options = {}) => {
+    const { expand = true } = options || {};
     setSelectedNodeId(id);
+    if (!expand) return;
     const newNodes = nodes.map(n => n.id === id ? { ...n, isExpanded: true } : n);
     const newHistory = [...history];
     newHistory[historyIndex] = newNodes;
@@ -856,19 +891,56 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     ));
   }, []);
 
+  const applyNodePositions = useCallback((positions, options = {}) => {
+    if (!positions) return;
+    let hasChanges = false;
+    const nextNodes = nodes.map((node) => {
+      const nextPosition = positions[node.id];
+      if (!nextPosition) return node;
+      if (node.position?.x === nextPosition.x && node.position?.y === nextPosition.y) return node;
+      hasChanges = true;
+      return { ...node, position: { x: nextPosition.x, y: nextPosition.y } };
+    });
+    if (!hasChanges) return;
+    if (options.useHistory) {
+      updateNodes(nextNodes);
+    } else {
+      replaceCurrentNodes(nextNodes);
+    }
+  }, [nodes, updateNodes, replaceCurrentNodes]);
+
   const updateNodePosition = useCallback((id, position) => {
     if (!id || !position) return;
-    const nextNodes = nodes.map((node) => {
-      if (node.id !== id) return node;
-      if (node.position?.x === position.x && node.position?.y === position.y) return node;
-      return { ...node, position: { x: position.x, y: position.y } };
-    });
-    replaceCurrentNodes(nextNodes);
-  }, [nodes, replaceCurrentNodes]);
+    applyNodePositions({ [id]: position });
+  }, [applyNodePositions]);
+
+  const applyAutoLayout = useCallback((positions) => {
+    applyNodePositions(positions, { useHistory: true });
+  }, [applyNodePositions]);
 
   const buildInValue = (values) => values.map((value) => String(value)).join(', ');
 
-  const addFilterNode = ({ parentId, field, operator = 'equals', value }) => {
+  const addFilterToNode = (nodeId, filter, options = {}) => {
+    if (!nodeId) return;
+    const target = findNodeById(nodeId);
+    if (!target) return;
+    const existing = normalizeFilters(target.params);
+    const nextFilters = [
+      ...existing,
+      { id: createFilterId(), field: '', operator: 'equals', value: '', mode: 'operator', ...filter }
+    ];
+    const nextParams = { ...target.params, filters: nextFilters };
+    updateNode(nodeId, nextParams);
+    const nextIndex = nextFilters.length - 1;
+    if (options.focus) {
+      setSelectedNodeId(nodeId);
+      setActiveFilterTarget({ nodeId, index: nextIndex });
+      if (options.openPanel !== false) expandPropertiesPanel();
+    }
+    return nextIndex;
+  };
+
+  const addFilterNode = ({ parentId, field, operator = 'equals', value, mode = 'operator' }) => {
     if (!parentId || !field) return;
     const parent = findNodeById(parentId);
     if (!parent) return;
@@ -876,6 +948,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const entangledRootId = parent.entangledRootId;
     const fallbackTitle = getDefaultNodeTitle('FILTER');
     const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
+    const filterPayload = { id: createFilterId(), field, operator, value, mode };
     const newNode = {
       id: newId,
       parentId,
@@ -883,7 +956,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       title,
       titleIsCustom: false,
       isExpanded: true,
-      params: { field, operator, value }
+      params: { filters: [filterPayload] }
     };
 
     const nextNodes = [...nodes, newNode];
@@ -906,6 +979,34 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setSelectedNodeId(newId);
   };
 
+  const updateFilterOnNode = (nodeId, filterIndex, updates) => {
+    if (filterIndex == null || filterIndex < 0) return;
+    const target = findNodeById(nodeId);
+    if (!target) return;
+    const existing = normalizeFilters(target.params);
+    if (!existing[filterIndex]) return;
+    const nextFilters = existing.map((filter, idx) => (
+      idx === filterIndex ? { ...filter, ...updates } : filter
+    ));
+    updateNode(nodeId, { ...target.params, filters: nextFilters });
+  };
+
+  const removeFilterFromNode = (nodeId, filterIndex) => {
+    if (filterIndex == null || filterIndex < 0) return;
+    const target = findNodeById(nodeId);
+    if (!target) return;
+    const existing = normalizeFilters(target.params);
+    if (!existing[filterIndex]) return;
+    const nextFilters = existing.filter((_, idx) => idx !== filterIndex);
+    updateNode(nodeId, { ...target.params, filters: nextFilters });
+    setActiveFilterTarget((prev) => {
+      if (!prev || prev.nodeId !== nodeId) return prev;
+      if (prev.index === filterIndex) return null;
+      if (prev.index > filterIndex) return { ...prev, index: prev.index - 1 };
+      return prev;
+    });
+  };
+
   const handleChartDrillDown = (data, chartMeta, parentId) => {
     if (!data || !parentId) return;
     const xAxisField = chartMeta?.xAxis;
@@ -916,11 +1017,24 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     if (!selectionValues.length) return;
     const operator = selectionValues.length > 1 ? 'in' : 'equals';
     const value = operator === 'in' ? buildInValue(selectionValues) : selectionValues[0];
-    addFilterNode({ parentId, field: xAxisField, operator, value });
+    addFilterNode({ parentId, field: xAxisField, operator, value, mode: 'attribute' });
   };
 
   const handleTableCellClick = (value, field, parentId) => {
-    addFilterNode({ parentId, field, operator: 'equals', value });
+    addFilterNode({ parentId, field, operator: 'equals', value, mode: 'attribute' });
+  };
+
+  const handleFilterCellAction = (action, payload) => {
+    if (!payload) return;
+    const { nodeId, field, value } = payload;
+    if (!nodeId || !field) return;
+    if (action === 'add-to-node') {
+      addFilterToNode(nodeId, { field, operator: 'equals', value, mode: 'attribute' }, { focus: false });
+      return;
+    }
+    if (action === 'create-node') {
+      addFilterNode({ parentId: nodeId, field, operator: 'equals', value, mode: 'attribute' });
+    }
   };
 
   const handleTableSortChange = (nodeId, sortBy, sortDirection) => {
@@ -1952,11 +2066,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 onTableCellClick={handleTableCellClick}
                 onTableSortChange={handleTableSortChange}
                 onAssistantRequest={handleAssistantRequest}
+                onAddFilter={addFilterToNode}
+                onUpdateFilter={updateFilterOnNode}
+                onRemoveFilter={removeFilterFromNode}
+                onFilterCellAction={handleFilterCellAction}
                 showAddMenuForId={showAddMenuForId}
                 setShowAddMenuForId={setShowAddMenuForId}
                 showInsertMenuForId={showInsertMenuForId}
                 setShowInsertMenuForId={setShowInsertMenuForId}
                 onUpdateNodePosition={updateNodePosition}
+                onAutoLayout={applyAutoLayout}
               />
             ) : (
               <div className="min-w-full inline-flex justify-center p-20 items-start min-h-full">
@@ -1976,6 +2095,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                   onTableCellClick={handleTableCellClick}
                   onTableSortChange={handleTableSortChange}
                   onAssistantRequest={handleAssistantRequest}
+                  onAddFilter={addFilterToNode}
+                  onUpdateFilter={updateFilterOnNode}
+                  onRemoveFilter={removeFilterFromNode}
+                  onFilterCellAction={handleFilterCellAction}
                   showAddMenuForId={showAddMenuForId}
                   setShowAddMenuForId={setShowAddMenuForId}
                   showInsertMenuForId={showInsertMenuForId}
@@ -2033,6 +2156,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           onClearData={clearIngestedData}
           onShowDataModel={() => setShowDataModel(true)}
           onCollapse={collapsePropertiesPanel}
+            activeFilterIndex={activeFilterTarget?.nodeId === selectedNodeId ? activeFilterTarget.index : null}
         />
       )}
 

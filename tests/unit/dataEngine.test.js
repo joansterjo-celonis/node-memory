@@ -62,4 +62,26 @@ describe('data engine', () => {
     const joined = engine.getRows('join', { start: 0, size: 3 });
     expect(joined[0]).toHaveProperty('customers_name');
   });
+
+  it('applies multiple filters in a single node', () => {
+    const engine = createDataEngine(dataModel);
+    engine.ensureQuery('source', { type: 'SOURCE', table: 'orders' });
+
+    const parentKey = engine.getQueryKey('source');
+    engine.ensureQuery('filter-multi', {
+      type: 'FILTER',
+      parentId: 'source',
+      parentKey,
+      params: {
+        filters: [
+          { field: 'region', operator: 'equals', value: 'West' },
+          { field: 'amount', operator: 'gt', value: 6 }
+        ]
+      }
+    });
+
+    expect(engine.getRowCount('filter-multi')).toBe(1);
+    const rows = engine.getRows('filter-multi', { start: 0, size: 2 });
+    expect(rows.map((row) => row.id)).toEqual(['1']);
+  });
 });

@@ -22,6 +22,7 @@ import {
 } from 'antd';
 import { Database, Settings, Play, BarChart3, TrendingUp, Hash, Globe, Plus, Trash2, Minimize2 } from '../ui/icons';
 import { MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
+import { normalizeFilters } from '../utils/filterUtils';
 
 const { Title, Text } = Typography;
 
@@ -68,7 +69,8 @@ const PropertiesPanel = ({
   onIngest,
   onClearData,
   onShowDataModel,
-  onCollapse
+  onCollapse,
+  activeFilterIndex
 }) => {
   // Local staging for JOIN config (so user can edit multiple fields then commit).
   const [localParams, setLocalParams] = useState({});
@@ -215,6 +217,7 @@ const PropertiesPanel = ({
   const selectDropdownProps = { popupMatchSelectWidth: false, styles: { popup: { root: { minWidth: 320 } } } };
   const fullWidthSelect = { ...selectDropdownProps, style: { width: '100%' } };
   const isSourceError = sourceStatus?.title === 'Error';
+  const filters = node.type === 'FILTER' ? normalizeFilters(node.params) : [];
 
   const updateKpiMetric = (idx, updates) => {
     const next = kpiMetrics.map((metric, index) => index === idx ? { ...metric, ...updates } : metric);
@@ -232,6 +235,26 @@ const PropertiesPanel = ({
   const removeKpiMetric = (idx) => {
     const next = kpiMetrics.filter((_, index) => index !== idx);
     handleChange('metrics', next);
+  };
+
+  const updateFilterAtIndex = (idx, updates) => {
+    const next = filters.map((filter, index) => (
+      index === idx ? { ...filter, ...updates, mode: 'operator' } : filter
+    ));
+    handleChange('filters', next);
+  };
+
+  const addFilter = () => {
+    const next = [
+      ...filters,
+      { id: `filter-${Date.now()}`, field: '', operator: 'equals', value: '', mode: 'operator' }
+    ];
+    handleChange('filters', next);
+  };
+
+  const removeFilter = (idx) => {
+    const next = filters.filter((_, index) => index !== idx);
+    handleChange('filters', next);
   };
 
   return (
@@ -479,43 +502,73 @@ const PropertiesPanel = ({
         {/* FILTER CONFIG */}
         {node.type === 'FILTER' && (
           <div className="space-y-4">
-            <Form.Item label="Filter Field">
-              <Select
-                value={node.params.field || ''}
-                onChange={(value) => handleChange('field', value)}
-                options={[
-                  { label: 'Select Field...', value: '' },
-                  ...schema.map((f) => ({ label: f, value: f }))
-                ]}
-                {...fullWidthSelect}
-              />
-            </Form.Item>
-            <Space size="small" style={{ width: '100%' }}>
-              <Form.Item label="Operator" style={{ flex: 1, minWidth: 0 }}>
-                <Select
-                  value={node.params.operator || 'equals'}
-                  onChange={(value) => handleChange('operator', value)}
-                  options={[
-                    { label: '=', value: 'equals' },
-                    { label: '!=', value: 'not_equals' },
-                    { label: '>', value: 'gt' },
-                    { label: '<', value: 'lt' },
-                    { label: 'In list', value: 'in' },
-                    { label: 'Like', value: 'contains' }
-                  ]}
-                  {...selectDropdownProps}
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-              <Form.Item label="Value" style={{ flex: 2, minWidth: 0 }}>
-                <Input
-                  placeholder={node.params.operator === 'in' ? 'Comma-separated values...' : 'Value...'}
-                  value={node.params.value || ''}
-                  onChange={(e) => handleChange('value', e.target.value)}
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-            </Space>
+            {filters.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                No filters yet. Add one to refine the data in this node.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filters.map((filter, idx) => {
+                  const isActive = activeFilterIndex === idx;
+                  return (
+                    <div
+                      key={filter.id || `filter-${idx}`}
+                      className={`rounded-lg border px-3 py-3 ${isActive ? 'border-blue-400 bg-blue-50/60 dark:border-blue-400/70 dark:bg-blue-500/10' : 'border-gray-200 bg-white dark:border-slate-700 dark:bg-slate-900'}`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <Form.Item label="Filter Field" style={{ flex: 1, minWidth: 0, marginBottom: 0 }}>
+                          <Select
+                            value={filter.field || ''}
+                            onChange={(value) => updateFilterAtIndex(idx, { field: value })}
+                            options={[
+                              { label: 'Select Field...', value: '' },
+                              ...schema.map((f) => ({ label: f, value: f }))
+                            ]}
+                            {...fullWidthSelect}
+                          />
+                        </Form.Item>
+                        <Button
+                          type="text"
+                          danger
+                          icon={<Trash2 size={14} />}
+                          onClick={() => removeFilter(idx)}
+                          aria-label="Remove filter"
+                        />
+                      </div>
+                      <Space size="small" style={{ width: '100%' }}>
+                        <Form.Item label="Operator" style={{ flex: 1, minWidth: 0 }}>
+                          <Select
+                            value={filter.operator || 'equals'}
+                            onChange={(value) => updateFilterAtIndex(idx, { operator: value })}
+                            options={[
+                              { label: '=', value: 'equals' },
+                              { label: '!=', value: 'not_equals' },
+                              { label: '>', value: 'gt' },
+                              { label: '<', value: 'lt' },
+                              { label: 'In list', value: 'in' },
+                              { label: 'Like', value: 'contains' }
+                            ]}
+                            {...selectDropdownProps}
+                            style={{ width: '100%' }}
+                          />
+                        </Form.Item>
+                        <Form.Item label="Value" style={{ flex: 2, minWidth: 0 }}>
+                          <Input
+                            placeholder={filter.operator === 'in' ? 'Comma-separated values...' : 'Value...'}
+                            value={filter.value ?? ''}
+                            onChange={(e) => updateFilterAtIndex(idx, { value: e.target.value })}
+                            style={{ width: '100%' }}
+                          />
+                        </Form.Item>
+                      </Space>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <Button type="dashed" block icon={<Plus size={16} />} onClick={addFilter}>
+              Add Filter
+            </Button>
           </div>
         )}
 

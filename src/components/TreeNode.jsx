@@ -1,7 +1,7 @@
 // src/components/TreeNode.js
 // Recursive node renderer for the branching analysis canvas.
 import React from 'react';
-import { Alert, Button, Card, Dropdown, Empty, Input, Progress, Space, Statistic, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Dropdown, Empty, Input, Popover, Progress, Radio, Select, Space, Statistic, Table, Tag, Tooltip, Typography } from 'antd';
 import {
   Plus,
   Filter,
@@ -17,9 +17,11 @@ import {
   Gauge,
   LinkIcon,
   Minimize2,
-  Share2
+  Share2,
+  Layout
 } from '../ui/icons';
 import { getChildren, countDescendants, getNodeResult, formatNumber } from '../utils/nodeUtils';
+import { normalizeFilters, resolveFilterMode } from '../utils/filterUtils';
 import VisxChart from '../ui/SimpleChart';
 import WorldMapChart from '../ui/WorldMapChart';
 
@@ -28,6 +30,10 @@ const BRANCH_CONNECTOR_STROKE = 2;
 const FREE_LAYOUT_MIN_SCALE = 0.4;
 const FREE_LAYOUT_MAX_SCALE = 2.2;
 const FREE_LAYOUT_ZOOM_STEP = 1.15;
+const FREE_LAYOUT_DEFAULT_NODE_SIZE = { width: 640, height: 320 };
+const FREE_LAYOUT_BASE_OFFSET = { x: 80, y: 80 };
+const FREE_LAYOUT_MIN_GAP_X = 80;
+const FREE_LAYOUT_MIN_GAP_Y = 60;
 const KPI_LABELS = {
   count: 'Count',
   count_distinct: 'Distinct Count',
@@ -36,6 +42,32 @@ const KPI_LABELS = {
   min: 'Min',
   max: 'Max'
 };
+const FILTER_OPERATOR_LABELS = {
+  equals: '=',
+  not_equals: '!=',
+  gt: '>',
+  lt: '<',
+  gte: '>=',
+  lte: '<=',
+  in: 'in',
+  contains: 'contains'
+};
+
+const INSERT_MENU_ITEMS = [
+  {
+    type: 'group',
+    label: 'Insert Step',
+    children: [
+      { key: 'FILTER', label: 'Filter', icon: <span className="w-1.5 h-1.5 rounded-full bg-orange-400" /> },
+      { key: 'AGGREGATE', label: 'Aggregate', icon: <span className="w-1.5 h-1.5 rounded-full bg-purple-400" /> },
+      { key: 'JOIN', label: 'Join', icon: <span className="w-1.5 h-1.5 rounded-full bg-pink-400" /> },
+      { type: 'divider' },
+      { key: 'COMPONENT:TABLE', label: 'Table', icon: <TableIcon size={12} /> },
+      { key: 'COMPONENT:PIVOT', label: 'Pivot Table', icon: <TableIcon size={12} /> },
+      { key: 'COMPONENT:AI', label: 'AI Assistant', icon: <Share2 size={12} /> }
+    ]
+  }
+];
 
 const { Text, Title } = Typography;
 
@@ -47,6 +79,25 @@ const formatMetricLabel = (metric) => {
   if (metric.fn === 'count') return fnLabel;
   if (!metric.field) return fnLabel;
   return `${fnLabel} of ${metric.field}`;
+};
+
+const formatFilterLabel = (filter) => {
+  const field = filter.field || '';
+  const operator = FILTER_OPERATOR_LABELS[filter.operator] || filter.operator || '=';
+  const value = filter.value ?? '';
+  if (!field && (value === '' || value === null || value === undefined)) {
+    return 'New filter';
+  }
+  const resolvedField = field || 'Filter';
+  if (value === '' || value === null || value === undefined) {
+    return `${resolvedField} ${operator}`.trim();
+  }
+  return `${resolvedField} ${operator} ${value}`.trim();
+};
+
+const getElementLayoutHeight = (element) => {
+  if (!element) return 0;
+  return element.offsetHeight || element.clientHeight || 0;
 };
 
 const AssistantPanel = React.memo(({ node, schema, onRun }) => {
@@ -132,6 +183,8 @@ const TablePreview = React.memo(({
   getRowAt,
   sampleRows = [],
   onCellClick,
+  enableInlineFilterMenu = false,
+  onFilterCellAction,
   onSortChange,
   nodeId,
   sortBy,
@@ -142,6 +195,7 @@ const TablePreview = React.memo(({
   const rowCacheRef = React.useRef(new Map());
   const [tableHeight, setTableHeight] = React.useState(220);
   const [headerHeight, setHeaderHeight] = React.useState(38);
+  const [cellAction, setCellAction] = React.useState(null);
   const normalizedSortDirection = sortDirection === 'asc' || sortDirection === 'desc' ? sortDirection : '';
   const densityClassName = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
 
@@ -150,12 +204,14 @@ const TablePreview = React.memo(({
     if (!el) return undefined;
 
     const updateLayoutMetrics = () => {
-      const rect = el.getBoundingClientRect();
-      if (rect.height) setTableHeight(rect.height);
+      const nextHeight = getElementLayoutHeight(el);
+      if (nextHeight) setTableHeight(nextHeight);
       const header = el.querySelector('.ant-table-header') || el.querySelector('.ant-table-thead');
       if (header) {
-        const nextHeaderHeight = Math.ceil(header.getBoundingClientRect().height);
-        setHeaderHeight((prev) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+        const nextHeaderHeight = getElementLayoutHeight(header);
+        if (nextHeaderHeight) {
+          setHeaderHeight((prev) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+        }
       }
     };
     updateLayoutMetrics();
@@ -183,6 +239,10 @@ const TablePreview = React.memo(({
   React.useEffect(() => {
     rowCacheRef.current.clear();
   }, [rowCount, sortBy, normalizedSortDirection]);
+
+  React.useEffect(() => {
+    setCellAction(null);
+  }, [nodeId, enableInlineFilterMenu]);
 
   const dataSource = React.useMemo(
     () => (rowCount > 0 ? Array.from({ length: rowCount }, (_, idx) => idx) : []),
@@ -217,6 +277,38 @@ const TablePreview = React.memo(({
     360,
     columns.reduce((sum, col) => sum + (estimatedColumnWidths[col] || 120), 0)
   );
+
+  const cellActionContent = cellAction?.payload ? (
+    <Space direction="vertical" size="small">
+      <Text type="secondary" className="text-xs">
+        Apply filter
+      </Text>
+      <Tag color="orange">
+        {cellAction.payload.field} = {String(cellAction.payload.value ?? '')}
+      </Tag>
+      <Space size="small">
+        <Button
+          size="small"
+          onClick={() => {
+            onFilterCellAction?.('add-to-node', cellAction.payload);
+            setCellAction(null);
+          }}
+        >
+          Add to this node
+        </Button>
+        <Button
+          size="small"
+          type="primary"
+          onClick={() => {
+            onFilterCellAction?.('create-node', cellAction.payload);
+            setCellAction(null);
+          }}
+        >
+          New filter node
+        </Button>
+      </Space>
+    </Space>
+  ) : null;
 
   if (columns.length === 0) {
     return <Empty description="No columns available for preview" />;
@@ -261,7 +353,23 @@ const TablePreview = React.memo(({
       ellipsis: true,
       render: (_value, recordIndex) => {
         const row = resolveRow(recordIndex);
-        return row?.[col] ?? '';
+        const displayValue = row?.[col] ?? '';
+        if (!enableInlineFilterMenu) return displayValue;
+        const cellKey = `${recordIndex}-${col}`;
+        const isOpen = cellAction?.key === cellKey;
+        return (
+          <Popover
+            open={isOpen}
+            content={cellActionContent}
+            trigger="click"
+            placement="right"
+            onOpenChange={(open) => {
+              if (!open) setCellAction(null);
+            }}
+          >
+            <span className="block truncate">{displayValue}</span>
+          </Popover>
+        );
       },
       onHeaderCell: () => ({
         onClick: (e) => {
@@ -273,9 +381,17 @@ const TablePreview = React.memo(({
       onCell: (recordIndex) => ({
         onClick: (e) => {
           e.stopPropagation();
-          if (!onCellClick) return;
           const row = resolveRow(recordIndex);
-          onCellClick(row?.[col], col, nodeId);
+          const value = row?.[col];
+          if (enableInlineFilterMenu && onFilterCellAction) {
+            setCellAction({
+              key: `${recordIndex}-${col}`,
+              payload: { nodeId, field: col, value }
+            });
+            return;
+          }
+          if (!onCellClick) return;
+          onCellClick(value, col, nodeId);
         },
         className: 'cursor-pointer hover:bg-blue-50 hover:text-blue-700 transition-colors'
       })
@@ -468,6 +584,10 @@ const TreeNode = ({
   onTableCellClick,
   onTableSortChange,
   onAssistantRequest,
+  onAddFilter,
+  onUpdateFilter,
+  onRemoveFilter,
+  onFilterCellAction,
   showAddMenuForId,
   setShowAddMenuForId,
   showInsertMenuForId,
@@ -479,12 +599,22 @@ const TreeNode = ({
   renderChildren = true,
   compactHeader = false,
   menuId,
-  headerDragProps
+  headerDragProps,
+  shouldSuppressSelect
 }) => {
   const node = nodes.find(n => n.id === nodeId);
   if (!node) return null;
 
   const result = getNodeResult(chainData, nodeId);
+  const filters = React.useMemo(
+    () => (node.type === 'FILTER' ? normalizeFilters(node.params) : []),
+    [node.type, node.params]
+  );
+  const [isFilterBuilderOpen, setIsFilterBuilderOpen] = React.useState(false);
+  const [filterBuilderTargetIndex, setFilterBuilderTargetIndex] = React.useState(null);
+  const [filterBuilderMode, setFilterBuilderMode] = React.useState('operator');
+  const [operatorDraft, setOperatorDraft] = React.useState({ field: '', operator: 'equals', value: '' });
+  const [attributeDraft, setAttributeDraft] = React.useState({ field: '', values: [] });
   const rawChildren = getChildren(nodes, nodeId);
   const isActive = selectedNodeId === nodeId;
   const isExpanded = node.isExpanded !== false;
@@ -594,21 +724,91 @@ const TreeNode = ({
     }
   ];
 
-  const insertMenuItems = [
-    {
-      type: 'group',
-      label: 'Insert Step',
-      children: [
-        { key: 'FILTER', label: 'Filter', icon: <span className="w-1.5 h-1.5 rounded-full bg-orange-400" /> },
-        { key: 'AGGREGATE', label: 'Aggregate', icon: <span className="w-1.5 h-1.5 rounded-full bg-purple-400" /> },
-        { key: 'JOIN', label: 'Join', icon: <span className="w-1.5 h-1.5 rounded-full bg-pink-400" /> },
-        { type: 'divider' },
-        { key: 'COMPONENT:TABLE', label: 'Table', icon: <TableIcon size={12} /> },
-        { key: 'COMPONENT:PIVOT', label: 'Pivot Table', icon: <TableIcon size={12} /> },
-        { key: 'COMPONENT:AI', label: 'AI Assistant', icon: <Share2 size={12} /> }
-      ]
+  const resetFilterDrafts = React.useCallback(() => {
+    setOperatorDraft({ field: '', operator: 'equals', value: '' });
+    setAttributeDraft({ field: '', values: [] });
+  }, []);
+
+  const closeFilterBuilder = React.useCallback(() => {
+    setIsFilterBuilderOpen(false);
+    setFilterBuilderTargetIndex(null);
+  }, []);
+
+  const resolveAttributeValues = React.useCallback((filter) => {
+    if (!filter) return [];
+    if (Array.isArray(filter.value)) {
+      return filter.value.map((item) => String(item)).filter(Boolean);
     }
-  ];
+    if (filter.operator === 'in') {
+      return String(filter.value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    if (filter.value === null || filter.value === undefined || filter.value === '') return [];
+    return [String(filter.value)];
+  }, []);
+
+  const openNewFilterBuilder = React.useCallback((mode = 'operator') => {
+    resetFilterDrafts();
+    setFilterBuilderMode(mode);
+    setFilterBuilderTargetIndex(-1);
+    setIsFilterBuilderOpen(true);
+  }, [resetFilterDrafts]);
+
+  const openFilterBuilderForFilter = React.useCallback((filter, index) => {
+    const mode = resolveFilterMode(filter);
+    setFilterBuilderMode(mode);
+    setFilterBuilderTargetIndex(index);
+    if (mode === 'attribute') {
+      setAttributeDraft({ field: filter.field || '', values: resolveAttributeValues(filter) });
+      setOperatorDraft({ field: '', operator: 'equals', value: '' });
+    } else {
+      setOperatorDraft({
+        field: filter.field || '',
+        operator: filter.operator || 'equals',
+        value: filter.value ?? ''
+      });
+      setAttributeDraft({ field: '', values: [] });
+    }
+    setIsFilterBuilderOpen(true);
+  }, [resolveAttributeValues]);
+
+  const handleApplyOperatorFilter = () => {
+    if (!operatorDraft.field) return;
+    const payload = {
+      field: operatorDraft.field,
+      operator: operatorDraft.operator || 'equals',
+      value: operatorDraft.value ?? '',
+      mode: 'operator'
+    };
+    if (filterBuilderTargetIndex != null && filterBuilderTargetIndex >= 0) {
+      onUpdateFilter?.(nodeId, filterBuilderTargetIndex, payload);
+    } else {
+      onAddFilter?.(nodeId, payload);
+    }
+    resetFilterDrafts();
+    closeFilterBuilder();
+  };
+
+  const handleApplyAttributeFilter = () => {
+    if (!attributeDraft.field || attributeDraft.values.length === 0) return;
+    const value = attributeDraft.values.join(', ');
+    const operator = attributeDraft.values.length > 1 ? 'in' : 'equals';
+    const payload = {
+      field: attributeDraft.field,
+      operator,
+      value,
+      mode: 'attribute'
+    };
+    if (filterBuilderTargetIndex != null && filterBuilderTargetIndex >= 0) {
+      onUpdateFilter?.(nodeId, filterBuilderTargetIndex, payload);
+    } else {
+      onAddFilter?.(nodeId, payload);
+    }
+    resetFilterDrafts();
+    closeFilterBuilder();
+  };
 
   const canToggleEntangle = !!node.parentId && (!node.entangledPeerId || isEntangledRoot);
   const entangleMenu = {
@@ -658,6 +858,233 @@ const TreeNode = ({
   const visibleColumns = (node.type === 'COMPONENT' && node.params.subtype === 'TABLE' && node.params.columns && node.params.columns.length > 0)
     ? node.params.columns
     : result ? result.schema : [];
+
+  const filterFieldOptions = result?.schema || [];
+  const attributeValueOptions = React.useMemo(() => {
+    if (!result || !attributeDraft.field) return [];
+    if (result.getColumnStats) {
+      const stats = result.getColumnStats(attributeDraft.field, 32);
+      if (stats?.topValues?.length) {
+        return stats.topValues.map((item) => ({
+          label: `${item.value} (${item.count})`,
+          value: String(item.value)
+        }));
+      }
+    }
+    const fallbackRows = result.sampleRows || result.data || [];
+    const seen = new Set();
+    const options = [];
+    fallbackRows.forEach((row) => {
+      if (options.length >= 32) return;
+      const raw = row?.[attributeDraft.field];
+      if (raw === null || raw === undefined || raw === '') return;
+      const display = String(raw);
+      if (seen.has(display)) return;
+      seen.add(display);
+      options.push({ label: display, value: display });
+    });
+    return options;
+  }, [result, attributeDraft.field]);
+
+  const isEditingFilter = filterBuilderTargetIndex != null && filterBuilderTargetIndex >= 0;
+  const filterBuilderContent = (
+    <div className="w-80 p-3" onClick={(e) => e.stopPropagation()}>
+      <Space direction="vertical" size="small" className="w-full">
+        <Text type="secondary" className="text-xs">
+          {isEditingFilter ? 'Edit filter' : 'Add a filter'}
+        </Text>
+        <Radio.Group
+          value={filterBuilderMode}
+          onChange={(e) => setFilterBuilderMode(e.target.value)}
+          optionType="button"
+          buttonStyle="solid"
+          size="small"
+        >
+          <Radio.Button value="operator">Operator</Radio.Button>
+          <Radio.Button value="attribute">Attribute</Radio.Button>
+        </Radio.Group>
+        {filterBuilderMode === 'operator' ? (
+          <Space direction="vertical" size="small" className="w-full">
+            <Select
+              placeholder="Select column"
+              value={operatorDraft.field || undefined}
+              onChange={(value) => setOperatorDraft((prev) => ({ ...prev, field: value }))}
+              options={filterFieldOptions.map((field) => ({ label: field, value: field }))}
+              disabled={filterFieldOptions.length === 0}
+              style={{ width: '100%' }}
+            />
+            <Space size="small" className="w-full">
+              <Select
+                value={operatorDraft.operator || 'equals'}
+                onChange={(value) => setOperatorDraft((prev) => ({ ...prev, operator: value }))}
+                options={[
+                  { label: '=', value: 'equals' },
+                  { label: '!=', value: 'not_equals' },
+                  { label: '>', value: 'gt' },
+                  { label: '<', value: 'lt' },
+                  { label: '>=', value: 'gte' },
+                  { label: '<=', value: 'lte' },
+                  { label: 'In list', value: 'in' },
+                  { label: 'Like', value: 'contains' }
+                ]}
+                style={{ width: 120 }}
+              />
+              <Input
+                placeholder={operatorDraft.operator === 'in' ? 'Comma-separated values' : 'Value'}
+                value={operatorDraft.value}
+                onChange={(e) => setOperatorDraft((prev) => ({ ...prev, value: e.target.value }))}
+              />
+            </Space>
+            <Button
+              type="primary"
+              size="small"
+              onClick={handleApplyOperatorFilter}
+              disabled={!operatorDraft.field}
+            >
+              Apply filter
+            </Button>
+          </Space>
+        ) : (
+          <Space direction="vertical" size="small" className="w-full">
+            <Select
+              placeholder="Select column"
+              value={attributeDraft.field || undefined}
+              onChange={(value) => setAttributeDraft({ field: value, values: [] })}
+              options={filterFieldOptions.map((field) => ({ label: field, value: field }))}
+              disabled={filterFieldOptions.length === 0}
+              style={{ width: '100%' }}
+            />
+            <Select
+              mode="multiple"
+              placeholder={attributeDraft.field ? 'Select values' : 'Pick a column first'}
+              value={attributeDraft.values}
+              onChange={(values) => setAttributeDraft((prev) => ({ ...prev, values }))}
+              options={attributeValueOptions}
+              disabled={!attributeDraft.field}
+              maxTagCount="responsive"
+              style={{ width: '100%' }}
+            />
+            <Button
+              type="primary"
+              size="small"
+              onClick={handleApplyAttributeFilter}
+              disabled={!attributeDraft.field || attributeDraft.values.length === 0}
+            >
+              Apply filter
+            </Button>
+          </Space>
+        )}
+      </Space>
+    </div>
+  );
+
+  const filterAddTrigger = (
+    <Button
+      size="small"
+      type="dashed"
+      icon={<Plus size={12} />}
+      onClick={(e) => {
+        e.stopPropagation();
+        openNewFilterBuilder('operator');
+      }}
+    >
+      Add filter
+    </Button>
+  );
+
+  const filterAddTriggerCompact = (
+    <Button
+      size="small"
+      type="text"
+      icon={<Plus size={12} />}
+      onClick={(e) => {
+        e.stopPropagation();
+        openNewFilterBuilder('operator');
+      }}
+    />
+  );
+
+  const renderFilterChips = (compact = false) => {
+    if (!filters.length && !compact) {
+      return (
+        <Space size="small">
+          <Text type="secondary" className="text-xs">
+            No filters yet
+          </Text>
+          <Popover
+            content={filterBuilderContent}
+            trigger="click"
+            open={isFilterBuilderOpen && filterBuilderTargetIndex === -1}
+            onOpenChange={(open) => {
+              if (!open) closeFilterBuilder();
+            }}
+            placement="bottomLeft"
+          >
+            {filterAddTrigger}
+          </Popover>
+        </Space>
+      );
+    }
+
+    return (
+      <Space size={[compact ? 4 : 6, 4]} wrap>
+        {filters.map((filter, index) => {
+          const isOpen = isFilterBuilderOpen && filterBuilderTargetIndex === index;
+          return (
+            <Popover
+              key={filter.id || `filter-${index}`}
+              content={filterBuilderContent}
+              trigger="click"
+              placement="bottomLeft"
+              open={isOpen}
+              onOpenChange={(open) => {
+                if (!open) closeFilterBuilder();
+              }}
+            >
+              <span
+                className="group inline-flex"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openFilterBuilderForFilter(filter, index);
+                }}
+              >
+                <Tag color="orange" className={compact ? 'cursor-pointer select-none text-[9px] px-1' : 'cursor-pointer select-none'}>
+                  <span className="inline-flex items-center gap-1">
+                    {formatFilterLabel(filter)}
+                    <button
+                      type="button"
+                      className="ml-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full text-orange-700 opacity-0 transition-opacity group-hover:opacity-100 hover:text-orange-900"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveFilter?.(nodeId, index);
+                        if (isFilterBuilderOpen && filterBuilderTargetIndex === index) {
+                          closeFilterBuilder();
+                        }
+                      }}
+                      aria-label="Remove filter"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </span>
+                </Tag>
+              </span>
+            </Popover>
+          );
+        })}
+        <Popover
+          content={filterBuilderContent}
+          trigger="click"
+          open={isFilterBuilderOpen && filterBuilderTargetIndex === -1}
+          onOpenChange={(open) => {
+            if (!open) closeFilterBuilder();
+          }}
+          placement="bottomLeft"
+        >
+          {compact ? filterAddTriggerCompact : filterAddTrigger}
+        </Popover>
+      </Space>
+    );
+  };
 
   const kpiMetrics = React.useMemo(() => {
     if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'KPI') return [];
@@ -710,12 +1137,14 @@ const TreeNode = ({
     if (!el) return undefined;
 
     const updateLayoutMetrics = () => {
-      const rect = el.getBoundingClientRect();
-      if (rect.height) setPivotTableHeight(rect.height);
+      const nextHeight = getElementLayoutHeight(el);
+      if (nextHeight) setPivotTableHeight(nextHeight);
       const header = el.querySelector('.ant-table-header') || el.querySelector('.ant-table-thead');
       if (header) {
-        const nextHeaderHeight = Math.ceil(header.getBoundingClientRect().height);
-        setPivotHeaderHeight((prev) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+        const nextHeaderHeight = getElementLayoutHeight(header);
+        if (nextHeaderHeight) {
+          setPivotHeaderHeight((prev) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+        }
       }
     };
     updateLayoutMetrics();
@@ -832,7 +1261,11 @@ const TreeNode = ({
   const nodeCard = (
     <div className="relative group z-10">
       <div
-        onClick={(e) => { e.stopPropagation(); onSelect(nodeId); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (shouldSuppressSelect?.()) return;
+          onSelect(nodeId);
+        }}
         className={`
           node-card bg-white dark:bg-slate-900 rounded-xl border-2 transition-all cursor-pointer overflow-hidden relative flex flex-col
           ${compactHeader ? 'node-card--compact' : ''}
@@ -871,19 +1304,25 @@ const TreeNode = ({
                   {resolvedBranchLabel}
                 </Tag>
               )}
+              {compactHeader && node.type === 'FILTER' && renderFilterChips(true)}
               {node.entangledPeerId && (
                 <Tooltip title="Entangled branch">
                   <span className="entangled-node-indicator" />
                 </Tooltip>
               )}
             </Space>
-            <Text type="secondary" className="text-xs truncate block mt-0.5 node-card-subtitle">
-              {node.type === 'FILTER' && node.params.field ? `${node.params.field} ${node.params.operator} ${node.params.value}` :
-                node.type === 'AGGREGATE' ? `Group by ${node.params.groupBy}` :
-                node.type === 'JOIN' ? `with ${node.params.rightTable || '...'}` :
-                node.type === 'COMPONENT' ? (node.params.subtype === 'AI' ? 'AI Assistant' : `${node.params.subtype} View`) :
-                node.description || node.type}
-            </Text>
+            <div className="mt-0.5 node-card-subtitle">
+              {node.type === 'FILTER' ? (
+                compactHeader ? null : renderFilterChips(false)
+              ) : (
+                <Text type="secondary" className="text-xs truncate block">
+                  {node.type === 'AGGREGATE' ? `Group by ${node.params.groupBy}` :
+                    node.type === 'JOIN' ? `with ${node.params.rightTable || '...'}` :
+                    node.type === 'COMPONENT' ? (node.params.subtype === 'AI' ? 'AI Assistant' : `${node.params.subtype} View`) :
+                    node.description || node.type}
+                </Text>
+              )}
+            </div>
           </div>
           <Space size="small">
             <Tooltip title="Fork Branch">
@@ -970,6 +1409,8 @@ const TreeNode = ({
                       getRowAt={result.getRowAt}
                       sampleRows={result.sampleRows || result.data || []}
                       onCellClick={onTableCellClick}
+                      enableInlineFilterMenu={node.type === 'FILTER'}
+                      onFilterCellAction={onFilterCellAction}
                       onSortChange={onTableSortChange}
                       nodeId={nodeId}
                       sortBy={node.params.tableSortBy}
@@ -1169,7 +1610,7 @@ const TreeNode = ({
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity z-30">
               <div ref={insertMenuRef}>
                 <Dropdown
-                  menu={{ items: insertMenuItems, onClick: handleInsertMenuClick }}
+                  menu={{ items: INSERT_MENU_ITEMS, onClick: handleInsertMenuClick }}
                   trigger={['click']}
                   open={showInsertMenuForId === resolvedMenuId}
                   onOpenChange={(open) => setShowInsertMenuForId(open ? resolvedMenuId : null)}
@@ -1204,6 +1645,10 @@ const TreeNode = ({
               onTableCellClick={onTableCellClick}
               onTableSortChange={onTableSortChange}
               onAssistantRequest={onAssistantRequest}
+              onAddFilter={onAddFilter}
+              onUpdateFilter={onUpdateFilter}
+              onRemoveFilter={onRemoveFilter}
+              onFilterCellAction={onFilterCellAction}
               showAddMenuForId={showAddMenuForId}
               setShowAddMenuForId={setShowAddMenuForId}
               showInsertMenuForId={showInsertMenuForId}
@@ -1234,6 +1679,10 @@ const TreeNode = ({
                   onTableCellClick={onTableCellClick}
                   onTableSortChange={onTableSortChange}
                   onAssistantRequest={onAssistantRequest}
+                  onAddFilter={onAddFilter}
+                  onUpdateFilter={onUpdateFilter}
+                  onRemoveFilter={onRemoveFilter}
+                  onFilterCellAction={onFilterCellAction}
                   showAddMenuForId={showAddMenuForId}
                   setShowAddMenuForId={setShowAddMenuForId}
                   showInsertMenuForId={showInsertMenuForId}
@@ -1304,30 +1753,151 @@ const FreeLayoutCanvas = ({
   onTableCellClick,
   onTableSortChange,
   onAssistantRequest,
+  onAddFilter,
+  onUpdateFilter,
+  onRemoveFilter,
+  onFilterCellAction,
   showAddMenuForId,
   setShowAddMenuForId,
   showInsertMenuForId,
   setShowInsertMenuForId,
-  onUpdateNodePosition
+  onUpdateNodePosition,
+  onAutoLayout
 }) => {
   const containerRef = React.useRef(null);
   const [viewport, setViewport] = React.useState({ x: 0, y: 0, scale: 1 });
   const viewportRef = React.useRef(viewport);
   const [isPanning, setIsPanning] = React.useState(false);
   const [isDragging, setIsDragging] = React.useState(false);
+  const [hoveredConnector, setHoveredConnector] = React.useState(null);
+  const [insertAnchor, setInsertAnchor] = React.useState(null);
   const nodeSizesRef = React.useRef(new Map());
+  const dragPositionsRef = React.useRef(new Map());
+  const pendingDragPositionsRef = React.useRef(new Map());
+  const [dragVersion, setDragVersion] = React.useState(0);
   const [layoutVersion, setLayoutVersion] = React.useState(0);
   const panStateRef = React.useRef(null);
   const dragStateRef = React.useRef(null);
   const dragFrameRef = React.useRef(null);
+  const hoverFrameRef = React.useRef(null);
+  const hoverPayloadRef = React.useRef(null);
+  const connectorInsertRef = React.useRef(null);
+  const activeInsertEdgeRef = React.useRef(null);
+  const suppressSelectRef = React.useRef(false);
   const clampScale = React.useCallback(
     (value) => Math.min(FREE_LAYOUT_MAX_SCALE, Math.max(FREE_LAYOUT_MIN_SCALE, value)),
     []
   );
 
+  const getGraphPointFromEvent = React.useCallback((event) => {
+    const container = containerRef.current;
+    if (!container) return null;
+    const rect = container.getBoundingClientRect();
+    const { x, y, scale } = viewportRef.current;
+    if (!scale) return null;
+    return {
+      x: (event.clientX - rect.left - x) / scale,
+      y: (event.clientY - rect.top - y) / scale
+    };
+  }, []);
+
+  const resolveNodePosition = React.useCallback((node) => {
+    const override = dragPositionsRef.current.get(node.id);
+    if (override) return override;
+    return node.position || null;
+  }, []);
+
+  const scheduleConnectorHover = React.useCallback(() => {
+    if (hoverFrameRef.current) return;
+    hoverFrameRef.current = requestAnimationFrame(() => {
+      hoverFrameRef.current = null;
+      if (hoverPayloadRef.current) {
+        setHoveredConnector(hoverPayloadRef.current);
+      }
+    });
+  }, []);
+
+  const handleConnectorHover = React.useCallback((edge, event) => {
+    if (showInsertMenuForId && insertAnchor?.edgeKey === showInsertMenuForId) return;
+    const point = getGraphPointFromEvent(event);
+    if (!point) return;
+    hoverPayloadRef.current = {
+      edgeKey: edge.edgeKey,
+      parentId: edge.parentId,
+      childId: edge.childId,
+      position: point
+    };
+    scheduleConnectorHover();
+  }, [getGraphPointFromEvent, insertAnchor, scheduleConnectorHover, showInsertMenuForId]);
+
+  const handleConnectorLeave = React.useCallback((event, edgeKey) => {
+    if (showInsertMenuForId === edgeKey) return;
+    const related = event.relatedTarget;
+    if (related && connectorInsertRef.current?.contains(related)) return;
+    hoverPayloadRef.current = null;
+    setHoveredConnector((prev) => (prev?.edgeKey === edgeKey ? null : prev));
+  }, [showInsertMenuForId]);
+
+  const handleInsertButtonLeave = React.useCallback(() => {
+    if (showInsertMenuForId) return;
+    hoverPayloadRef.current = null;
+    setHoveredConnector(null);
+  }, [showInsertMenuForId]);
+
+  const resolveInsertPosition = React.useCallback((anchor) => {
+    if (!anchor?.position) return null;
+    const { x, y } = anchor.position;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return {
+      x: Math.round(x - FREE_LAYOUT_DEFAULT_NODE_SIZE.width / 2),
+      y: Math.round(y - FREE_LAYOUT_DEFAULT_NODE_SIZE.height / 2)
+    };
+  }, []);
+
+  const handleConnectorInsertClick = React.useCallback((event, anchor) => {
+    event.stopPropagation();
+    if (!anchor) return;
+    activeInsertEdgeRef.current = anchor;
+    setInsertAnchor(anchor);
+    setShowInsertMenuForId(anchor.edgeKey);
+  }, [setShowInsertMenuForId]);
+
+  const handleConnectorInsertMenuClick = React.useCallback(({ key }) => {
+    const target = activeInsertEdgeRef.current;
+    if (!target || !onInsert) return;
+    const insertPosition = resolveInsertPosition(target);
+    if (key.startsWith('COMPONENT:')) {
+      onInsert('COMPONENT', target.parentId, key.split(':')[1], target.childId, insertPosition);
+    } else {
+      onInsert(key, target.parentId, undefined, target.childId, insertPosition);
+    }
+    setShowInsertMenuForId(null);
+    setInsertAnchor(null);
+  }, [onInsert, resolveInsertPosition, setShowInsertMenuForId]);
+
+  const handleConnectorInsertOpenChange = React.useCallback((open, edgeKey) => {
+    if (open) {
+      setShowInsertMenuForId(edgeKey);
+      return;
+    }
+    setShowInsertMenuForId(null);
+    setInsertAnchor(null);
+  }, [setShowInsertMenuForId]);
+
   React.useEffect(() => {
     viewportRef.current = viewport;
   }, [viewport]);
+
+  React.useEffect(() => {
+    return () => {
+      if (hoverFrameRef.current) cancelAnimationFrame(hoverFrameRef.current);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (showInsertMenuForId) return;
+    setInsertAnchor(null);
+  }, [showInsertMenuForId]);
 
   const nodesById = React.useMemo(() => new Map(nodes.map(node => [node.id, node])), [nodes]);
 
@@ -1353,6 +1923,44 @@ const FreeLayoutCanvas = ({
     [nodes, hiddenNodeIds]
   );
 
+  React.useEffect(() => {
+    if (dragStateRef.current) return;
+    if (dragPositionsRef.current.size === 0 && pendingDragPositionsRef.current.size === 0) return;
+
+    const committed = [];
+    const stale = [];
+    pendingDragPositionsRef.current.forEach((position, nodeId) => {
+      const node = nodesById.get(nodeId);
+      if (!node) {
+        stale.push(nodeId);
+        return;
+      }
+      const current = node.position;
+      if (current && current.x === position.x && current.y === position.y) {
+        committed.push(nodeId);
+      }
+    });
+
+    const orphaned = [];
+    dragPositionsRef.current.forEach((_position, nodeId) => {
+      if (!pendingDragPositionsRef.current.has(nodeId)) {
+        orphaned.push(nodeId);
+      }
+    });
+
+    [...committed, ...stale].forEach((nodeId) => {
+      pendingDragPositionsRef.current.delete(nodeId);
+      dragPositionsRef.current.delete(nodeId);
+    });
+    orphaned.forEach((nodeId) => {
+      dragPositionsRef.current.delete(nodeId);
+    });
+
+    if (committed.length || stale.length || orphaned.length) {
+      setDragVersion((version) => version + 1);
+    }
+  }, [nodesById]);
+
   const upstreamEdgeKeys = React.useMemo(() => {
     const keys = new Set();
     if (!selectedNodeId) return keys;
@@ -1363,6 +1971,119 @@ const FreeLayoutCanvas = ({
     }
     return keys;
   }, [selectedNodeId, nodesById]);
+
+  const buildOptimizedLayout = React.useCallback(() => {
+    if (visibleNodes.length === 0) return null;
+    const sizeMap = nodeSizesRef.current;
+    const fallbackSize = FREE_LAYOUT_DEFAULT_NODE_SIZE;
+    const getSize = (nodeId) => sizeMap.get(nodeId) || fallbackSize;
+    const samples = visibleNodes.map((node) => getSize(node.id));
+    const averageWidth = samples.reduce((sum, size) => sum + size.width, 0) / samples.length;
+    const averageHeight = samples.reduce((sum, size) => sum + size.height, 0) / samples.length;
+    const horizontalGap = Math.max(FREE_LAYOUT_MIN_GAP_X, Math.round(averageWidth * 0.15));
+    const verticalGap = Math.max(FREE_LAYOUT_MIN_GAP_Y, Math.round(averageHeight * 0.25));
+    const rootGap = verticalGap * 2;
+    const offset = FREE_LAYOUT_BASE_OFFSET;
+
+    const visibleIds = new Set(visibleNodes.map((node) => node.id));
+    const childrenByParent = new Map();
+    visibleNodes.forEach((node) => {
+      const parentKey = node.parentId;
+      if (!childrenByParent.has(parentKey)) childrenByParent.set(parentKey, []);
+      childrenByParent.get(parentKey).push(node);
+    });
+
+    const roots = visibleNodes.filter((node) => !node.parentId || !visibleIds.has(node.parentId));
+    const depthById = new Map();
+    const assignDepth = (nodeId, depth) => {
+      if (depthById.has(nodeId)) return;
+      depthById.set(nodeId, depth);
+      const children = childrenByParent.get(nodeId) || [];
+      children.forEach((child) => assignDepth(child.id, depth + 1));
+    };
+    roots.forEach((root) => assignDepth(root.id, 0));
+
+    const columnWidths = [];
+    visibleNodes.forEach((node) => {
+      const depth = depthById.get(node.id) ?? 0;
+      const size = getSize(node.id);
+      columnWidths[depth] = Math.max(columnWidths[depth] || 0, size.width);
+    });
+
+    const columnOffsets = [];
+    let currentX = offset.x;
+    columnWidths.forEach((width, depth) => {
+      columnOffsets[depth] = currentX;
+      currentX += width + horizontalGap;
+    });
+
+    const subtreeHeights = new Map();
+    const measureSubtree = (nodeId) => {
+      const size = getSize(nodeId);
+      const children = childrenByParent.get(nodeId) || [];
+      if (children.length === 0) {
+        subtreeHeights.set(nodeId, size.height);
+        return size.height;
+      }
+      let childrenTotal = 0;
+      children.forEach((child, index) => {
+        const childHeight = measureSubtree(child.id);
+        if (index > 0) childrenTotal += verticalGap;
+        childrenTotal += childHeight;
+      });
+      const subtreeHeight = Math.max(size.height, childrenTotal);
+      subtreeHeights.set(nodeId, subtreeHeight);
+      return subtreeHeight;
+    };
+    roots.forEach((root) => measureSubtree(root.id));
+
+    const positions = {};
+    const assignPositions = (nodeId, top) => {
+      const size = getSize(nodeId);
+      const depth = depthById.get(nodeId) ?? 0;
+      const children = childrenByParent.get(nodeId) || [];
+      const subtreeHeight = subtreeHeights.get(nodeId) || size.height;
+      let centerY = top + subtreeHeight / 2;
+
+      if (children.length > 0) {
+        let childrenTotal = 0;
+        children.forEach((child, index) => {
+          const childHeight = subtreeHeights.get(child.id) || getSize(child.id).height;
+          if (index > 0) childrenTotal += verticalGap;
+          childrenTotal += childHeight;
+        });
+        let cursor = top + (subtreeHeight - childrenTotal) / 2;
+        const childCenters = [];
+        children.forEach((child) => {
+          assignPositions(child.id, cursor);
+          const childSize = getSize(child.id);
+          const childPos = positions[child.id];
+          childCenters.push(childPos.y + childSize.height / 2);
+          cursor += (subtreeHeights.get(child.id) || childSize.height) + verticalGap;
+        });
+        centerY = childCenters.reduce((sum, value) => sum + value, 0) / childCenters.length;
+      }
+
+      positions[nodeId] = {
+        x: Math.round(columnOffsets[depth] ?? offset.x),
+        y: Math.round(centerY - size.height / 2)
+      };
+    };
+
+    let rootTop = offset.y;
+    roots.forEach((root) => {
+      assignPositions(root.id, rootTop);
+      rootTop += (subtreeHeights.get(root.id) || getSize(root.id).height) + rootGap;
+    });
+
+    return positions;
+  }, [visibleNodes]);
+
+  const handleAutoLayout = React.useCallback(() => {
+    const positions = buildOptimizedLayout();
+    if (!positions) return;
+    onAutoLayout?.(positions);
+  }, [buildOptimizedLayout, onAutoLayout]);
 
   const handleMeasureNode = React.useCallback((nodeId, width, height) => {
     const prev = nodeSizesRef.current.get(nodeId);
@@ -1462,29 +2183,71 @@ const FreeLayoutCanvas = ({
   const handleNodeDragMove = React.useCallback((event) => {
     const state = dragStateRef.current;
     if (!state) return;
+    state.lastX = event.clientX;
+    state.lastY = event.clientY;
+    const rawDx = event.clientX - state.startX;
+    const rawDy = event.clientY - state.startY;
+    if (!state.hasMoved && (Math.abs(rawDx) > 3 || Math.abs(rawDy) > 3)) {
+      state.hasMoved = true;
+    }
     if (dragFrameRef.current) return;
     dragFrameRef.current = requestAnimationFrame(() => {
       dragFrameRef.current = null;
       const scale = viewportRef.current.scale || 1;
-      const dx = (event.clientX - state.startX) / scale;
-      const dy = (event.clientY - state.startY) / scale;
-      onUpdateNodePosition?.(state.nodeId, {
+      const lastX = Number.isFinite(state.lastX) ? state.lastX : state.startX;
+      const lastY = Number.isFinite(state.lastY) ? state.lastY : state.startY;
+      const dx = (lastX - state.startX) / scale;
+      const dy = (lastY - state.startY) / scale;
+      const nextPosition = {
         x: state.originX + dx,
         y: state.originY + dy
-      });
+      };
+      dragPositionsRef.current.set(state.nodeId, nextPosition);
+      setDragVersion((version) => version + 1);
     });
-  }, [onUpdateNodePosition]);
+  }, []);
 
   const handleNodeDragEnd = React.useCallback(() => {
     if (dragFrameRef.current) {
       cancelAnimationFrame(dragFrameRef.current);
       dragFrameRef.current = null;
     }
+    const state = dragStateRef.current;
+    if (state?.hasMoved) {
+      suppressSelectRef.current = true;
+      requestAnimationFrame(() => {
+        suppressSelectRef.current = false;
+      });
+    }
+    if (state) {
+      const scale = viewportRef.current.scale || 1;
+      const lastX = Number.isFinite(state.lastX) ? state.lastX : state.startX;
+      const lastY = Number.isFinite(state.lastY) ? state.lastY : state.startY;
+      const dx = (lastX - state.startX) / scale;
+      const dy = (lastY - state.startY) / scale;
+      const hasDelta = dx !== 0 || dy !== 0;
+      if (hasDelta) {
+        const finalPosition = {
+          x: state.originX + dx,
+          y: state.originY + dy
+        };
+        const prevPosition = dragPositionsRef.current.get(state.nodeId);
+        if (!prevPosition || prevPosition.x !== finalPosition.x || prevPosition.y !== finalPosition.y) {
+          dragPositionsRef.current.set(state.nodeId, finalPosition);
+          setDragVersion((version) => version + 1);
+        }
+        pendingDragPositionsRef.current.set(state.nodeId, finalPosition);
+        onUpdateNodePosition?.(state.nodeId, finalPosition);
+      } else if (dragPositionsRef.current.has(state.nodeId)) {
+        dragPositionsRef.current.delete(state.nodeId);
+        setDragVersion((version) => version + 1);
+      }
+    }
     dragStateRef.current = null;
     setIsDragging(false);
     window.removeEventListener('pointermove', handleNodeDragMove);
     window.removeEventListener('pointerup', handleNodeDragEnd);
-  }, [handleNodeDragMove]);
+  }, [handleNodeDragMove, onUpdateNodePosition]);
 
   const handleNodeDragStart = React.useCallback((nodeId, event) => {
     if (event.button !== 0) return;
@@ -1492,55 +2255,133 @@ const FreeLayoutCanvas = ({
     if (target?.closest('button, a, input, textarea, .ant-dropdown, .ant-select, .ant-table')) return;
     event.preventDefault();
     event.stopPropagation();
-    onSelect?.(nodeId);
+    suppressSelectRef.current = false;
+    pendingDragPositionsRef.current.delete(nodeId);
+    onSelect?.(nodeId, { expand: false });
     const node = nodesById.get(nodeId);
-    const origin = node?.position || { x: 0, y: 0 };
+    const origin = dragPositionsRef.current.get(nodeId) || node?.position || { x: 0, y: 0 };
     dragStateRef.current = {
       nodeId,
       startX: event.clientX,
       startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
       originX: origin.x,
-      originY: origin.y
+      originY: origin.y,
+      hasMoved: false
     };
     setIsDragging(true);
     window.addEventListener('pointermove', handleNodeDragMove);
     window.addEventListener('pointerup', handleNodeDragEnd);
   }, [nodesById, onSelect, handleNodeDragMove, handleNodeDragEnd]);
 
+  const shouldSuppressSelect = React.useCallback(() => {
+    if (!suppressSelectRef.current) return false;
+    suppressSelectRef.current = false;
+    return true;
+  }, []);
+
   const connectors = React.useMemo(() => {
     const lines = [];
     const sizes = nodeSizesRef.current;
+    const getSize = (nodeId) => sizes.get(nodeId) || FREE_LAYOUT_DEFAULT_NODE_SIZE;
+    const getRect = (node) => {
+      const pos = resolveNodePosition(node);
+      if (!pos) return null;
+      const size = getSize(node.id);
+      const left = pos.x;
+      const top = pos.y;
+      return {
+        left,
+        top,
+        right: left + size.width,
+        bottom: top + size.height,
+        centerX: left + size.width / 2,
+        centerY: top + size.height / 2,
+        width: size.width,
+        height: size.height
+      };
+    };
+    const resolveAnchor = (rect, side) => {
+      if (side === 'left') return { x: rect.left, y: rect.centerY };
+      if (side === 'right') return { x: rect.right, y: rect.centerY };
+      if (side === 'top') return { x: rect.centerX, y: rect.top };
+      return { x: rect.centerX, y: rect.bottom };
+    };
+    const chooseSides = (parentRect, childRect) => {
+      const horizontalSeparation = Math.max(
+        0,
+        childRect.left - parentRect.right,
+        parentRect.left - childRect.right
+      );
+      const verticalSeparation = Math.max(
+        0,
+        childRect.top - parentRect.bottom,
+        parentRect.top - childRect.bottom
+      );
+      let orientation = 'vertical';
+      if (horizontalSeparation > verticalSeparation) {
+        orientation = 'horizontal';
+      } else if (horizontalSeparation === verticalSeparation) {
+        const dx = childRect.centerX - parentRect.centerX;
+        const dy = childRect.centerY - parentRect.centerY;
+        orientation = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical';
+      }
+      if (orientation === 'horizontal') {
+        const isRight = childRect.centerX >= parentRect.centerX;
+        return {
+          orientation,
+          parentSide: isRight ? 'right' : 'left',
+          childSide: isRight ? 'left' : 'right'
+        };
+      }
+      const isBelow = childRect.centerY >= parentRect.centerY;
+      return {
+        orientation,
+        parentSide: isBelow ? 'bottom' : 'top',
+        childSide: isBelow ? 'top' : 'bottom'
+      };
+    };
     const visibleIds = new Set(visibleNodes.map(node => node.id));
     visibleNodes.forEach((node) => {
       if (!node.parentId || !visibleIds.has(node.parentId)) return;
       const parent = nodesById.get(node.parentId);
       if (!parent) return;
-      const parentPos = parent.position;
-      const childPos = node.position;
-      const parentSize = sizes.get(parent.id);
-      const childSize = sizes.get(node.id);
-      if (!parentPos || !childPos || !parentSize || !childSize) return;
-      const x1 = parentPos.x + parentSize.width / 2;
-      const y1 = parentPos.y + parentSize.height;
-      const x2 = childPos.x + childSize.width / 2;
-      const y2 = childPos.y;
-      const deltaY = Math.max(60, Math.abs(y2 - y1) * 0.5);
-      const c1y = y1 + deltaY;
-      const c2y = y2 - deltaY;
-      const path = `M ${x1} ${y1} C ${x1} ${c1y}, ${x2} ${c2y}, ${x2} ${y2}`;
+      const parentRect = getRect(parent);
+      const childRect = getRect(node);
+      if (!parentRect || !childRect) return;
+      const { orientation, parentSide, childSide } = chooseSides(parentRect, childRect);
+      const start = resolveAnchor(parentRect, parentSide);
+      const end = resolveAnchor(childRect, childSide);
+      let path = '';
+      if (orientation === 'horizontal') {
+        const deltaX = Math.max(60, Math.abs(end.x - start.x) * 0.5);
+        const direction = end.x >= start.x ? 1 : -1;
+        const c1x = start.x + deltaX * direction;
+        const c2x = end.x - deltaX * direction;
+        path = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
+      } else {
+        const deltaY = Math.max(60, Math.abs(end.y - start.y) * 0.5);
+        const direction = end.y >= start.y ? 1 : -1;
+        const c1y = start.y + deltaY * direction;
+        const c2y = end.y - deltaY * direction;
+        path = `M ${start.x} ${start.y} C ${start.x} ${c1y}, ${end.x} ${c2y}, ${end.x} ${end.y}`;
+      }
       const edgeKey = `${node.parentId}::${node.id}`;
       lines.push({
         path,
         edgeKey,
+        parentId: node.parentId,
+        childId: node.id,
         isUpstream: upstreamEdgeKeys.has(edgeKey),
-        x1,
-        y1,
-        x2,
-        y2
+        x1: start.x,
+        y1: start.y,
+        x2: end.x,
+        y2: end.y
       });
     });
     return lines;
-  }, [visibleNodes, nodesById, layoutVersion, upstreamEdgeKeys]);
+  }, [visibleNodes, nodesById, layoutVersion, upstreamEdgeKeys, dragVersion, resolveNodePosition]);
 
   return (
     <div
@@ -1556,7 +2397,7 @@ const FreeLayoutCanvas = ({
         }}
       >
         <svg
-          className="absolute inset-0 pointer-events-none"
+          className="absolute inset-0"
           style={{ overflow: 'visible' }}
           aria-hidden="true"
         >
@@ -1572,16 +2413,63 @@ const FreeLayoutCanvas = ({
                   stroke="currentColor"
                   strokeWidth={line.isUpstream ? 3 : 2}
                   strokeLinecap="round"
+                  pointerEvents="none"
                 />
-                <circle cx={line.x1} cy={line.y1} r={3} fill="currentColor" />
-                <circle cx={line.x2} cy={line.y2} r={3} fill="currentColor" />
+                <path
+                  d={line.path}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={line.isUpstream ? 18 : 14}
+                  strokeLinecap="round"
+                  pointerEvents="stroke"
+                  onPointerMove={(event) => handleConnectorHover(line, event)}
+                  onPointerLeave={(event) => handleConnectorLeave(event, line.edgeKey)}
+                />
+                <circle cx={line.x1} cy={line.y1} r={3} fill="currentColor" pointerEvents="none" />
+                <circle cx={line.x2} cy={line.y2} r={3} fill="currentColor" pointerEvents="none" />
               </g>
             );
           })}
         </svg>
 
+        {(() => {
+          const connectorInsertAnchor = (showInsertMenuForId && insertAnchor?.edgeKey === showInsertMenuForId)
+            ? insertAnchor
+            : hoveredConnector;
+          if (!connectorInsertAnchor || !connectorInsertAnchor.position) return null;
+          if (isDragging || isPanning) return null;
+          return (
+            <div
+              ref={connectorInsertRef}
+              className="absolute z-30"
+              style={{
+                left: connectorInsertAnchor.position.x,
+                top: connectorInsertAnchor.position.y,
+                transform: 'translate(-50%, -50%)'
+              }}
+              onPointerLeave={handleInsertButtonLeave}
+            >
+              <Dropdown
+                menu={{ items: INSERT_MENU_ITEMS, onClick: handleConnectorInsertMenuClick }}
+                trigger={['click']}
+                open={showInsertMenuForId === connectorInsertAnchor.edgeKey}
+                onOpenChange={(open) => handleConnectorInsertOpenChange(open, connectorInsertAnchor.edgeKey)}
+              >
+                <Button
+                  shape="circle"
+                  size="small"
+                  icon={<Plus size={12} strokeWidth={3} />}
+                  title="Insert Step Here"
+                  onClick={(event) => handleConnectorInsertClick(event, connectorInsertAnchor)}
+                  onPointerDown={(event) => event.stopPropagation()}
+                />
+              </Dropdown>
+            </div>
+          );
+        })()}
+
         {visibleNodes.map((node) => {
-          const position = node.position || { x: 0, y: 0 };
+          const position = resolveNodePosition(node) || { x: 0, y: 0 };
           return (
             <FreeLayoutNode
               key={node.id}
@@ -1605,6 +2493,10 @@ const FreeLayoutCanvas = ({
                 onTableCellClick={onTableCellClick}
                 onTableSortChange={onTableSortChange}
                 onAssistantRequest={onAssistantRequest}
+                onAddFilter={onAddFilter}
+                onUpdateFilter={onUpdateFilter}
+                onRemoveFilter={onRemoveFilter}
+                onFilterCellAction={onFilterCellAction}
                 showAddMenuForId={showAddMenuForId}
                 setShowAddMenuForId={setShowAddMenuForId}
                 showInsertMenuForId={showInsertMenuForId}
@@ -1613,6 +2505,7 @@ const FreeLayoutCanvas = ({
                 renderChildren={false}
                 compactHeader
                 menuId={node.id}
+                shouldSuppressSelect={shouldSuppressSelect}
                 headerDragProps={{
                   onPointerDown: (event) => handleNodeDragStart(node.id, event)
                 }}
@@ -1642,6 +2535,15 @@ const FreeLayoutCanvas = ({
           title="Reset zoom"
         >
           {Math.round(viewport.scale * 100)}%
+        </button>
+        <div className="my-1 h-px bg-gray-200 dark:bg-slate-700" />
+        <button
+          onClick={handleAutoLayout}
+          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800 flex items-center justify-center"
+          title="Optimize layout"
+          aria-label="Optimize layout"
+        >
+          <Layout size={14} />
         </button>
       </div>
     </div>
