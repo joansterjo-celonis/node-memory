@@ -1,7 +1,7 @@
 // src/app/AnalysisApp.js
 // Main application component: ingestion, history, engine, and layout.
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Button, Card, Dropdown, Empty, Modal, Space, Tag, Typography } from 'antd';
+import { Button, Card, Drawer, Dropdown, Empty, Modal, Space, Tag, Typography } from 'antd';
 import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
 import { TreeNode, FreeLayoutCanvas } from '../components/TreeNode';
@@ -32,7 +32,13 @@ const DEFAULT_ENTANGLED_COLOR = '#facc15';
 const SESSION_STORAGE_KEY = 'nma-session-v1';
 const SESSION_VERSION = 1;
 const VALID_VIEW_MODES = new Set(['canvas', 'landing']);
-const VALID_RENDER_MODES = new Set(['classic', 'entangled', 'singleStream', 'freeLayout']);
+const VALID_RENDER_MODES = new Set(['classic', 'entangled', 'singleStream', 'freeLayout', 'mobile']);
+const MOBILE_UA_REGEX = /Mobi|Android|iPhone|iPad|iPod|Windows Phone|BlackBerry|IEMobile|Opera Mini|webOS/i;
+const isMobileUserAgent = () => {
+  if (typeof navigator === 'undefined') return false;
+  if (navigator.userAgentData?.mobile) return true;
+  return MOBILE_UA_REGEX.test(navigator.userAgent || '');
+};
 const readStoredTableDensity = () => {
   if (typeof window === 'undefined' || !window.localStorage) return DEFAULT_TABLE_DENSITY;
   try {
@@ -227,7 +233,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [showInsertMenuForId, setShowInsertMenuForId] = useState(null);
   const [showDataModel, setShowDataModel] = useState(initialSession?.showDataModel ?? false);
   const [viewMode, setViewMode] = useState(initialSession?.viewMode ?? 'canvas');
-  const [renderMode, setRenderMode] = useState(initialSession?.renderMode ?? 'classic');
+  const shouldAutoMobile = useMemo(() => isMobileUserAgent(), []);
+  const [renderMode, setRenderMode] = useState(() => (
+    shouldAutoMobile ? 'mobile' : (initialSession?.renderMode ?? 'classic')
+  ));
   const [dataModelSorts, setDataModelSorts] = useState(initialSession?.dataModelSorts ?? {});
   const [explorations, setExplorations] = useState([]);
   const [activeExplorationId, setActiveExplorationId] = useState(initialSession?.activeExplorationId ?? null);
@@ -245,6 +254,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const statsResizeFrameRef = useRef(null);
   const nodeIdCounterRef = useRef(0);
   const filterIdCounterRef = useRef(0);
+  const isMobileMode = renderMode === 'mobile';
 
   const createNodeId = useCallback(() => `node-${Date.now()}-${nodeIdCounterRef.current++}`, []);
   const createFilterId = useCallback(() => `filter-${Date.now()}-${filterIdCounterRef.current++}`, []);
@@ -261,6 +271,20 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       setHistoryIndex(safeHistoryIndex);
     }
   }, [historyIndex, safeHistoryIndex]);
+
+  useEffect(() => {
+    if (!shouldAutoMobile) return;
+    setIsStatsDetached(false);
+    setIsStatsCollapsed(true);
+    setIsPropertiesCollapsed(true);
+  }, [shouldAutoMobile]);
+
+  useEffect(() => {
+    if (!isMobileMode) return;
+    if (isStatsDetached) {
+      setIsStatsDetached(false);
+    }
+  }, [isMobileMode, isStatsDetached]);
 
   // -------------------------------------------------------------------
   // File ingestion pipeline (triggered by explicit "Ingest Data" button)
@@ -2027,6 +2051,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     classic: 'Classic',
     entangled: 'Entangled',
     singleStream: 'Single stream',
+    mobile: 'Mobile',
     freeLayout: 'Free layout'
   };
   const renderModeMenu = useMemo(() => ({
@@ -2047,6 +2072,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           <Space size="small">
             <span>Single stream</span>
             <Tag color="gold">Beta</Tag>
+          </Space>
+        )
+      },
+      {
+        key: 'mobile',
+        label: (
+          <Space size="small">
+            <span>Mobile</span>
+            <Tag color="green">Auto</Tag>
           </Space>
         )
       },
@@ -2120,51 +2154,92 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   return (
     <div className="flex h-screen w-full bg-slate-50 font-sans text-slate-900 dark:bg-slate-950 dark:text-slate-100 overflow-hidden">
       {/* 1. LEFT SIDEBAR */}
-      <div className="w-16 flex-shrink-0 bg-white flex flex-col items-center text-slate-500 border-r border-gray-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-700 z-50">
-        <div className="w-full h-16 bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-sm">
-          <Layout size={22} />
-        </div>
-        <div className="flex-1 w-full flex flex-col items-center py-6 gap-6">
-          <div
-            onClick={() => {
-              setShowDataModel(false);
-              setViewMode('landing');
-            }}
-            className={`p-2.5 rounded-lg cursor-pointer transition-colors relative group ${
-              viewMode === 'landing' ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100' : 'hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
-            title="Explorations"
-          >
-            <AppsIcon size={20} />
+      {!isMobileMode && (
+        <div className="w-16 flex-shrink-0 bg-white flex flex-col items-center text-slate-500 border-r border-gray-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-700 z-50">
+          <div className="w-full h-16 bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-sm">
+            <Layout size={22} />
           </div>
-          <Dropdown menu={settingsMenu} trigger={['click']} placement="rightBottom">
-            <div className="mt-auto p-2.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors relative group">
-              <Settings size={20} />
+          <div className="flex-1 w-full flex flex-col items-center py-6 gap-6">
+            <div
+              onClick={() => {
+                setShowDataModel(false);
+                setViewMode('landing');
+              }}
+              className={`p-2.5 rounded-lg cursor-pointer transition-colors relative group ${
+                viewMode === 'landing' ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100' : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              title="Explorations"
+            >
+              <AppsIcon size={20} />
             </div>
-          </Dropdown>
+            <Dropdown menu={settingsMenu} trigger={['click']} placement="rightBottom">
+              <div className="mt-auto p-2.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg cursor-pointer transition-colors relative group">
+                <Settings size={20} />
+              </div>
+            </Dropdown>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 2. MAIN CANVAS AREA */}
       <div className="flex-1 flex flex-col relative overflow-hidden bg-[#F8FAFC] dark:bg-slate-950">
-        <header className="h-16 bg-white border-b border-gray-200 flex items-center px-8 justify-between shadow-sm z-40 relative dark:bg-slate-900 dark:border-slate-700">
-          <div className="flex items-center gap-4">
+        <header className={`bg-white border-b border-gray-200 flex items-center justify-between shadow-sm z-40 relative dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'flex-wrap gap-2 px-4 py-3' : 'h-16 px-8'}`}>
+          <div className={`flex items-center gap-4 ${isMobileMode ? 'w-full justify-between' : ''}`}>
             <div>
-              <div className="font-bold text-gray-900 text-lg dark:text-slate-100">Node Memory Analytics</div>
-              <div className="text-xs text-gray-400 dark:text-slate-400">Exploration workspace</div>
+              <div className={`font-bold text-gray-900 dark:text-slate-100 ${isMobileMode ? 'text-base' : 'text-lg'}`}>Node Memory Analytics</div>
+              {!isMobileMode && (
+                <div className="text-xs text-gray-400 dark:text-slate-400">Exploration workspace</div>
+              )}
             </div>
+            {isMobileMode && (
+              <div className="flex items-center gap-2">
+                <Button
+                  size="small"
+                  type={viewMode === 'landing' ? 'primary' : 'default'}
+                  icon={<AppsIcon size={16} />}
+                  onClick={() => {
+                    setShowDataModel(false);
+                    setViewMode('landing');
+                  }}
+                  aria-label="Explorations"
+                />
+                <Dropdown menu={settingsMenu} trigger={['click']} placement="bottomRight">
+                  <Button size="small" icon={<Settings size={16} />} aria-label="Settings" />
+                </Dropdown>
+              </div>
+            )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className={`flex items-center gap-3 ${isMobileMode ? 'w-full flex-wrap' : ''}`}>
             {viewMode === 'canvas' && (
-              <Space size="small" align="center">
-                <Space.Compact size="middle">
+              <Space size="small" align="center" wrap={isMobileMode}>
+                {isMobileMode && (
+                  <Space size="small" wrap>
+                    <Button
+                      size="small"
+                      type={isStatsCollapsed ? 'default' : 'primary'}
+                      onClick={() => (isStatsCollapsed ? expandStatsPanel() : collapseStatsPanel())}
+                    >
+                      Stats
+                    </Button>
+                    <Button
+                      size="small"
+                      type={isPropertiesCollapsed ? 'default' : 'primary'}
+                      onClick={() => (isPropertiesCollapsed ? expandPropertiesPanel() : collapsePropertiesPanel())}
+                    >
+                      Properties
+                    </Button>
+                  </Space>
+                )}
+                <Space.Compact size={isMobileMode ? 'small' : 'middle'}>
                   <Button
+                    size={isMobileMode ? 'small' : 'middle'}
                     icon={<Undo size={16} />}
                     onClick={undo}
                     disabled={historyIndex === 0}
                     aria-label="Undo"
                   />
                   <Button
+                    size={isMobileMode ? 'small' : 'middle'}
                     icon={<Redo size={16} />}
                     onClick={redo}
                     disabled={historyIndex === history.length - 1}
@@ -2172,11 +2247,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                   />
                 </Space.Compact>
                 <Dropdown menu={renderModeMenu} trigger={['click']} placement="bottomRight">
-                  <Button icon={<Layout size={14} />}>
+                  <Button size={isMobileMode ? 'small' : 'middle'} icon={<Layout size={14} />}>
                     {activeRenderModeLabel}
                   </Button>
                 </Dropdown>
-                <Button type="primary" icon={<Save size={14} />} onClick={saveExploration}>
+                <Button size={isMobileMode ? 'small' : 'middle'} type="primary" icon={<Save size={14} />} onClick={saveExploration}>
                   Save & Exit
                 </Button>
                 {saveError && (
@@ -2191,19 +2266,19 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
         {viewMode === 'landing' ? (
           <div className="flex-1 overflow-auto bg-slate-50 dark:bg-slate-950">
-            <div className="max-w-6xl mx-auto px-10 py-12 space-y-8">
-              <div className="flex items-center justify-between">
+            <div className={`space-y-8 ${isMobileMode ? 'max-w-none px-4 py-6' : 'max-w-6xl mx-auto px-10 py-12'}`}>
+              <div className={`flex ${isMobileMode ? 'flex-col items-start gap-4' : 'items-center justify-between'}`}>
                 <div>
                   <Title level={2} style={{ margin: 0 }}>Explorations</Title>
                   <Text type="secondary">Pick up where you left off or start something new.</Text>
                 </div>
-                <Button type="primary" icon={<Plus size={14} />} onClick={startNewExploration}>
+                <Button type="primary" icon={<Plus size={14} />} onClick={startNewExploration} block={isMobileMode}>
                   New Exploration
                 </Button>
               </div>
 
               {explorations.length === 0 ? (
-                <div className="bg-white border border-gray-200 rounded-2xl p-10 text-center shadow-sm dark:bg-slate-900 dark:border-slate-700">
+                <div className={`bg-white border border-gray-200 rounded-2xl text-center shadow-sm dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'p-6' : 'p-10'}`}>
                   <Empty
                     description={
                       <div className="space-y-1">
@@ -2212,7 +2287,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                       </div>
                     }
                   >
-                    <Button type="primary" icon={<Plus size={14} />} onClick={startNewExploration}>
+                    <Button type="primary" icon={<Plus size={14} />} onClick={startNewExploration} block={isMobileMode}>
                       Create your first exploration
                     </Button>
                   </Empty>
@@ -2311,7 +2386,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 onRenameBranch={renameBranch}
               />
             ) : (
-              <div className="min-w-full inline-flex justify-center p-20 items-start min-h-full">
+              <div className={isMobileMode ? 'w-full flex justify-center px-4 py-6 items-start min-h-full' : 'min-w-full inline-flex justify-center p-20 items-start min-h-full'}>
                 <TreeNode
                   nodeId="node-start"
                   nodes={nodes}
@@ -2348,7 +2423,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           </div>
         )}
 
-        {viewMode === 'canvas' && (isStatsCollapsed || isPropertiesCollapsed) && (
+        {viewMode === 'canvas' && !isMobileMode && (isStatsCollapsed || isPropertiesCollapsed) && (
           <div className="absolute right-4 top-20 flex flex-col gap-2 z-40">
             {isStatsCollapsed && (
               <Button size="small" onClick={expandStatsPanel}>
@@ -2365,7 +2440,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       </div>
 
       {/* 3. COLUMN STATS PANEL */}
-      {viewMode === 'canvas' && !isStatsCollapsed && !isStatsDetached && (
+      {viewMode === 'canvas' && !isMobileMode && !isStatsCollapsed && !isStatsDetached && (
         <ColumnStatsPanel
           node={nodes.find(n => n.id === selectedNodeId)}
           schema={selectedSchema}
@@ -2375,11 +2450,35 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           onCollapse={collapseStatsPanel}
           onToggleDetach={detachStatsPanel}
           isDetached={false}
+          isMobile={false}
         />
       )}
 
+      {viewMode === 'canvas' && isMobileMode && (
+        <Drawer
+          open={!isStatsCollapsed}
+          placement="right"
+          width="100%"
+          closable={false}
+          onClose={collapseStatsPanel}
+          styles={{ body: { padding: 0 } }}
+          destroyOnClose
+        >
+          <ColumnStatsPanel
+            node={nodes.find(n => n.id === selectedNodeId)}
+            schema={selectedSchema}
+            data={selectedData}
+            rowCount={selectedResult?.rowCount || 0}
+            getColumnStats={selectedResult?.getColumnStats}
+            onCollapse={collapseStatsPanel}
+            isDetached={false}
+            isMobile
+          />
+        </Drawer>
+      )}
+
       {/* 4. PROPERTIES PANEL */}
-      {viewMode === 'canvas' && !isPropertiesCollapsed && (
+      {viewMode === 'canvas' && !isMobileMode && !isPropertiesCollapsed && (
         <PropertiesPanel
           node={nodes.find(n => n.id === selectedNodeId)}
           updateNode={updateNodeFromPanel}
@@ -2391,11 +2490,39 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           onClearData={clearIngestedData}
           onShowDataModel={() => setShowDataModel(true)}
           onCollapse={collapsePropertiesPanel}
-            activeFilterIndex={activeFilterTarget?.nodeId === selectedNodeId ? activeFilterTarget.index : null}
+          activeFilterIndex={activeFilterTarget?.nodeId === selectedNodeId ? activeFilterTarget.index : null}
+          isMobile={false}
         />
       )}
 
-      {viewMode === 'canvas' && isStatsDetached && !isStatsCollapsed && (
+      {viewMode === 'canvas' && isMobileMode && (
+        <Drawer
+          open={!isPropertiesCollapsed}
+          placement="right"
+          width="100%"
+          closable={false}
+          onClose={collapsePropertiesPanel}
+          styles={{ body: { padding: 0 } }}
+          destroyOnClose
+        >
+          <PropertiesPanel
+            node={nodes.find(n => n.id === selectedNodeId)}
+            updateNode={updateNodeFromPanel}
+            schema={selectedSchema}
+            data={selectedData}
+            dataModel={dataModel}
+            sourceStatus={sourceStatus}
+            onIngest={ingestPendingFiles}
+            onClearData={clearIngestedData}
+            onShowDataModel={() => setShowDataModel(true)}
+            onCollapse={collapsePropertiesPanel}
+            activeFilterIndex={activeFilterTarget?.nodeId === selectedNodeId ? activeFilterTarget.index : null}
+            isMobile
+          />
+        </Drawer>
+      )}
+
+      {viewMode === 'canvas' && !isMobileMode && isStatsDetached && !isStatsCollapsed && (
         <div
           className="fixed bg-white border border-gray-200 shadow-2xl rounded-xl overflow-hidden dark:bg-slate-900 dark:border-slate-700 z-50"
           style={{
@@ -2428,10 +2555,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         open={showDataModel}
         onCancel={() => setShowDataModel(false)}
         footer={null}
-        width={980}
-        centered
+        width={isMobileMode ? '100%' : 980}
+        centered={!isMobileMode}
         closeIcon={<X size={16} />}
         styles={{ body: { padding: 0 } }}
+        style={isMobileMode ? { top: 0, margin: 0 } : undefined}
         title={
           <Space align="center">
             <div className="bg-blue-100 p-2 rounded text-blue-600 dark:bg-blue-500/20 dark:text-blue-300">
@@ -2444,11 +2572,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           </Space>
         }
       >
-        <div className="flex-1 overflow-auto p-8 bg-slate-50 dark:bg-slate-950">
+        <div className={`flex-1 overflow-auto bg-slate-50 dark:bg-slate-950 ${isMobileMode ? 'p-4' : 'p-8'}`}>
           {dataModel.order.length === 0 ? (
             <Empty description="Upload a CSV/XLSX file to populate the data model." />
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 ${isMobileMode ? 'gap-4' : 'gap-6'}`}>
               {dataModel.order.map((tableName) => {
                 const baseRow = (dataModel.tables[tableName] || [])[0] || {};
                 const rows = Object.keys(baseRow).map((col) => ({
