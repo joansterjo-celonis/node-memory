@@ -622,6 +622,16 @@ const TreeNode = ({
     }
   };
 
+  const resolvedBranchLabel = React.useMemo(() => {
+    let current = node;
+    while (current) {
+      if (current.branchName) return current.branchName;
+      if (!current.parentId) break;
+      current = nodes.find((n) => n.id === current.parentId);
+    }
+    return '';
+  }, [node, nodes]);
+
   // Resolve icon by node type (and component subtype).
   let Icon = Database;
   if (node.type === 'FILTER') Icon = Filter;
@@ -853,10 +863,15 @@ const TreeNode = ({
           <div className="flex-1 min-w-0">
             <Space size="small" align="center">
               <Text strong className="truncate node-card-title">{node.title}</Text>
-              {node.branchName && (
+              {resolvedBranchLabel && (
                 <Tag color="geekblue" className="uppercase text-[9px] font-bold">
-                  {node.branchName}
+                  {resolvedBranchLabel}
                 </Tag>
+              )}
+              {node.entangledPeerId && (
+                <Tooltip title="Entangled branch">
+                  <span className="entangled-node-indicator" />
+                </Tooltip>
               )}
             </Space>
             <Text type="secondary" className="text-xs truncate block mt-0.5 node-card-subtitle">
@@ -913,7 +928,14 @@ const TreeNode = ({
                       onSelectBranch?.(nodeId, child.id);
                     }}
                   >
-                    {label}
+                    <Space size="small">
+                      <span>{label}</span>
+                      {child.entangledPeerId && (
+                        <Tooltip title="Entangled branch">
+                          <span className="entangled-tab-indicator" />
+                        </Tooltip>
+                      )}
+                    </Space>
                   </Button>
                 );
               })}

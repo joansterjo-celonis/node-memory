@@ -121,3 +121,18 @@
   border-radius: 4px;
   pointer-events: none;
 }
+
+.entangled-tab-indicator,
+.entangled-node-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: #facc15;
+  box-shadow: 0 0 0 1px rgba(202, 138, 4, 0.5);
+}
+
+.entangled-node-indicator {
+  width: 10px;
+  height: 10px;
+}

@@ -705,6 +705,24 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const newId = createNodeId();
     const entangledRootId = parent.entangledRootId;
 
+    let nextNodes = [...nodes];
+    if (siblings.length === 1) {
+      const existingChild = siblings[0];
+      if (!existingChild.branchName) {
+        const firstBranchLabel = 'Fork 1';
+        nextNodes = nextNodes.map((node) => (
+          node.id === existingChild.id ? { ...node, branchName: firstBranchLabel } : node
+        ));
+        nextNodes = applyBranchLabelToSubtree(nextNodes, existingChild.id, firstBranchLabel);
+        if (existingChild.entangledPeerId) {
+          nextNodes = nextNodes.map((node) => (
+            node.id === existingChild.entangledPeerId ? { ...node, branchName: firstBranchLabel } : node
+          ));
+          nextNodes = applyBranchLabelToSubtree(nextNodes, existingChild.entangledPeerId, firstBranchLabel);
+        }
+      }
+    }
+
     const newNode = {
       id: newId,
       parentId,
@@ -716,7 +734,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       params: getDefaultParams(subtype)
     };
 
-    const nextNodes = [...nodes, newNode];
+    nextNodes.push(newNode);
     if (parent.entangledPeerId) {
       const peerId = createNodeId();
       const peerTitle = resolveNodeTitle(parent.entangledPeerId, branchName, 'New Step');
