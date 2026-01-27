@@ -130,6 +130,8 @@
   border-radius: 2px;
   background: #facc15;
   box-shadow: 0 0 0 1px rgba(202, 138, 4, 0.5);
+  cursor: pointer;
+  transition: background-color 150ms ease, box-shadow 150ms ease;
 }
 
 .entangled-node-indicator {
