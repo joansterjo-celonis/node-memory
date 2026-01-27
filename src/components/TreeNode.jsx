@@ -1,7 +1,7 @@
 // src/components/TreeNode.js
 // Recursive node renderer for the branching analysis canvas.
 import React from 'react';
-import { Alert, Button, Card, Dropdown, Empty, Input, Progress, Space, Statistic, Table, Tag, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Dropdown, Empty, Input, Popover, Progress, Radio, Select, Space, Statistic, Table, Tag, Tooltip, Typography } from 'antd';
 import {
   Plus,
   Filter,
@@ -20,6 +20,7 @@ import {
   Share2
 } from '../ui/icons';
 import { getChildren, countDescendants, getNodeResult, formatNumber } from '../utils/nodeUtils';
+import { normalizeFilters, resolveFilterMode } from '../utils/filterUtils';
 import VisxChart from '../ui/SimpleChart';
 import WorldMapChart from '../ui/WorldMapChart';
 
@@ -36,6 +37,16 @@ const KPI_LABELS = {
   min: 'Min',
   max: 'Max'
 };
+const FILTER_OPERATOR_LABELS = {
+  equals: '=',
+  not_equals: '!=',
+  gt: '>',
+  lt: '<',
+  gte: '>=',
+  lte: '<=',
+  in: 'in',
+  contains: 'contains'
+};
 
 const { Text, Title } = Typography;
 
@@ -47,6 +58,20 @@ const formatMetricLabel = (metric) => {
   if (metric.fn === 'count') return fnLabel;
   if (!metric.field) return fnLabel;
   return `${fnLabel} of ${metric.field}`;
+};
+
+const formatFilterLabel = (filter) => {
+  const field = filter.field || '';
+  const operator = FILTER_OPERATOR_LABELS[filter.operator] || filter.operator || '=';
+  const value = filter.value ?? '';
+  if (!field && (value === '' || value === null || value === undefined)) {
+    return 'New filter';
+  }
+  const resolvedField = field || 'Filter';
+  if (value === '' || value === null || value === undefined) {
+    return `${resolvedField} ${operator}`.trim();
+  }
+  return `${resolvedField} ${operator} ${value}`.trim();
 };
 
 const AssistantPanel = React.memo(({ node, schema, onRun }) => {
@@ -132,6 +157,8 @@ const TablePreview = React.memo(({
   getRowAt,
   sampleRows = [],
   onCellClick,
+  enableInlineFilterMenu = false,
+  onFilterCellAction,
   onSortChange,
   nodeId,
   sortBy,
@@ -142,6 +169,7 @@ const TablePreview = React.memo(({
   const rowCacheRef = React.useRef(new Map());
   const [tableHeight, setTableHeight] = React.useState(220);
   const [headerHeight, setHeaderHeight] = React.useState(38);
+  const [cellAction, setCellAction] = React.useState(null);
   const normalizedSortDirection = sortDirection === 'asc' || sortDirection === 'desc' ? sortDirection : '';
   const densityClassName = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
 
@@ -184,6 +212,10 @@ const TablePreview = React.memo(({
     rowCacheRef.current.clear();
   }, [rowCount, sortBy, normalizedSortDirection]);
 
+  React.useEffect(() => {
+    setCellAction(null);
+  }, [nodeId, enableInlineFilterMenu]);
+
   const dataSource = React.useMemo(
     () => (rowCount > 0 ? Array.from({ length: rowCount }, (_, idx) => idx) : []),
     [rowCount]
@@ -217,6 +249,38 @@ const TablePreview = React.memo(({
     360,
     columns.reduce((sum, col) => sum + (estimatedColumnWidths[col] || 120), 0)
   );
+
+  const cellActionContent = cellAction?.payload ? (
+    <Space direction="vertical" size="small">
+      <Text type="secondary" className="text-xs">
+        Apply filter
+      </Text>
+      <Tag color="orange">
+        {cellAction.payload.field} = {String(cellAction.payload.value ?? '')}
+      </Tag>
+      <Space size="small">
+        <Button
+          size="small"
+          onClick={() => {
+            onFilterCellAction?.('add-to-node', cellAction.payload);
+            setCellAction(null);
+          }}
+        >
+          Add to this node
+        </Button>
+        <Button
+          size="small"
+          type="primary"
+          onClick={() => {
+            onFilterCellAction?.('create-node', cellAction.payload);
+            setCellAction(null);
+          }}
+        >
+          New filter node
+        </Button>
+      </Space>
+    </Space>
+  ) : null;
 
   if (columns.length === 0) {
     return <Empty description="No columns available for preview" />;
@@ -261,7 +325,23 @@ const TablePreview = React.memo(({
       ellipsis: true,
       render: (_value, recordIndex) => {
         const row = resolveRow(recordIndex);
-        return row?.[col] ?? '';
+        const displayValue = row?.[col] ?? '';
+        if (!enableInlineFilterMenu) return displayValue;
+        const cellKey = `${recordIndex}-${col}`;
+        const isOpen = cellAction?.key === cellKey;
+        return (
+          <Popover
+            open={isOpen}
+            content={cellActionContent}
+            trigger="click"
+            placement="right"
+            onOpenChange={(open) => {
+              if (!open) setCellAction(null);
+            }}
+          >
+            <span className="block truncate">{displayValue}</span>
+          </Popover>
+        );
       },
       onHeaderCell: () => ({
         onClick: (e) => {
@@ -273,9 +353,17 @@ const TablePreview = React.memo(({
       onCell: (recordIndex) => ({
         onClick: (e) => {
           e.stopPropagation();
-          if (!onCellClick) return;
           const row = resolveRow(recordIndex);
-          onCellClick(row?.[col], col, nodeId);
+          const value = row?.[col];
+          if (enableInlineFilterMenu && onFilterCellAction) {
+            setCellAction({
+              key: `${recordIndex}-${col}`,
+              payload: { nodeId, field: col, value }
+            });
+            return;
+          }
+          if (!onCellClick) return;
+          onCellClick(value, col, nodeId);
         },
         className: 'cursor-pointer hover:bg-blue-50 hover:text-blue-700 transition-colors'
       })
@@ -468,6 +556,10 @@ const TreeNode = ({
   onTableCellClick,
   onTableSortChange,
   onAssistantRequest,
+  onAddFilter,
+  onUpdateFilter,
+  onRemoveFilter,
+  onFilterCellAction,
   showAddMenuForId,
   setShowAddMenuForId,
   showInsertMenuForId,
@@ -485,6 +577,15 @@ const TreeNode = ({
   if (!node) return null;
 
   const result = getNodeResult(chainData, nodeId);
+  const filters = React.useMemo(
+    () => (node.type === 'FILTER' ? normalizeFilters(node.params) : []),
+    [node.type, node.params]
+  );
+  const [isFilterBuilderOpen, setIsFilterBuilderOpen] = React.useState(false);
+  const [filterBuilderTargetIndex, setFilterBuilderTargetIndex] = React.useState(null);
+  const [filterBuilderMode, setFilterBuilderMode] = React.useState('operator');
+  const [operatorDraft, setOperatorDraft] = React.useState({ field: '', operator: 'equals', value: '' });
+  const [attributeDraft, setAttributeDraft] = React.useState({ field: '', values: [] });
   const rawChildren = getChildren(nodes, nodeId);
   const isActive = selectedNodeId === nodeId;
   const isExpanded = node.isExpanded !== false;
@@ -610,6 +711,92 @@ const TreeNode = ({
     }
   ];
 
+  const resetFilterDrafts = React.useCallback(() => {
+    setOperatorDraft({ field: '', operator: 'equals', value: '' });
+    setAttributeDraft({ field: '', values: [] });
+  }, []);
+
+  const closeFilterBuilder = React.useCallback(() => {
+    setIsFilterBuilderOpen(false);
+    setFilterBuilderTargetIndex(null);
+  }, []);
+
+  const resolveAttributeValues = React.useCallback((filter) => {
+    if (!filter) return [];
+    if (Array.isArray(filter.value)) {
+      return filter.value.map((item) => String(item)).filter(Boolean);
+    }
+    if (filter.operator === 'in') {
+      return String(filter.value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    if (filter.value === null || filter.value === undefined || filter.value === '') return [];
+    return [String(filter.value)];
+  }, []);
+
+  const openNewFilterBuilder = React.useCallback((mode = 'operator') => {
+    resetFilterDrafts();
+    setFilterBuilderMode(mode);
+    setFilterBuilderTargetIndex(-1);
+    setIsFilterBuilderOpen(true);
+  }, [resetFilterDrafts]);
+
+  const openFilterBuilderForFilter = React.useCallback((filter, index) => {
+    const mode = resolveFilterMode(filter);
+    setFilterBuilderMode(mode);
+    setFilterBuilderTargetIndex(index);
+    if (mode === 'attribute') {
+      setAttributeDraft({ field: filter.field || '', values: resolveAttributeValues(filter) });
+      setOperatorDraft({ field: '', operator: 'equals', value: '' });
+    } else {
+      setOperatorDraft({
+        field: filter.field || '',
+        operator: filter.operator || 'equals',
+        value: filter.value ?? ''
+      });
+      setAttributeDraft({ field: '', values: [] });
+    }
+    setIsFilterBuilderOpen(true);
+  }, [resolveAttributeValues]);
+
+  const handleApplyOperatorFilter = () => {
+    if (!operatorDraft.field) return;
+    const payload = {
+      field: operatorDraft.field,
+      operator: operatorDraft.operator || 'equals',
+      value: operatorDraft.value ?? '',
+      mode: 'operator'
+    };
+    if (filterBuilderTargetIndex != null && filterBuilderTargetIndex >= 0) {
+      onUpdateFilter?.(nodeId, filterBuilderTargetIndex, payload);
+    } else {
+      onAddFilter?.(nodeId, payload);
+    }
+    resetFilterDrafts();
+    closeFilterBuilder();
+  };
+
+  const handleApplyAttributeFilter = () => {
+    if (!attributeDraft.field || attributeDraft.values.length === 0) return;
+    const value = attributeDraft.values.join(', ');
+    const operator = attributeDraft.values.length > 1 ? 'in' : 'equals';
+    const payload = {
+      field: attributeDraft.field,
+      operator,
+      value,
+      mode: 'attribute'
+    };
+    if (filterBuilderTargetIndex != null && filterBuilderTargetIndex >= 0) {
+      onUpdateFilter?.(nodeId, filterBuilderTargetIndex, payload);
+    } else {
+      onAddFilter?.(nodeId, payload);
+    }
+    resetFilterDrafts();
+    closeFilterBuilder();
+  };
+
   const canToggleEntangle = !!node.parentId && (!node.entangledPeerId || isEntangledRoot);
   const entangleMenu = {
     items: [
@@ -658,6 +845,233 @@ const TreeNode = ({
   const visibleColumns = (node.type === 'COMPONENT' && node.params.subtype === 'TABLE' && node.params.columns && node.params.columns.length > 0)
     ? node.params.columns
     : result ? result.schema : [];
+
+  const filterFieldOptions = result?.schema || [];
+  const attributeValueOptions = React.useMemo(() => {
+    if (!result || !attributeDraft.field) return [];
+    if (result.getColumnStats) {
+      const stats = result.getColumnStats(attributeDraft.field, 32);
+      if (stats?.topValues?.length) {
+        return stats.topValues.map((item) => ({
+          label: `${item.value} (${item.count})`,
+          value: String(item.value)
+        }));
+      }
+    }
+    const fallbackRows = result.sampleRows || result.data || [];
+    const seen = new Set();
+    const options = [];
+    fallbackRows.forEach((row) => {
+      if (options.length >= 32) return;
+      const raw = row?.[attributeDraft.field];
+      if (raw === null || raw === undefined || raw === '') return;
+      const display = String(raw);
+      if (seen.has(display)) return;
+      seen.add(display);
+      options.push({ label: display, value: display });
+    });
+    return options;
+  }, [result, attributeDraft.field]);
+
+  const isEditingFilter = filterBuilderTargetIndex != null && filterBuilderTargetIndex >= 0;
+  const filterBuilderContent = (
+    <div className="w-80 p-3" onClick={(e) => e.stopPropagation()}>
+      <Space direction="vertical" size="small" className="w-full">
+        <Text type="secondary" className="text-xs">
+          {isEditingFilter ? 'Edit filter' : 'Add a filter'}
+        </Text>
+        <Radio.Group
+          value={filterBuilderMode}
+          onChange={(e) => setFilterBuilderMode(e.target.value)}
+          optionType="button"
+          buttonStyle="solid"
+          size="small"
+        >
+          <Radio.Button value="operator">Operator</Radio.Button>
+          <Radio.Button value="attribute">Attribute</Radio.Button>
+        </Radio.Group>
+        {filterBuilderMode === 'operator' ? (
+          <Space direction="vertical" size="small" className="w-full">
+            <Select
+              placeholder="Select column"
+              value={operatorDraft.field || undefined}
+              onChange={(value) => setOperatorDraft((prev) => ({ ...prev, field: value }))}
+              options={filterFieldOptions.map((field) => ({ label: field, value: field }))}
+              disabled={filterFieldOptions.length === 0}
+              style={{ width: '100%' }}
+            />
+            <Space size="small" className="w-full">
+              <Select
+                value={operatorDraft.operator || 'equals'}
+                onChange={(value) => setOperatorDraft((prev) => ({ ...prev, operator: value }))}
+                options={[
+                  { label: '=', value: 'equals' },
+                  { label: '!=', value: 'not_equals' },
+                  { label: '>', value: 'gt' },
+                  { label: '<', value: 'lt' },
+                  { label: '>=', value: 'gte' },
+                  { label: '<=', value: 'lte' },
+                  { label: 'In list', value: 'in' },
+                  { label: 'Like', value: 'contains' }
+                ]}
+                style={{ width: 120 }}
+              />
+              <Input
+                placeholder={operatorDraft.operator === 'in' ? 'Comma-separated values' : 'Value'}
+                value={operatorDraft.value}
+                onChange={(e) => setOperatorDraft((prev) => ({ ...prev, value: e.target.value }))}
+              />
+            </Space>
+            <Button
+              type="primary"
+              size="small"
+              onClick={handleApplyOperatorFilter}
+              disabled={!operatorDraft.field}
+            >
+              Apply filter
+            </Button>
+          </Space>
+        ) : (
+          <Space direction="vertical" size="small" className="w-full">
+            <Select
+              placeholder="Select column"
+              value={attributeDraft.field || undefined}
+              onChange={(value) => setAttributeDraft({ field: value, values: [] })}
+              options={filterFieldOptions.map((field) => ({ label: field, value: field }))}
+              disabled={filterFieldOptions.length === 0}
+              style={{ width: '100%' }}
+            />
+            <Select
+              mode="multiple"
+              placeholder={attributeDraft.field ? 'Select values' : 'Pick a column first'}
+              value={attributeDraft.values}
+              onChange={(values) => setAttributeDraft((prev) => ({ ...prev, values }))}
+              options={attributeValueOptions}
+              disabled={!attributeDraft.field}
+              maxTagCount="responsive"
+              style={{ width: '100%' }}
+            />
+            <Button
+              type="primary"
+              size="small"
+              onClick={handleApplyAttributeFilter}
+              disabled={!attributeDraft.field || attributeDraft.values.length === 0}
+            >
+              Apply filter
+            </Button>
+          </Space>
+        )}
+      </Space>
+    </div>
+  );
+
+  const filterAddTrigger = (
+    <Button
+      size="small"
+      type="dashed"
+      icon={<Plus size={12} />}
+      onClick={(e) => {
+        e.stopPropagation();
+        openNewFilterBuilder('operator');
+      }}
+    >
+      Add filter
+    </Button>
+  );
+
+  const filterAddTriggerCompact = (
+    <Button
+      size="small"
+      type="text"
+      icon={<Plus size={12} />}
+      onClick={(e) => {
+        e.stopPropagation();
+        openNewFilterBuilder('operator');
+      }}
+    />
+  );
+
+  const renderFilterChips = (compact = false) => {
+    if (!filters.length && !compact) {
+      return (
+        <Space size="small">
+          <Text type="secondary" className="text-xs">
+            No filters yet
+          </Text>
+          <Popover
+            content={filterBuilderContent}
+            trigger="click"
+            open={isFilterBuilderOpen && filterBuilderTargetIndex === -1}
+            onOpenChange={(open) => {
+              if (!open) closeFilterBuilder();
+            }}
+            placement="bottomLeft"
+          >
+            {filterAddTrigger}
+          </Popover>
+        </Space>
+      );
+    }
+
+    return (
+      <Space size={[compact ? 4 : 6, 4]} wrap>
+        {filters.map((filter, index) => {
+          const isOpen = isFilterBuilderOpen && filterBuilderTargetIndex === index;
+          return (
+            <Popover
+              key={filter.id || `filter-${index}`}
+              content={filterBuilderContent}
+              trigger="click"
+              placement="bottomLeft"
+              open={isOpen}
+              onOpenChange={(open) => {
+                if (!open) closeFilterBuilder();
+              }}
+            >
+              <span
+                className="group inline-flex"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openFilterBuilderForFilter(filter, index);
+                }}
+              >
+                <Tag color="orange" className={compact ? 'cursor-pointer select-none text-[9px] px-1' : 'cursor-pointer select-none'}>
+                  <span className="inline-flex items-center gap-1">
+                    {formatFilterLabel(filter)}
+                    <button
+                      type="button"
+                      className="ml-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full text-orange-700 opacity-0 transition-opacity group-hover:opacity-100 hover:text-orange-900"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveFilter?.(nodeId, index);
+                        if (isFilterBuilderOpen && filterBuilderTargetIndex === index) {
+                          closeFilterBuilder();
+                        }
+                      }}
+                      aria-label="Remove filter"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </span>
+                </Tag>
+              </span>
+            </Popover>
+          );
+        })}
+        <Popover
+          content={filterBuilderContent}
+          trigger="click"
+          open={isFilterBuilderOpen && filterBuilderTargetIndex === -1}
+          onOpenChange={(open) => {
+            if (!open) closeFilterBuilder();
+          }}
+          placement="bottomLeft"
+        >
+          {compact ? filterAddTriggerCompact : filterAddTrigger}
+        </Popover>
+      </Space>
+    );
+  };
 
   const kpiMetrics = React.useMemo(() => {
     if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'KPI') return [];
@@ -871,19 +1285,25 @@ const TreeNode = ({
                   {resolvedBranchLabel}
                 </Tag>
               )}
+              {compactHeader && node.type === 'FILTER' && renderFilterChips(true)}
               {node.entangledPeerId && (
                 <Tooltip title="Entangled branch">
                   <span className="entangled-node-indicator" />
                 </Tooltip>
               )}
             </Space>
-            <Text type="secondary" className="text-xs truncate block mt-0.5 node-card-subtitle">
-              {node.type === 'FILTER' && node.params.field ? `${node.params.field} ${node.params.operator} ${node.params.value}` :
-                node.type === 'AGGREGATE' ? `Group by ${node.params.groupBy}` :
-                node.type === 'JOIN' ? `with ${node.params.rightTable || '...'}` :
-                node.type === 'COMPONENT' ? (node.params.subtype === 'AI' ? 'AI Assistant' : `${node.params.subtype} View`) :
-                node.description || node.type}
-            </Text>
+            <div className="mt-0.5 node-card-subtitle">
+              {node.type === 'FILTER' ? (
+                compactHeader ? null : renderFilterChips(false)
+              ) : (
+                <Text type="secondary" className="text-xs truncate block">
+                  {node.type === 'AGGREGATE' ? `Group by ${node.params.groupBy}` :
+                    node.type === 'JOIN' ? `with ${node.params.rightTable || '...'}` :
+                    node.type === 'COMPONENT' ? (node.params.subtype === 'AI' ? 'AI Assistant' : `${node.params.subtype} View`) :
+                    node.description || node.type}
+                </Text>
+              )}
+            </div>
           </div>
           <Space size="small">
             <Tooltip title="Fork Branch">
@@ -970,6 +1390,8 @@ const TreeNode = ({
                       getRowAt={result.getRowAt}
                       sampleRows={result.sampleRows || result.data || []}
                       onCellClick={onTableCellClick}
+                      enableInlineFilterMenu={node.type === 'FILTER'}
+                      onFilterCellAction={onFilterCellAction}
                       onSortChange={onTableSortChange}
                       nodeId={nodeId}
                       sortBy={node.params.tableSortBy}
@@ -1204,6 +1626,10 @@ const TreeNode = ({
               onTableCellClick={onTableCellClick}
               onTableSortChange={onTableSortChange}
               onAssistantRequest={onAssistantRequest}
+              onAddFilter={onAddFilter}
+              onUpdateFilter={onUpdateFilter}
+              onRemoveFilter={onRemoveFilter}
+              onFilterCellAction={onFilterCellAction}
               showAddMenuForId={showAddMenuForId}
               setShowAddMenuForId={setShowAddMenuForId}
               showInsertMenuForId={showInsertMenuForId}
@@ -1234,6 +1660,10 @@ const TreeNode = ({
                   onTableCellClick={onTableCellClick}
                   onTableSortChange={onTableSortChange}
                   onAssistantRequest={onAssistantRequest}
+                  onAddFilter={onAddFilter}
+                  onUpdateFilter={onUpdateFilter}
+                  onRemoveFilter={onRemoveFilter}
+                  onFilterCellAction={onFilterCellAction}
                   showAddMenuForId={showAddMenuForId}
                   setShowAddMenuForId={setShowAddMenuForId}
                   showInsertMenuForId={showInsertMenuForId}
@@ -1304,6 +1734,10 @@ const FreeLayoutCanvas = ({
   onTableCellClick,
   onTableSortChange,
   onAssistantRequest,
+  onAddFilter,
+  onUpdateFilter,
+  onRemoveFilter,
+  onFilterCellAction,
   showAddMenuForId,
   setShowAddMenuForId,
   showInsertMenuForId,
@@ -1605,6 +2039,10 @@ const FreeLayoutCanvas = ({
                 onTableCellClick={onTableCellClick}
                 onTableSortChange={onTableSortChange}
                 onAssistantRequest={onAssistantRequest}
+                onAddFilter={onAddFilter}
+                onUpdateFilter={onUpdateFilter}
+                onRemoveFilter={onRemoveFilter}
+                onFilterCellAction={onFilterCellAction}
                 showAddMenuForId={showAddMenuForId}
                 setShowAddMenuForId={setShowAddMenuForId}
                 showInsertMenuForId={showInsertMenuForId}

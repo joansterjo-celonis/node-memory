@@ -1,5 +1,6 @@
 // src/utils/dataEngine.js
 // Lightweight in-browser data engine for large datasets.
+import { normalizeFilters } from './filterUtils';
 
 const DEFAULT_SAMPLE_SIZE = 200;
 const DEFAULT_CHART_SAMPLE_SIZE = 5000;
@@ -153,7 +154,8 @@ const createDataEngine = (dataModel = { tables: {}, order: [] }) => {
 
     if (type === 'FILTER') {
       const params = spec?.params || {};
-      if (!params.field) {
+      const filters = normalizeFilters(params).filter((filter) => filter.field);
+      if (filters.length === 0) {
         query.mode = 'rows';
         query.rowIds = null;
         query.rowCount = parent.rowCount;
@@ -161,11 +163,13 @@ const createDataEngine = (dataModel = { tables: {}, order: [] }) => {
         queries.set(queryId, query);
         return query;
       }
-      const predicate = buildFilterPredicate(params.field, params.operator, params.value);
+      const predicates = filters.map((filter) => (
+        buildFilterPredicate(filter.field, filter.operator, filter.value)
+      ));
       const rowIds = [];
       for (let i = 0; i < parent.rowCount; i += 1) {
         const row = resolveRow(parent, i);
-        if (predicate(row)) rowIds.push(i);
+        if (predicates.every((predicate) => predicate(row))) rowIds.push(i);
       }
       query.mode = 'rows';
       query.rowIds = rowIds;
