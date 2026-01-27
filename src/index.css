@@ -77,3 +77,62 @@
   font-size: 13px;
   line-height: 1.2;
 }
+
+/* Free layout canvas + compact node header */
+.free-layout-canvas {
+  cursor: default;
+}
+
+.free-layout-canvas.is-panning {
+  cursor: grabbing;
+}
+
+.node-drag-handle {
+  cursor: grab;
+}
+
+.node-drag-handle:active {
+  cursor: grabbing;
+}
+
+.node-card-header--compact {
+  padding: 6px 10px;
+  gap: 6px;
+}
+
+.node-card--compact .node-card-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.node-card--compact .node-card-title {
+  font-size: 13px;
+}
+
+.node-card--compact .node-card-subtitle {
+  font-size: 10px;
+  display: none;
+}
+
+.entangled-pair {
+  position: absolute;
+  border: 2px solid rgba(250, 204, 21, 0.6);
+  background: rgba(254, 249, 195, 0.3);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.entangled-tab-indicator,
+.entangled-node-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: #facc15;
+  box-shadow: 0 0 0 1px rgba(202, 138, 4, 0.5);
+}
+
+.entangled-node-indicator {
+  width: 10px;
+  height: 10px;
+}

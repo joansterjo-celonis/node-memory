@@ -4,7 +4,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Button, Card, Dropdown, Empty, Modal, Space, Tag, Typography } from 'antd';
 import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
-import { TreeNode } from '../components/TreeNode';
+import { TreeNode, FreeLayoutCanvas } from '../components/TreeNode';
 import { Layout, Database, AppsIcon, Settings, Undo, Redo, TableIcon, X, Plus, Trash2, Play, Save } from '../ui/icons';
 import { parseCSVFile, readFileAsArrayBuffer, parseXLSX, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
 import { getChildren, getCalculationOrder, getNodeResult } from '../utils/nodeUtils';
@@ -48,6 +48,47 @@ const getDefaultStatsPanelRect = () => {
   return { x, y, width, height };
 };
 
+const buildDefaultFreeLayout = (nodesToLayout) => {
+  const positions = {};
+  const childrenByParent = new Map();
+  nodesToLayout.forEach((node) => {
+    const list = childrenByParent.get(node.parentId) || [];
+    list.push(node);
+    childrenByParent.set(node.parentId, list);
+  });
+
+  const columnGap = 720;
+  const rowGap = 380;
+  const offset = { x: 80, y: 80 };
+  let leafIndex = 0;
+
+  const assign = (nodeId, depth) => {
+    const children = childrenByParent.get(nodeId) || [];
+    if (children.length === 0) {
+      const y = leafIndex * rowGap;
+      positions[nodeId] = { x: depth * columnGap, y };
+      leafIndex += 1;
+      return y;
+    }
+    const childYs = children.map(child => assign(child.id, depth + 1));
+    const y = childYs.reduce((sum, value) => sum + value, 0) / childYs.length;
+    positions[nodeId] = { x: depth * columnGap, y };
+    return y;
+  };
+
+  const roots = nodesToLayout.filter(node => node.parentId === null);
+  roots.forEach(root => assign(root.id, 0));
+
+  Object.keys(positions).forEach((id) => {
+    positions[id] = {
+      x: positions[id].x + offset.x,
+      y: positions[id].y + offset.y
+    };
+  });
+
+  return positions;
+};
+
 const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   // -------------------------------------------------------------------
   // Ingestion state
@@ -76,6 +117,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [showInsertMenuForId, setShowInsertMenuForId] = useState(null);
   const [showDataModel, setShowDataModel] = useState(false);
   const [viewMode, setViewMode] = useState('canvas');
+  const [renderMode, setRenderMode] = useState('classic');
   const [dataModelSorts, setDataModelSorts] = useState({});
   const [explorations, setExplorations] = useState([]);
   const [activeExplorationId, setActiveExplorationId] = useState(null);
@@ -85,10 +127,14 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [isStatsDetached, setIsStatsDetached] = useState(false);
   const [statsPanelRect, setStatsPanelRect] = useState(getDefaultStatsPanelRect);
   const [isPropertiesCollapsed, setIsPropertiesCollapsed] = useState(false);
+  const [branchSelectionByNodeId, setBranchSelectionByNodeId] = useState({});
   const statsDragStateRef = useRef(null);
   const statsDragFrameRef = useRef(null);
   const statsResizeStateRef = useRef(null);
   const statsResizeFrameRef = useRef(null);
+  const nodeIdCounterRef = useRef(0);
+
+  const createNodeId = useCallback(() => `node-${Date.now()}-${nodeIdCounterRef.current++}`, []);
 
   // -------------------------------------------------------------------
   // File ingestion pipeline (triggered by explicit "Ingest Data" button)
@@ -199,8 +245,33 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setHistoryIndex(newHistory.length - 1);
   };
 
+  const replaceCurrentNodes = (newNodes) => {
+    const newHistory = [...history];
+    newHistory[historyIndex] = newNodes;
+    setHistory(newHistory);
+  };
+
   const undo = () => { if (historyIndex > 0) setHistoryIndex(historyIndex - 1); };
   const redo = () => { if (historyIndex < history.length - 1) setHistoryIndex(historyIndex + 1); };
+
+  const findNodeById = (id, nodesList = nodes) => nodesList.find(node => node.id === id);
+
+  const collectSubtreeIds = (rootId, nodesList = nodes) => {
+    const ids = new Set();
+    const stack = [rootId];
+    while (stack.length > 0) {
+      const currentId = stack.pop();
+      if (ids.has(currentId)) continue;
+      const current = findNodeById(currentId, nodesList);
+      if (!current) continue;
+      ids.add(currentId);
+      const children = getChildren(nodesList, currentId);
+      children.forEach(child => stack.push(child.id));
+    }
+    return ids;
+  };
+
+  const resolveNodeTitle = (parentId, branchName, fallbackTitle) => fallbackTitle;
 
   const EXPLORATION_STORAGE_KEY = 'nma-explorations';
   const loadExplorations = () => {
@@ -233,11 +304,29 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     }
   }, [tableDensity]);
 
+  useEffect(() => {
+    if (renderMode !== 'freeLayout') return;
+    const needsLayout = nodes.some((node) => (
+      !node.position || !Number.isFinite(node.position.x) || !Number.isFinite(node.position.y)
+    ));
+    if (!needsLayout) return;
+    const defaults = buildDefaultFreeLayout(nodes);
+    const nextNodes = nodes.map((node) => {
+      if (node.position && Number.isFinite(node.position.x) && Number.isFinite(node.position.y)) {
+        return node;
+      }
+      const fallback = defaults[node.id] || { x: 80, y: 80 };
+      return { ...node, position: { x: fallback.x, y: fallback.y } };
+    });
+    replaceCurrentNodes(nextNodes);
+  }, [renderMode, nodes, buildDefaultFreeLayout, replaceCurrentNodes]);
+
   // -------------------------------------------------------------------
   // Node updates (params + metadata)
   // -------------------------------------------------------------------
   const updateNode = (id, updates, isMeta = false, silent = false) => {
-    const newNodes = nodes.map(n => {
+    const targetNode = findNodeById(id);
+    let newNodes = nodes.map(n => {
       if (n.id !== id) return n;
       if (isMeta) return { ...n, ...updates };
       return { ...n, params: updates };
@@ -529,55 +618,173 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     assistantPlan: []
   });
 
+  const COMPONENT_TITLE_BY_SUBTYPE = {
+    TABLE: 'Table',
+    PIVOT: 'Pivot Table',
+    AI: 'AI Assistant',
+    CHART: 'Chart',
+    KPI: 'KPI',
+    GAUGE: 'Gauge'
+  };
+
+  const getComponentTitle = (subtype) => {
+    if (!subtype) return 'Component';
+    const key = String(subtype).toUpperCase();
+    return COMPONENT_TITLE_BY_SUBTYPE[key] || `${key} View`;
+  };
+
+  const DEFAULT_NODE_TITLE_BY_TYPE = {
+    FILTER: 'Filter Data',
+    AGGREGATE: 'Aggregate',
+    JOIN: 'SQL Join'
+  };
+
+  const getDefaultNodeTitle = (type, subtype) => {
+    if (!type) return 'New Step';
+    const key = String(type).toUpperCase();
+    if (key === 'COMPONENT') return getComponentTitle(subtype);
+    return DEFAULT_NODE_TITLE_BY_TYPE[key] || 'New Step';
+  };
+
+  const cloneSubtree = (rootId, newParentId) => {
+    const mapping = new Map();
+    const reverseMapping = new Map();
+    const newNodes = [];
+    const queue = [rootId];
+
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      const current = findNodeById(currentId);
+      if (!current) continue;
+      const newId = createNodeId();
+      mapping.set(currentId, newId);
+      reverseMapping.set(newId, currentId);
+      const parentId = currentId === rootId ? newParentId : mapping.get(current.parentId);
+      const cloned = {
+        ...current,
+        id: newId,
+        parentId
+      };
+      delete cloned.entangledPeerId;
+      delete cloned.entangledRootId;
+      newNodes.push(cloned);
+      const children = getChildren(nodes, currentId);
+      children.forEach(child => queue.push(child.id));
+    }
+
+    return { newNodes, mapping, reverseMapping };
+  };
+
   const addNode = (type, parentId, subtype = 'TABLE') => {
-    const newId = `node-${Date.now()}`;
+    const parent = findNodeById(parentId);
+    if (!parent) return;
     const siblings = getChildren(nodes, parentId);
     const branchName = siblings.length > 0 ? `Fork ${siblings.length + 1}` : undefined;
+    const fallbackTitle = getDefaultNodeTitle(type, subtype);
+    const title = resolveNodeTitle(parentId, branchName, fallbackTitle);
+    const newId = createNodeId();
+    const entangledRootId = parent.entangledRootId;
+
+    let nextNodes = [...nodes];
+    if (siblings.length === 1) {
+      const existingChild = siblings[0];
+      if (!existingChild.branchName) {
+        const firstBranchLabel = 'Fork 1';
+        nextNodes = nextNodes.map((node) => (
+          node.id === existingChild.id ? { ...node, branchName: firstBranchLabel } : node
+        ));
+        if (existingChild.entangledPeerId) {
+          nextNodes = nextNodes.map((node) => (
+            node.id === existingChild.entangledPeerId ? { ...node, branchName: firstBranchLabel } : node
+          ));
+        }
+      }
+    }
 
     const newNode = {
       id: newId,
       parentId,
       type,
-      title: 'New Step',
+      title,
       branchName,
+      titleIsCustom: false,
       isExpanded: true,
       params: getDefaultParams(subtype)
     };
 
-    updateNodes([...nodes, newNode]);
+    nextNodes.push(newNode);
+    if (parent.entangledPeerId) {
+      const peerId = createNodeId();
+      const peerTitle = resolveNodeTitle(parent.entangledPeerId, branchName, fallbackTitle);
+      newNode.entangledPeerId = peerId;
+      newNode.entangledRootId = entangledRootId;
+      nextNodes.push({
+        ...newNode,
+        id: peerId,
+        parentId: parent.entangledPeerId,
+        title: peerTitle,
+        entangledPeerId: newId,
+        entangledRootId
+      });
+    }
+
+    updateNodes(nextNodes);
     setSelectedNodeId(newId);
     setShowAddMenuForId(null);
   };
 
   const insertNode = (type, parentId, subtype = 'TABLE') => {
-    const newId = `node-${Date.now()}`;
+    const parent = findNodeById(parentId);
+    if (!parent) return;
+    const fallbackTitle = getDefaultNodeTitle(type, subtype);
+    const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
+    const newId = createNodeId();
+    const entangledRootId = parent.entangledRootId;
     const newNode = {
       id: newId,
       parentId,
       type,
-      title: 'Inserted Step',
+      title,
+      titleIsCustom: false,
       isExpanded: true,
       params: getDefaultParams(subtype)
     };
 
-    const updatedNodes = nodes.map(n => n.parentId === parentId ? { ...n, parentId: newId } : n);
+    let updatedNodes = nodes.map(n => n.parentId === parentId ? { ...n, parentId: newId } : n);
 
-    updateNodes([...updatedNodes, newNode]);
+    if (parent.entangledPeerId) {
+      const peerParentId = parent.entangledPeerId;
+      const peerId = createNodeId();
+      const peerTitle = resolveNodeTitle(peerParentId, undefined, fallbackTitle);
+      newNode.entangledPeerId = peerId;
+      newNode.entangledRootId = entangledRootId;
+      updatedNodes = updatedNodes.map(n => n.parentId === peerParentId ? { ...n, parentId: peerId } : n);
+      updatedNodes.push({
+        ...newNode,
+        id: peerId,
+        parentId: peerParentId,
+        title: peerTitle,
+        entangledPeerId: newId,
+        entangledRootId
+      });
+    }
+
+    updatedNodes.push(newNode);
+    updateNodes(updatedNodes);
     setSelectedNodeId(newId);
     setShowInsertMenuForId(null);
   };
 
   const removeNode = (id) => {
-    const nodesToDelete = new Set([id]);
-    let poolToCheck = [id];
-    while (poolToCheck.length > 0) {
-      const current = poolToCheck.pop();
-      const children = getChildren(nodes, current);
-      children.forEach(c => { nodesToDelete.add(c.id); poolToCheck.push(c.id); });
+    const target = findNodeById(id);
+    if (!target) return;
+    const nodesToDelete = collectSubtreeIds(id);
+    if (target.entangledPeerId) {
+      collectSubtreeIds(target.entangledPeerId).forEach((peerId) => nodesToDelete.add(peerId));
     }
     const filtered = nodes.filter(n => !nodesToDelete.has(n.id));
     updateNodes(filtered);
-    if (selectedNodeId === id) setSelectedNodeId('node-start');
+    if (nodesToDelete.has(selectedNodeId)) setSelectedNodeId('node-start');
   };
 
   const toggleNodeExpansion = (id) => {
@@ -602,21 +809,100 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setHistory(newHistory);
   };
 
+  const toggleEntangledBranch = useCallback((id) => {
+    const target = findNodeById(id);
+    if (!target || !target.parentId) return;
+    if (target.entangledPeerId) {
+      const peer = findNodeById(target.entangledPeerId);
+      if (!peer || peer.parentId !== target.parentId) return;
+      const peerIds = collectSubtreeIds(peer.id);
+      const selfIds = collectSubtreeIds(target.id);
+      const nextNodes = nodes
+        .filter(node => !peerIds.has(node.id))
+        .map((node) => (
+          selfIds.has(node.id)
+            ? { ...node, entangledPeerId: undefined, entangledRootId: undefined }
+            : node
+        ));
+      updateNodes(nextNodes);
+      return;
+    }
+
+    const groupId = `entangled-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const { newNodes, mapping, reverseMapping } = cloneSubtree(target.id, target.parentId);
+    const updatedExisting = nodes.map((node) => {
+      if (!mapping.has(node.id)) return node;
+      return {
+        ...node,
+        entangledPeerId: mapping.get(node.id),
+        entangledRootId: groupId
+      };
+    });
+    const mirrored = newNodes.map((node) => {
+      const originalId = reverseMapping.get(node.id);
+      return {
+        ...node,
+        entangledPeerId: originalId,
+        entangledRootId: groupId
+      };
+    });
+    updateNodes([...updatedExisting, ...mirrored]);
+  }, [nodes, findNodeById, collectSubtreeIds, cloneSubtree, updateNodes]);
+
+  const setBranchSelection = useCallback((parentId, childId) => {
+    if (!parentId || !childId) return;
+    setBranchSelectionByNodeId(prev => (
+      prev[parentId] === childId ? prev : { ...prev, [parentId]: childId }
+    ));
+  }, []);
+
+  const updateNodePosition = useCallback((id, position) => {
+    if (!id || !position) return;
+    const nextNodes = nodes.map((node) => {
+      if (node.id !== id) return node;
+      if (node.position?.x === position.x && node.position?.y === position.y) return node;
+      return { ...node, position: { x: position.x, y: position.y } };
+    });
+    replaceCurrentNodes(nextNodes);
+  }, [nodes, replaceCurrentNodes]);
+
   const buildInValue = (values) => values.map((value) => String(value)).join(', ');
 
   const addFilterNode = ({ parentId, field, operator = 'equals', value }) => {
     if (!parentId || !field) return;
-    const newId = `node-${Date.now()}`;
+    const parent = findNodeById(parentId);
+    if (!parent) return;
+    const newId = createNodeId();
+    const entangledRootId = parent.entangledRootId;
+    const fallbackTitle = getDefaultNodeTitle('FILTER');
+    const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
     const newNode = {
       id: newId,
       parentId,
       type: 'FILTER',
-      title: 'Filter Data',
+      title,
+      titleIsCustom: false,
       isExpanded: true,
       params: { field, operator, value }
     };
 
-    updateNodes([...nodes, newNode]);
+    const nextNodes = [...nodes, newNode];
+    if (parent.entangledPeerId) {
+      const peerId = createNodeId();
+      const peerTitle = resolveNodeTitle(parent.entangledPeerId, undefined, fallbackTitle);
+      newNode.entangledPeerId = peerId;
+      newNode.entangledRootId = entangledRootId;
+      nextNodes.push({
+        ...newNode,
+        id: peerId,
+        parentId: parent.entangledPeerId,
+        title: peerTitle,
+        entangledPeerId: newId,
+        entangledRootId
+      });
+    }
+
+    updateNodes(nextNodes);
     setSelectedNodeId(newId);
   };
 
@@ -1253,6 +1539,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   };
 
   const applyAssistantPlan = (nodeId, plan, assistantUpdate) => {
+    const baseNode = findNodeById(nodeId);
+    if (!baseNode) return;
     const baseNodes = nodes.map((node) => {
       if (node.id !== nodeId) return node;
       return {
@@ -1267,25 +1555,49 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     }
 
     let parentId = nodeId;
-    const newNodes = plan.map((step, index) => {
-      const newId = `node-${Date.now()}-${index}`;
+    let peerParentId = baseNode.entangledPeerId;
+    const entangledRootId = baseNode.entangledRootId;
+    const newNodes = [];
+    const peerNodes = [];
+
+    plan.forEach((step) => {
+      const newId = createNodeId();
       const params = step.type === 'COMPONENT'
         ? { ...getDefaultParams(step.subtype), ...step.params, subtype: step.subtype }
         : { ...getDefaultParams(step.subtype || 'TABLE'), ...step.params };
-      const title = step.title || (step.type === 'COMPONENT' ? `${step.subtype} View` : 'New Step');
+      const fallbackTitle = step.title || getDefaultNodeTitle(step.type, step.subtype);
+      const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
       const newNode = {
         id: newId,
         parentId,
         type: step.type,
         title,
+        titleIsCustom: false,
         isExpanded: true,
         params
       };
+
+      if (peerParentId) {
+        const peerId = createNodeId();
+        const peerTitle = resolveNodeTitle(peerParentId, undefined, fallbackTitle);
+        newNode.entangledPeerId = peerId;
+        newNode.entangledRootId = entangledRootId;
+        peerNodes.push({
+          ...newNode,
+          id: peerId,
+          parentId: peerParentId,
+          title: peerTitle,
+          entangledPeerId: newId,
+          entangledRootId
+        });
+        peerParentId = peerId;
+      }
+
+      newNodes.push(newNode);
       parentId = newId;
-      return newNode;
     });
 
-    updateNodes([...baseNodes, ...newNodes]);
+    updateNodes([...baseNodes, ...newNodes, ...peerNodes]);
     setSelectedNodeId(newNodes[newNodes.length - 1]?.id || nodeId);
   };
 
@@ -1366,6 +1678,48 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const selectedSchema = selectedResult?.schema || [];
   const selectedData = selectedResult?.sampleRows || selectedResult?.data || [];
 
+  const renderModeLabels = {
+    classic: 'Classic',
+    entangled: 'Entangled',
+    singleStream: 'Single stream',
+    freeLayout: 'Free layout'
+  };
+  const renderModeMenu = useMemo(() => ({
+    items: [
+      { key: 'classic', label: 'Classic' },
+      {
+        key: 'entangled',
+        label: (
+          <Space size="small">
+            <span>Entangled</span>
+            <Tag color="gold">Beta</Tag>
+          </Space>
+        )
+      },
+      {
+        key: 'singleStream',
+        label: (
+          <Space size="small">
+            <span>Single stream</span>
+            <Tag color="gold">Beta</Tag>
+          </Space>
+        )
+      },
+      {
+        key: 'freeLayout',
+        label: (
+          <Space size="small">
+            <span>Free layout</span>
+            <Tag color="gold">Beta</Tag>
+          </Space>
+        )
+      }
+    ],
+    selectable: true,
+    selectedKeys: [renderMode],
+    onClick: ({ key }) => setRenderMode(key)
+  }), [renderMode]);
+
   const settingsMenu = useMemo(() => ({
     items: [
       {
@@ -1413,6 +1767,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const dataModelCellPadding = tableDensity === 'dense' ? 'p-2' : 'p-3';
   const dataModelTextSize = tableDensity === 'dense' ? 'text-xs' : 'text-sm';
   const dataModelHeaderTextSize = tableDensity === 'dense' ? 'text-[11px]' : 'text-xs';
+  const activeRenderModeLabel = renderModeLabels[renderMode] || 'Classic';
 
   // -------------------------------------------------------------------
   // Render
@@ -1471,6 +1826,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     aria-label="Redo"
                   />
                 </Space.Compact>
+                <Dropdown menu={renderModeMenu} trigger={['click']} placement="bottomRight">
+                  <Button icon={<Layout size={14} />}>
+                    {activeRenderModeLabel}
+                  </Button>
+                </Dropdown>
                 <Button type="primary" icon={<Save size={14} />} onClick={saveExploration}>
                   Save & Exit
                 </Button>
@@ -1568,15 +1928,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           </div>
         ) : (
           <div
-            className="flex-1 overflow-auto bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-slate-50 dark:bg-slate-950 dark:bg-none cursor-grab active:cursor-grabbing"
+            className={renderMode === 'freeLayout'
+              ? 'flex-1 overflow-hidden bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-slate-50 dark:bg-slate-950 dark:bg-none'
+              : 'flex-1 overflow-auto bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-slate-50 dark:bg-slate-950 dark:bg-none cursor-grab active:cursor-grabbing'}
             onClick={() => {
               setShowAddMenuForId(null);
               setShowInsertMenuForId(null);
             }}
           >
-            <div className="min-w-full inline-flex justify-center p-20 items-start min-h-full">
-              <TreeNode
-                nodeId="node-start"
+            {renderMode === 'freeLayout' ? (
+              <FreeLayoutCanvas
                 nodes={nodes}
                 selectedNodeId={selectedNodeId}
                 chainData={chainData}
@@ -1595,8 +1956,37 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 setShowAddMenuForId={setShowAddMenuForId}
                 showInsertMenuForId={showInsertMenuForId}
                 setShowInsertMenuForId={setShowInsertMenuForId}
+                onUpdateNodePosition={updateNodePosition}
               />
-            </div>
+            ) : (
+              <div className="min-w-full inline-flex justify-center p-20 items-start min-h-full">
+                <TreeNode
+                  nodeId="node-start"
+                  nodes={nodes}
+                  selectedNodeId={selectedNodeId}
+                  chainData={chainData}
+                  tableDensity={tableDensity}
+                  onSelect={handleSelect}
+                  onAdd={addNode}
+                  onInsert={insertNode}
+                  onRemove={removeNode}
+                  onToggleExpand={toggleNodeExpansion}
+                  onToggleBranch={toggleBranchCollapse}
+                  onDrillDown={handleChartDrillDown}
+                  onTableCellClick={handleTableCellClick}
+                  onTableSortChange={handleTableSortChange}
+                  onAssistantRequest={handleAssistantRequest}
+                  showAddMenuForId={showAddMenuForId}
+                  setShowAddMenuForId={setShowAddMenuForId}
+                  showInsertMenuForId={showInsertMenuForId}
+                  setShowInsertMenuForId={setShowInsertMenuForId}
+                  renderMode={renderMode}
+                  branchSelectionByNodeId={branchSelectionByNodeId}
+                  onSelectBranch={setBranchSelection}
+                  onToggleEntangle={toggleEntangledBranch}
+                />
+              </div>
+            )}
           </div>
         )}
 

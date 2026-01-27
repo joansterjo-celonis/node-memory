@@ -155,7 +155,13 @@ const PropertiesPanel = ({
   };
 
   const commitJoin = () => updateNode(node.id, localParams);
-  const handleMetaChange = (key, value) => updateNode(node.id, { [key]: value }, true);
+  const handleMetaChange = (key, value) => {
+    if (key === 'title') {
+      updateNode(node.id, { title: value, titleIsCustom: true }, true);
+      return;
+    }
+    updateNode(node.id, { [key]: value }, true);
+  };
 
   const currentFiles = node.params?.__files || [];
   const getTotalBytes = (files = []) => files.reduce((sum, file) => sum + (file?.size || 0), 0);
