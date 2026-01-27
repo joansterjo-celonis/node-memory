@@ -34,6 +34,15 @@ const FREE_LAYOUT_DEFAULT_NODE_SIZE = { width: 640, height: 320 };
 const FREE_LAYOUT_BASE_OFFSET = { x: 80, y: 80 };
 const FREE_LAYOUT_MIN_GAP_X = 80;
 const FREE_LAYOUT_MIN_GAP_Y = 60;
+const DEFAULT_ENTANGLED_COLOR = '#facc15';
+const ENTANGLED_COLOR_OPTIONS = [
+  { value: '#facc15', label: 'Gold' },
+  { value: '#38bdf8', label: 'Sky' },
+  { value: '#34d399', label: 'Emerald' },
+  { value: '#a78bfa', label: 'Violet' },
+  { value: '#f472b6', label: 'Pink' },
+  { value: '#fb7185', label: 'Rose' }
+];
 const KPI_LABELS = {
   count: 'Count',
   count_distinct: 'Distinct Count',
@@ -73,6 +82,90 @@ const { Text, Title } = Typography;
 
 const metricRequiresField = (fn) => ['sum', 'avg', 'min', 'max', 'count_distinct'].includes(fn);
 
+const EntangledIndicator = ({
+  color,
+  rootId,
+  onChange,
+  className,
+  tooltip = 'Entangled branch'
+}) => {
+  const resolvedColor = color || DEFAULT_ENTANGLED_COLOR;
+  const canEdit = !!rootId && typeof onChange === 'function';
+  const resolvedOption = ENTANGLED_COLOR_OPTIONS.some((option) => option.value === resolvedColor)
+    ? resolvedColor
+    : DEFAULT_ENTANGLED_COLOR;
+  const [draftColor, setDraftColor] = React.useState(resolvedOption);
+  const [isOpen, setIsOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      setDraftColor(resolvedOption);
+    }
+  }, [resolvedOption, isOpen]);
+
+  const handleApply = () => {
+    if (!rootId) return;
+    onChange?.(rootId, draftColor || resolvedOption);
+    setIsOpen(false);
+  };
+  const indicator = (
+    <span
+      className={className}
+      style={buildEntangledIndicatorStyle(resolvedColor)}
+    />
+  );
+  const tooltipWrapped = tooltip ? (
+    <Tooltip title={tooltip}>{indicator}</Tooltip>
+  ) : indicator;
+  const colorPicker = (
+    <div className="flex flex-col gap-2" onClick={(event) => event.stopPropagation()}>
+      <Radio.Group value={draftColor} onChange={(event) => setDraftColor(event.target.value)}>
+        <Space direction="vertical" size={4}>
+          {ENTANGLED_COLOR_OPTIONS.map((option) => (
+            <Radio key={option.value} value={option.value}>
+              <Space size="small">
+                <span
+                  className="inline-block h-3 w-3 rounded-sm"
+                  style={buildEntangledIndicatorStyle(option.value)}
+                />
+                <Text>{option.label}</Text>
+              </Space>
+            </Radio>
+          ))}
+        </Space>
+      </Radio.Group>
+      <Space size="small" className="justify-end">
+        <Button size="small" onClick={() => setIsOpen(false)}>
+          Cancel
+        </Button>
+        <Button
+          size="small"
+          type="primary"
+          onClick={handleApply}
+          disabled={!draftColor || draftColor === resolvedOption}
+        >
+          Apply
+        </Button>
+      </Space>
+    </div>
+  );
+  const wrapper = (
+    <span
+      className="inline-flex"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      {tooltipWrapped}
+    </span>
+  );
+  if (!canEdit) return wrapper;
+  return (
+    <Popover content={colorPicker} trigger="click" open={isOpen} onOpenChange={setIsOpen}>
+      {wrapper}
+    </Popover>
+  );
+};
+
 const formatMetricLabel = (metric) => {
   if (metric.label) return metric.label;
   const fnLabel = KPI_LABELS[metric.fn] || metric.fn || 'Count';
@@ -93,6 +186,42 @@ const formatFilterLabel = (filter) => {
     return `${resolvedField} ${operator}`.trim();
   }
   return `${resolvedField} ${operator} ${value}`.trim();
+};
+
+const hexToRgb = (color) => {
+  if (!color || typeof color !== 'string') return null;
+  const hex = color.replace('#', '').trim();
+  if (hex.length !== 6) return null;
+  const int = Number.parseInt(hex, 16);
+  if (Number.isNaN(int)) return null;
+  return {
+    r: (int >> 16) & 255,
+    g: (int >> 8) & 255,
+    b: int & 255
+  };
+};
+
+const toRgba = (color, alpha) => {
+  const rgb = hexToRgb(color);
+  if (!rgb) return color;
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+};
+
+const buildEntangledIndicatorStyle = (color) => {
+  const resolved = color || DEFAULT_ENTANGLED_COLOR;
+  return {
+    background: resolved,
+    backgroundColor: resolved,
+    boxShadow: `0 0 0 1px ${toRgba(resolved, 0.6)}`
+  };
+};
+
+const buildEntangledPairStyle = (color) => {
+  const resolved = color || DEFAULT_ENTANGLED_COLOR;
+  return {
+    borderColor: toRgba(resolved, 0.6),
+    backgroundColor: toRgba(resolved, 0.18)
+  };
 };
 
 const getElementLayoutHeight = (element) => {
@@ -420,13 +549,29 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
   const containerRef = React.useRef(null);
   const childRefs = React.useRef([]);
   const rafRef = React.useRef(null);
+  const childrenNodesRef = React.useRef(childrenNodes);
   const [layout, setLayout] = React.useState({ parentX: 0, childXs: [], pairRects: [] });
+  const layoutKey = React.useMemo(
+    () => childrenNodes
+      .map((child) => `${child.nodeId}:${child.entangledPeerId || ''}`)
+      .join('|'),
+    [childrenNodes]
+  );
+  const childrenById = React.useMemo(
+    () => new Map(childrenNodes.map((child) => [child.nodeId, child])),
+    [childrenNodes]
+  );
+
+  React.useEffect(() => {
+    childrenNodesRef.current = childrenNodes;
+  }, [childrenNodes]);
 
   const updateLayout = React.useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
     if (!rect.width) return;
+    const currentChildren = childrenNodesRef.current;
     const childRects = childRefs.current.map((el) => (el ? el.getBoundingClientRect() : null));
     const childXs = childRects
       .map((childRect) => {
@@ -435,9 +580,9 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
       })
       .filter((val) => val !== null);
 
-    const indexById = new Map(childrenNodes.map((child, idx) => [child.nodeId, idx]));
+    const indexById = new Map(currentChildren.map((child, idx) => [child.nodeId, idx]));
     const pairRects = [];
-    childrenNodes.forEach((child, idx) => {
+    currentChildren.forEach((child, idx) => {
       if (!child.entangledPeerId) return;
       const peerIndex = indexById.get(child.entangledPeerId);
       if (peerIndex === undefined || peerIndex <= idx) return;
@@ -450,7 +595,9 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
       const top = Math.min(rectA.top, rectB.top) - rect.top - padding;
       const bottom = Math.max(rectA.bottom, rectB.bottom) - rect.top + padding;
       pairRects.push({
-        key: `${child.nodeId}-${child.entangledPeerId}`,
+        key: `${child.nodeId}::${child.entangledPeerId}`,
+        nodeId: child.nodeId,
+        peerId: child.entangledPeerId,
         left,
         top,
         width: right - left,
@@ -471,7 +618,7 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
 
   React.useLayoutEffect(() => {
     scheduleUpdate();
-  }, [childrenNodes.length, scheduleUpdate]);
+  }, [layoutKey, scheduleUpdate]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -494,7 +641,7 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
       window.removeEventListener('resize', scheduleUpdate);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [childrenNodes.length, scheduleUpdate]);
+  }, [layoutKey, scheduleUpdate]);
 
   childRefs.current = [];
   const hasLayout = layout.parentX > 0 && layout.childXs.length === childrenNodes.length;
@@ -509,18 +656,24 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
       >
         {hasLayout && layout.pairRects.length > 0 && (
           <div className="absolute inset-0 pointer-events-none">
-            {layout.pairRects.map((rect) => (
-              <div
-                key={rect.key}
-                className="entangled-pair"
-                style={{
-                  left: rect.left,
-                  top: rect.top,
-                  width: rect.width,
-                  height: rect.height
-                }}
-              />
-            ))}
+            {layout.pairRects.map((rect) => {
+              const primary = childrenById.get(rect.nodeId)?.entangledColor;
+              const secondary = childrenById.get(rect.peerId)?.entangledColor;
+              const pairColor = primary || secondary || DEFAULT_ENTANGLED_COLOR;
+              return (
+                <div
+                  key={rect.key}
+                  className="entangled-pair"
+                  style={{
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    ...buildEntangledPairStyle(pairColor)
+                  }}
+                />
+              );
+            })}
           </div>
         )}
 
@@ -596,6 +749,7 @@ const TreeNode = ({
   branchSelectionByNodeId,
   onSelectBranch,
   onToggleEntangle,
+  onEntangledColorChange,
   renderChildren = true,
   compactHeader = false,
   menuId,
@@ -656,7 +810,8 @@ const TreeNode = ({
       renderKey: buildMenuKey(child.id),
       menuKey: buildMenuKey(child.id),
       entangledPeerId: isEntangledMode ? child.entangledPeerId : undefined,
-      entangledRootId: isEntangledMode ? child.entangledRootId : undefined
+      entangledRootId: isEntangledMode ? child.entangledRootId : undefined,
+      entangledColor: isEntangledMode ? child.entangledColor : undefined
     }));
   }, [isSingleStreamMode, resolvedSelectedChildId, rawChildren, isEntangledMode, resolvedMenuId, useScopedMenuIds]);
 
@@ -1306,9 +1461,12 @@ const TreeNode = ({
               )}
               {compactHeader && node.type === 'FILTER' && renderFilterChips(true)}
               {node.entangledPeerId && (
-                <Tooltip title="Entangled branch">
-                  <span className="entangled-node-indicator" />
-                </Tooltip>
+                <EntangledIndicator
+                  color={node.entangledColor}
+                  rootId={node.entangledRootId || node.id}
+                  onChange={onEntangledColorChange}
+                  className="entangled-node-indicator"
+                />
               )}
             </Space>
             <div className="mt-0.5 node-card-subtitle">
@@ -1373,9 +1531,12 @@ const TreeNode = ({
                     <Space size="small">
                       <span>{label}</span>
                       {child.entangledPeerId && (
-                        <Tooltip title="Entangled branch">
-                          <span className="entangled-tab-indicator" />
-                        </Tooltip>
+                        <EntangledIndicator
+                          color={child.entangledColor}
+                          rootId={child.entangledRootId || child.id}
+                          onChange={onEntangledColorChange}
+                          className="entangled-tab-indicator"
+                        />
                       )}
                     </Space>
                   </Button>
@@ -1657,6 +1818,7 @@ const TreeNode = ({
               branchSelectionByNodeId={branchSelectionByNodeId}
               onSelectBranch={onSelectBranch}
               onToggleEntangle={onToggleEntangle}
+              onEntangledColorChange={onEntangledColorChange}
             />
           ) : (
             <MultiBranchGroup
@@ -1691,6 +1853,7 @@ const TreeNode = ({
                   branchSelectionByNodeId={branchSelectionByNodeId}
                   onSelectBranch={onSelectBranch}
                   onToggleEntangle={onToggleEntangle}
+                  onEntangledColorChange={onEntangledColorChange}
                 />
               )}
             />
@@ -1762,7 +1925,8 @@ const FreeLayoutCanvas = ({
   showInsertMenuForId,
   setShowInsertMenuForId,
   onUpdateNodePosition,
-  onAutoLayout
+  onAutoLayout,
+  onEntangledColorChange
 }) => {
   const containerRef = React.useRef(null);
   const [viewport, setViewport] = React.useState({ x: 0, y: 0, scale: 1 });
@@ -2501,6 +2665,7 @@ const FreeLayoutCanvas = ({
                 setShowAddMenuForId={setShowAddMenuForId}
                 showInsertMenuForId={showInsertMenuForId}
                 setShowInsertMenuForId={setShowInsertMenuForId}
+                onEntangledColorChange={onEntangledColorChange}
                 renderMode="freeLayout"
                 renderChildren={false}
                 compactHeader
