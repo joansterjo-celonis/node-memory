@@ -633,6 +633,19 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     return COMPONENT_TITLE_BY_SUBTYPE[key] || `${key} View`;
   };
 
+  const DEFAULT_NODE_TITLE_BY_TYPE = {
+    FILTER: 'Filter Data',
+    AGGREGATE: 'Aggregate',
+    JOIN: 'SQL Join'
+  };
+
+  const getDefaultNodeTitle = (type, subtype) => {
+    if (!type) return 'New Step';
+    const key = String(type).toUpperCase();
+    if (key === 'COMPONENT') return getComponentTitle(subtype);
+    return DEFAULT_NODE_TITLE_BY_TYPE[key] || 'New Step';
+  };
+
   const cloneSubtree = (rootId, newParentId) => {
     const mapping = new Map();
     const reverseMapping = new Map();
@@ -667,7 +680,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     if (!parent) return;
     const siblings = getChildren(nodes, parentId);
     const branchName = siblings.length > 0 ? `Fork ${siblings.length + 1}` : undefined;
-    const fallbackTitle = type === 'COMPONENT' ? getComponentTitle(subtype) : 'New Step';
+    const fallbackTitle = getDefaultNodeTitle(type, subtype);
     const title = resolveNodeTitle(parentId, branchName, fallbackTitle);
     const newId = createNodeId();
     const entangledRootId = parent.entangledRootId;
@@ -723,7 +736,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const insertNode = (type, parentId, subtype = 'TABLE') => {
     const parent = findNodeById(parentId);
     if (!parent) return;
-    const fallbackTitle = type === 'COMPONENT' ? getComponentTitle(subtype) : 'Inserted Step';
+    const fallbackTitle = getDefaultNodeTitle(type, subtype);
     const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
     const newId = createNodeId();
     const entangledRootId = parent.entangledRootId;
@@ -861,7 +874,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     if (!parent) return;
     const newId = createNodeId();
     const entangledRootId = parent.entangledRootId;
-    const title = resolveNodeTitle(parentId, undefined, 'Filter Data');
+    const fallbackTitle = getDefaultNodeTitle('FILTER');
+    const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
     const newNode = {
       id: newId,
       parentId,
@@ -875,7 +889,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const nextNodes = [...nodes, newNode];
     if (parent.entangledPeerId) {
       const peerId = createNodeId();
-      const peerTitle = resolveNodeTitle(parent.entangledPeerId, undefined, 'Filter Data');
+      const peerTitle = resolveNodeTitle(parent.entangledPeerId, undefined, fallbackTitle);
       newNode.entangledPeerId = peerId;
       newNode.entangledRootId = entangledRootId;
       nextNodes.push({
@@ -1551,7 +1565,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       const params = step.type === 'COMPONENT'
         ? { ...getDefaultParams(step.subtype), ...step.params, subtype: step.subtype }
         : { ...getDefaultParams(step.subtype || 'TABLE'), ...step.params };
-      const fallbackTitle = step.title || (step.type === 'COMPONENT' ? `${step.subtype} View` : 'New Step');
+      const fallbackTitle = step.title || getDefaultNodeTitle(step.type, step.subtype);
       const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
       const newNode = {
         id: newId,
