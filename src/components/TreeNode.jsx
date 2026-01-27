@@ -17,6 +17,7 @@ import {
   Gauge,
   LinkIcon,
   Minimize2,
+  Edit as EditIcon,
   Share2,
   Layout
 } from '../ui/icons';
@@ -748,6 +749,7 @@ const TreeNode = ({
   renderMode = 'classic',
   branchSelectionByNodeId,
   onSelectBranch,
+  onRenameBranch,
   onToggleEntangle,
   onEntangledColorChange,
   renderChildren = true,
@@ -782,6 +784,38 @@ const TreeNode = ({
   const tableDensityClass = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
   const addMenuRef = React.useRef(null);
   const insertMenuRef = React.useRef(null);
+  const [editingBranchId, setEditingBranchId] = React.useState(null);
+  const [branchNameDraft, setBranchNameDraft] = React.useState('');
+  const branchInputRef = React.useRef(null);
+  const skipBranchCommitRef = React.useRef(false);
+
+  const startBranchRename = React.useCallback((childId, label) => {
+    skipBranchCommitRef.current = false;
+    setEditingBranchId(childId);
+    setBranchNameDraft(label || '');
+  }, []);
+
+  const cancelBranchRename = React.useCallback(() => {
+    setEditingBranchId(null);
+    setBranchNameDraft('');
+  }, []);
+
+  const commitBranchRename = React.useCallback((childId) => {
+    if (!childId) return;
+    const nextName = typeof branchNameDraft === 'string' ? branchNameDraft.trim() : '';
+    if (onRenameBranch) {
+      onRenameBranch(childId, nextName);
+    }
+    cancelBranchRename();
+  }, [branchNameDraft, onRenameBranch, cancelBranchRename]);
+
+  React.useEffect(() => {
+    if (!editingBranchId) return undefined;
+    const frame = requestAnimationFrame(() => {
+      branchInputRef.current?.focus?.();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [editingBranchId]);
 
   const resolvedSelectedChildId = React.useMemo(() => {
     if (!isSingleStreamMode || rawChildren.length === 0) return null;
@@ -816,6 +850,13 @@ const TreeNode = ({
   }, [isSingleStreamMode, resolvedSelectedChildId, rawChildren, isEntangledMode, resolvedMenuId, useScopedMenuIds]);
 
   const showBranchTabs = isSingleStreamMode && rawChildren.length > 1;
+
+  const nodeCardWidth = isSingleStreamMode ? '65vw' : 640;
+  const nodeCardMaxWidth = isSingleStreamMode ? 1800 : undefined;
+  const nodeCardMinWidth = isSingleStreamMode ? 'min(520px, 65vw)' : 520;
+  const nodeCardResize = isExpanded && node.params.subtype !== 'AI'
+    ? (isSingleStreamMode ? 'vertical' : 'both')
+    : 'none';
 
   React.useEffect(() => {
     if (showAddMenuForId !== resolvedMenuId || !addMenuRef.current) return undefined;
@@ -1429,11 +1470,12 @@ const TreeNode = ({
             : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md dark:border-slate-700 dark:hover:border-slate-600 dark:shadow-black/40'}
         `}
         style={{
-          width: 640,
+          width: nodeCardWidth,
+          maxWidth: nodeCardMaxWidth,
           height: isExpanded ? (node.params.subtype === 'AI' ? 'auto' : 320) : 'auto',
-          minWidth: 520,
+          minWidth: nodeCardMinWidth,
           minHeight: isExpanded ? (node.params.subtype === 'AI' ? 0 : 180) : 0,
-          resize: isExpanded && node.params.subtype !== 'AI' ? 'both' : 'none'
+          resize: nodeCardResize
         }}
         data-node-resize="true"
       >
@@ -1518,28 +1560,100 @@ const TreeNode = ({
               {rawChildren.map((child, index) => {
                 const label = child.branchName || `Branch ${index + 1}`;
                 const isActiveBranch = child.id === resolvedSelectedChildId;
+                const isEditing = editingBranchId === child.id;
+                const chipClasses = `inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                  isActiveBranch
+                    ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                    : 'bg-white border-gray-200 text-slate-700 hover:border-gray-300 hover:bg-gray-50 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-600'
+                } ${isEditing ? 'pointer-events-none opacity-0' : ''}`;
                 return (
-                  <Button
-                    key={child.id}
-                    size="small"
-                    type={isActiveBranch ? 'primary' : 'default'}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelectBranch?.(nodeId, child.id);
-                    }}
-                  >
-                    <Space size="small">
-                      <span>{label}</span>
-                      {child.entangledPeerId && (
-                        <EntangledIndicator
-                          color={child.entangledColor}
-                          rootId={child.entangledRootId || child.id}
-                          onChange={onEntangledColorChange}
-                          className="entangled-tab-indicator"
+                  <span key={child.id} className="relative inline-flex group/branch-tab">
+                    <button
+                      type="button"
+                      className={chipClasses}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isEditing) return;
+                        onSelectBranch?.(nodeId, child.id);
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        startBranchRename(child.id, label);
+                      }}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        <span>{label}</span>
+                        {child.entangledPeerId && (
+                          <EntangledIndicator
+                            color={child.entangledColor}
+                            rootId={child.entangledRootId || child.id}
+                            onChange={onEntangledColorChange}
+                            className="entangled-tab-indicator"
+                          />
+                        )}
+                      </span>
+                    </button>
+
+                    {isEditing && (
+                      <div className="absolute inset-0 z-20">
+                        <input
+                          ref={branchInputRef}
+                          className="h-full w-full rounded-full border border-blue-400 bg-white/95 px-2.5 text-xs font-medium text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-slate-900 dark:text-slate-100"
+                          value={branchNameDraft}
+                          onChange={(e) => setBranchNameDraft(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              skipBranchCommitRef.current = true;
+                              e.preventDefault();
+                              commitBranchRename(child.id);
+                            }
+                            if (e.key === 'Escape') {
+                              skipBranchCommitRef.current = true;
+                              e.preventDefault();
+                              cancelBranchRename();
+                            }
+                          }}
+                          onBlur={() => {
+                            if (skipBranchCommitRef.current) {
+                              skipBranchCommitRef.current = false;
+                              return;
+                            }
+                            commitBranchRename(child.id);
+                          }}
+                          aria-label="Rename branch"
                         />
-                      )}
-                    </Space>
-                  </Button>
+                      </div>
+                    )}
+
+                    {!isEditing && (
+                      <div className="absolute -top-2 -right-1 z-20 flex items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover/branch-tab:opacity-100 group-hover/branch-tab:pointer-events-auto">
+                        <button
+                          type="button"
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-slate-600 shadow-sm hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startBranchRename(child.id, label);
+                          }}
+                          aria-label="Rename branch"
+                        >
+                          <EditIcon size={10} />
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-red-600 shadow-sm hover:text-red-700 dark:border-slate-600 dark:bg-slate-800 dark:text-red-300"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRemove?.(child.id);
+                          }}
+                          aria-label="Delete branch"
+                        >
+                          <Trash2 size={10} />
+                        </button>
+                      </div>
+                    )}
+                  </span>
                 );
               })}
             </Space>
@@ -1817,6 +1931,7 @@ const TreeNode = ({
               renderMode={renderMode}
               branchSelectionByNodeId={branchSelectionByNodeId}
               onSelectBranch={onSelectBranch}
+              onRenameBranch={onRenameBranch}
               onToggleEntangle={onToggleEntangle}
               onEntangledColorChange={onEntangledColorChange}
             />
@@ -1852,6 +1967,7 @@ const TreeNode = ({
                   renderMode={renderMode}
                   branchSelectionByNodeId={branchSelectionByNodeId}
                   onSelectBranch={onSelectBranch}
+                  onRenameBranch={onRenameBranch}
                   onToggleEntangle={onToggleEntangle}
                   onEntangledColorChange={onEntangledColorChange}
                 />
@@ -1926,7 +2042,8 @@ const FreeLayoutCanvas = ({
   setShowInsertMenuForId,
   onUpdateNodePosition,
   onAutoLayout,
-  onEntangledColorChange
+  onEntangledColorChange,
+  onRenameBranch
 }) => {
   const containerRef = React.useRef(null);
   const [viewport, setViewport] = React.useState({ x: 0, y: 0, scale: 1 });
@@ -2666,6 +2783,7 @@ const FreeLayoutCanvas = ({
                 showInsertMenuForId={showInsertMenuForId}
                 setShowInsertMenuForId={setShowInsertMenuForId}
                 onEntangledColorChange={onEntangledColorChange}
+                onRenameBranch={onRenameBranch}
                 renderMode="freeLayout"
                 renderChildren={false}
                 compactHeader

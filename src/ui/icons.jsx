@@ -19,6 +19,7 @@ import {
   Database as FluentDatabase,
   Delete,
   Dismiss,
+  Edit as FluentEdit,
   Filter as FluentFilter,
   Gauge as FluentGauge,
   Globe as FluentGlobe,
@@ -42,6 +43,7 @@ export const Filter = FluentFilter;
 export const BarChart3 = DataBarVertical;
 export const Database = FluentDatabase;
 export const Trash2 = Delete;
+export const Edit = FluentEdit;
 export const Settings = FluentSettings;
 export const TableIcon = FluentTable;
 export const Play = FluentPlay;

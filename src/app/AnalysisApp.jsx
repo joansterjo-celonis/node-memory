@@ -1105,6 +1105,23 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     ));
   }, []);
 
+  const renameBranch = useCallback((branchId, nextName) => {
+    if (!branchId) return;
+    const target = findNodeById(branchId);
+    if (!target) return;
+    const trimmed = typeof nextName === 'string' ? nextName.trim() : '';
+    const currentName = target.branchName || '';
+    const peer = target.entangledPeerId ? findNodeById(target.entangledPeerId) : null;
+    const peerName = peer?.branchName || '';
+    if (trimmed === currentName && trimmed === peerName) return;
+    const idsToUpdate = new Set([branchId]);
+    if (target.entangledPeerId) idsToUpdate.add(target.entangledPeerId);
+    const nextNodes = nodes.map((node) => (
+      idsToUpdate.has(node.id) ? { ...node, branchName: trimmed } : node
+    ));
+    updateNodes(nextNodes);
+  }, [nodes, findNodeById, updateNodes]);
+
   const applyNodePositions = useCallback((positions, options = {}) => {
     if (!positions) return;
     let hasChanges = false;
@@ -2291,6 +2308,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 onUpdateNodePosition={updateNodePosition}
                 onAutoLayout={applyAutoLayout}
                 onEntangledColorChange={updateEntangledGroupColor}
+                onRenameBranch={renameBranch}
               />
             ) : (
               <div className="min-w-full inline-flex justify-center p-20 items-start min-h-full">
@@ -2321,6 +2339,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                   renderMode={renderMode}
                   branchSelectionByNodeId={branchSelectionByNodeId}
                   onSelectBranch={setBranchSelection}
+                  onRenameBranch={renameBranch}
                   onToggleEntangle={toggleEntangledBranch}
                   onEntangledColorChange={updateEntangledGroupColor}
                 />
