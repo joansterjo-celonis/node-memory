@@ -127,12 +127,14 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [isStatsDetached, setIsStatsDetached] = useState(false);
   const [statsPanelRect, setStatsPanelRect] = useState(getDefaultStatsPanelRect);
   const [isPropertiesCollapsed, setIsPropertiesCollapsed] = useState(false);
-  const [entangledRootIds, setEntangledRootIds] = useState(() => new Set());
   const [branchSelectionByNodeId, setBranchSelectionByNodeId] = useState({});
   const statsDragStateRef = useRef(null);
   const statsDragFrameRef = useRef(null);
   const statsResizeStateRef = useRef(null);
   const statsResizeFrameRef = useRef(null);
+  const nodeIdCounterRef = useRef(0);
+
+  const createNodeId = useCallback(() => `node-${Date.now()}-${nodeIdCounterRef.current++}`, []);
 
   // -------------------------------------------------------------------
   // File ingestion pipeline (triggered by explicit "Ingest Data" button)
@@ -252,6 +254,68 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const undo = () => { if (historyIndex > 0) setHistoryIndex(historyIndex - 1); };
   const redo = () => { if (historyIndex < history.length - 1) setHistoryIndex(historyIndex + 1); };
 
+  const findNodeById = (id, nodesList = nodes) => nodesList.find(node => node.id === id);
+
+  const getNearestBranchLabel = (startId, nodesList = nodes) => {
+    let currentId = startId;
+    while (currentId) {
+      const current = findNodeById(currentId, nodesList);
+      if (!current) break;
+      if (current.branchName) return current.branchName;
+      currentId = current.parentId;
+    }
+    return '';
+  };
+
+  const collectSubtreeIds = (rootId, nodesList = nodes) => {
+    const ids = new Set();
+    const stack = [rootId];
+    while (stack.length > 0) {
+      const currentId = stack.pop();
+      if (ids.has(currentId)) continue;
+      const current = findNodeById(currentId, nodesList);
+      if (!current) continue;
+      ids.add(currentId);
+      const children = getChildren(nodesList, currentId);
+      children.forEach(child => stack.push(child.id));
+    }
+    return ids;
+  };
+
+  const collectBranchSubtreeIds = (rootId, nodesList = nodes) => {
+    const ids = new Set();
+    const stack = [rootId];
+    while (stack.length > 0) {
+      const currentId = stack.pop();
+      if (ids.has(currentId)) continue;
+      const current = findNodeById(currentId, nodesList);
+      if (!current) continue;
+      ids.add(currentId);
+      const children = getChildren(nodesList, currentId);
+      children.forEach((child) => {
+        if (child.branchName && child.id !== rootId) return;
+        stack.push(child.id);
+      });
+    }
+    return ids;
+  };
+
+  const applyBranchLabelToSubtree = (nodesList, rootId, nextBranchLabel) => {
+    if (!nextBranchLabel) return nodesList;
+    const ids = collectBranchSubtreeIds(rootId, nodesList);
+    return nodesList.map((node) => {
+      if (!ids.has(node.id)) return node;
+      if (node.titleIsCustom === true) return node;
+      return { ...node, title: nextBranchLabel };
+    });
+  };
+
+  const resolveNodeTitle = (parentId, branchName, fallbackTitle) => {
+    const inherited = getNearestBranchLabel(parentId);
+    const label = branchName || inherited;
+    return label || fallbackTitle;
+  };
+
   const EXPLORATION_STORAGE_KEY = 'nma-explorations';
   const loadExplorations = () => {
     if (typeof window === 'undefined' || !window.localStorage) return [];
@@ -304,11 +368,18 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   // Node updates (params + metadata)
   // -------------------------------------------------------------------
   const updateNode = (id, updates, isMeta = false, silent = false) => {
-    const newNodes = nodes.map(n => {
+    const targetNode = findNodeById(id);
+    let newNodes = nodes.map(n => {
       if (n.id !== id) return n;
       if (isMeta) return { ...n, ...updates };
       return { ...n, params: updates };
     });
+
+    if (isMeta && updates && Object.prototype.hasOwnProperty.call(updates, 'branchName') && targetNode) {
+      if (updates.branchName !== targetNode.branchName) {
+        newNodes = applyBranchLabelToSubtree(newNodes, id, updates.branchName);
+      }
+    }
 
     if (silent) {
       const newHistory = [...history];
@@ -596,55 +667,127 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     assistantPlan: []
   });
 
+  const cloneSubtree = (rootId, newParentId) => {
+    const mapping = new Map();
+    const reverseMapping = new Map();
+    const newNodes = [];
+    const queue = [rootId];
+
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      const current = findNodeById(currentId);
+      if (!current) continue;
+      const newId = createNodeId();
+      mapping.set(currentId, newId);
+      reverseMapping.set(newId, currentId);
+      const parentId = currentId === rootId ? newParentId : mapping.get(current.parentId);
+      const cloned = {
+        ...current,
+        id: newId,
+        parentId
+      };
+      delete cloned.entangledPeerId;
+      delete cloned.entangledRootId;
+      newNodes.push(cloned);
+      const children = getChildren(nodes, currentId);
+      children.forEach(child => queue.push(child.id));
+    }
+
+    return { newNodes, mapping, reverseMapping };
+  };
+
   const addNode = (type, parentId, subtype = 'TABLE') => {
-    const newId = `node-${Date.now()}`;
+    const parent = findNodeById(parentId);
+    if (!parent) return;
     const siblings = getChildren(nodes, parentId);
     const branchName = siblings.length > 0 ? `Fork ${siblings.length + 1}` : undefined;
+    const title = resolveNodeTitle(parentId, branchName, 'New Step');
+    const newId = createNodeId();
+    const entangledRootId = parent.entangledRootId;
 
     const newNode = {
       id: newId,
       parentId,
       type,
-      title: 'New Step',
+      title,
       branchName,
+      titleIsCustom: false,
       isExpanded: true,
       params: getDefaultParams(subtype)
     };
 
-    updateNodes([...nodes, newNode]);
+    const nextNodes = [...nodes, newNode];
+    if (parent.entangledPeerId) {
+      const peerId = createNodeId();
+      const peerTitle = resolveNodeTitle(parent.entangledPeerId, branchName, 'New Step');
+      newNode.entangledPeerId = peerId;
+      newNode.entangledRootId = entangledRootId;
+      nextNodes.push({
+        ...newNode,
+        id: peerId,
+        parentId: parent.entangledPeerId,
+        title: peerTitle,
+        entangledPeerId: newId,
+        entangledRootId
+      });
+    }
+
+    updateNodes(nextNodes);
     setSelectedNodeId(newId);
     setShowAddMenuForId(null);
   };
 
   const insertNode = (type, parentId, subtype = 'TABLE') => {
-    const newId = `node-${Date.now()}`;
+    const parent = findNodeById(parentId);
+    if (!parent) return;
+    const title = resolveNodeTitle(parentId, undefined, 'Inserted Step');
+    const newId = createNodeId();
+    const entangledRootId = parent.entangledRootId;
     const newNode = {
       id: newId,
       parentId,
       type,
-      title: 'Inserted Step',
+      title,
+      titleIsCustom: false,
       isExpanded: true,
       params: getDefaultParams(subtype)
     };
 
-    const updatedNodes = nodes.map(n => n.parentId === parentId ? { ...n, parentId: newId } : n);
+    let updatedNodes = nodes.map(n => n.parentId === parentId ? { ...n, parentId: newId } : n);
 
-    updateNodes([...updatedNodes, newNode]);
+    if (parent.entangledPeerId) {
+      const peerParentId = parent.entangledPeerId;
+      const peerId = createNodeId();
+      const peerTitle = resolveNodeTitle(peerParentId, undefined, 'Inserted Step');
+      newNode.entangledPeerId = peerId;
+      newNode.entangledRootId = entangledRootId;
+      updatedNodes = updatedNodes.map(n => n.parentId === peerParentId ? { ...n, parentId: peerId } : n);
+      updatedNodes.push({
+        ...newNode,
+        id: peerId,
+        parentId: peerParentId,
+        title: peerTitle,
+        entangledPeerId: newId,
+        entangledRootId
+      });
+    }
+
+    updatedNodes.push(newNode);
+    updateNodes(updatedNodes);
     setSelectedNodeId(newId);
     setShowInsertMenuForId(null);
   };
 
   const removeNode = (id) => {
-    const nodesToDelete = new Set([id]);
-    let poolToCheck = [id];
-    while (poolToCheck.length > 0) {
-      const current = poolToCheck.pop();
-      const children = getChildren(nodes, current);
-      children.forEach(c => { nodesToDelete.add(c.id); poolToCheck.push(c.id); });
+    const target = findNodeById(id);
+    if (!target) return;
+    const nodesToDelete = collectSubtreeIds(id);
+    if (target.entangledPeerId) {
+      collectSubtreeIds(target.entangledPeerId).forEach((peerId) => nodesToDelete.add(peerId));
     }
     const filtered = nodes.filter(n => !nodesToDelete.has(n.id));
     updateNodes(filtered);
-    if (selectedNodeId === id) setSelectedNodeId('node-start');
+    if (nodesToDelete.has(selectedNodeId)) setSelectedNodeId('node-start');
   };
 
   const toggleNodeExpansion = (id) => {
@@ -669,17 +812,45 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setHistory(newHistory);
   };
 
-  const toggleEntangledRoot = useCallback((id) => {
-    setEntangledRootIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
+  const toggleEntangledBranch = useCallback((id) => {
+    const target = findNodeById(id);
+    if (!target || !target.parentId) return;
+    if (target.entangledPeerId) {
+      const peer = findNodeById(target.entangledPeerId);
+      if (!peer || peer.parentId !== target.parentId) return;
+      const peerIds = collectSubtreeIds(peer.id);
+      const selfIds = collectSubtreeIds(target.id);
+      const nextNodes = nodes
+        .filter(node => !peerIds.has(node.id))
+        .map((node) => (
+          selfIds.has(node.id)
+            ? { ...node, entangledPeerId: undefined, entangledRootId: undefined }
+            : node
+        ));
+      updateNodes(nextNodes);
+      return;
+    }
+
+    const groupId = `entangled-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const { newNodes, mapping, reverseMapping } = cloneSubtree(target.id, target.parentId);
+    const updatedExisting = nodes.map((node) => {
+      if (!mapping.has(node.id)) return node;
+      return {
+        ...node,
+        entangledPeerId: mapping.get(node.id),
+        entangledRootId: groupId
+      };
     });
-  }, []);
+    const mirrored = newNodes.map((node) => {
+      const originalId = reverseMapping.get(node.id);
+      return {
+        ...node,
+        entangledPeerId: originalId,
+        entangledRootId: groupId
+      };
+    });
+    updateNodes([...updatedExisting, ...mirrored]);
+  }, [nodes, findNodeById, collectSubtreeIds, cloneSubtree, updateNodes]);
 
   const setBranchSelection = useCallback((parentId, childId) => {
     if (!parentId || !childId) return;
@@ -702,17 +873,38 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
   const addFilterNode = ({ parentId, field, operator = 'equals', value }) => {
     if (!parentId || !field) return;
-    const newId = `node-${Date.now()}`;
+    const parent = findNodeById(parentId);
+    if (!parent) return;
+    const newId = createNodeId();
+    const entangledRootId = parent.entangledRootId;
+    const title = resolveNodeTitle(parentId, undefined, 'Filter Data');
     const newNode = {
       id: newId,
       parentId,
       type: 'FILTER',
-      title: 'Filter Data',
+      title,
+      titleIsCustom: false,
       isExpanded: true,
       params: { field, operator, value }
     };
 
-    updateNodes([...nodes, newNode]);
+    const nextNodes = [...nodes, newNode];
+    if (parent.entangledPeerId) {
+      const peerId = createNodeId();
+      const peerTitle = resolveNodeTitle(parent.entangledPeerId, undefined, 'Filter Data');
+      newNode.entangledPeerId = peerId;
+      newNode.entangledRootId = entangledRootId;
+      nextNodes.push({
+        ...newNode,
+        id: peerId,
+        parentId: parent.entangledPeerId,
+        title: peerTitle,
+        entangledPeerId: newId,
+        entangledRootId
+      });
+    }
+
+    updateNodes(nextNodes);
     setSelectedNodeId(newId);
   };
 
@@ -1349,6 +1541,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   };
 
   const applyAssistantPlan = (nodeId, plan, assistantUpdate) => {
+    const baseNode = findNodeById(nodeId);
+    if (!baseNode) return;
     const baseNodes = nodes.map((node) => {
       if (node.id !== nodeId) return node;
       return {
@@ -1363,25 +1557,49 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     }
 
     let parentId = nodeId;
-    const newNodes = plan.map((step, index) => {
-      const newId = `node-${Date.now()}-${index}`;
+    let peerParentId = baseNode.entangledPeerId;
+    const entangledRootId = baseNode.entangledRootId;
+    const newNodes = [];
+    const peerNodes = [];
+
+    plan.forEach((step) => {
+      const newId = createNodeId();
       const params = step.type === 'COMPONENT'
         ? { ...getDefaultParams(step.subtype), ...step.params, subtype: step.subtype }
         : { ...getDefaultParams(step.subtype || 'TABLE'), ...step.params };
-      const title = step.title || (step.type === 'COMPONENT' ? `${step.subtype} View` : 'New Step');
+      const fallbackTitle = step.title || (step.type === 'COMPONENT' ? `${step.subtype} View` : 'New Step');
+      const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
       const newNode = {
         id: newId,
         parentId,
         type: step.type,
         title,
+        titleIsCustom: false,
         isExpanded: true,
         params
       };
+
+      if (peerParentId) {
+        const peerId = createNodeId();
+        const peerTitle = resolveNodeTitle(peerParentId, undefined, fallbackTitle);
+        newNode.entangledPeerId = peerId;
+        newNode.entangledRootId = entangledRootId;
+        peerNodes.push({
+          ...newNode,
+          id: peerId,
+          parentId: peerParentId,
+          title: peerTitle,
+          entangledPeerId: newId,
+          entangledRootId
+        });
+        peerParentId = peerId;
+      }
+
+      newNodes.push(newNode);
       parentId = newId;
-      return newNode;
     });
 
-    updateNodes([...baseNodes, ...newNodes]);
+    updateNodes([...baseNodes, ...newNodes, ...peerNodes]);
     setSelectedNodeId(newNodes[newNodes.length - 1]?.id || nodeId);
   };
 
@@ -1765,10 +1983,9 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                   showInsertMenuForId={showInsertMenuForId}
                   setShowInsertMenuForId={setShowInsertMenuForId}
                   renderMode={renderMode}
-                  entangledRootIds={entangledRootIds}
                   branchSelectionByNodeId={branchSelectionByNodeId}
                   onSelectBranch={setBranchSelection}
-                  onToggleEntangle={toggleEntangledRoot}
+                  onToggleEntangle={toggleEntangledBranch}
                 />
               </div>
             )}

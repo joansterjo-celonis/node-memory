@@ -96,13 +96,13 @@
 }
 
 .node-card-header--compact {
-  padding: 8px 12px;
-  gap: 8px;
+  padding: 6px 10px;
+  gap: 6px;
 }
 
 .node-card--compact .node-card-icon {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
 }
 
 .node-card--compact .node-card-title {
@@ -111,4 +111,13 @@
 
 .node-card--compact .node-card-subtitle {
   font-size: 10px;
+  display: none;
+}
+
+.entangled-pair {
+  position: absolute;
+  border: 2px solid rgba(250, 204, 21, 0.6);
+  background: rgba(254, 249, 195, 0.3);
+  border-radius: 4px;
+  pointer-events: none;
 }

@@ -301,21 +301,45 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
   const containerRef = React.useRef(null);
   const childRefs = React.useRef([]);
   const rafRef = React.useRef(null);
-  const [layout, setLayout] = React.useState({ parentX: 0, childXs: [] });
+  const [layout, setLayout] = React.useState({ parentX: 0, childXs: [], pairRects: [] });
 
   const updateLayout = React.useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
     if (!rect.width) return;
-    const childXs = childRefs.current
-      .map((el) => {
-        if (!el) return null;
-        const childRect = el.getBoundingClientRect();
+    const childRects = childRefs.current.map((el) => (el ? el.getBoundingClientRect() : null));
+    const childXs = childRects
+      .map((childRect) => {
+        if (!childRect) return null;
         return childRect.left + childRect.width / 2 - rect.left;
       })
       .filter((val) => val !== null);
-    setLayout({ parentX: rect.width / 2, childXs });
+
+    const indexById = new Map(childrenNodes.map((child, idx) => [child.nodeId, idx]));
+    const pairRects = [];
+    childrenNodes.forEach((child, idx) => {
+      if (!child.entangledPeerId) return;
+      const peerIndex = indexById.get(child.entangledPeerId);
+      if (peerIndex === undefined || peerIndex <= idx) return;
+      const rectA = childRects[idx];
+      const rectB = childRects[peerIndex];
+      if (!rectA || !rectB) return;
+      const padding = 8;
+      const left = Math.min(rectA.left, rectB.left) - rect.left - padding;
+      const right = Math.max(rectA.right, rectB.right) - rect.left + padding;
+      const top = Math.min(rectA.top, rectB.top) - rect.top - padding;
+      const bottom = Math.max(rectA.bottom, rectB.bottom) - rect.top + padding;
+      pairRects.push({
+        key: `${child.nodeId}-${child.entangledPeerId}`,
+        left,
+        top,
+        width: right - left,
+        height: bottom - top
+      });
+    });
+
+    setLayout({ parentX: rect.width / 2, childXs, pairRects });
   }, []);
 
   const scheduleUpdate = React.useCallback(() => {
@@ -364,6 +388,23 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
         className="relative flex gap-8"
         style={{ paddingTop: BRANCH_CONNECTOR_HEIGHT }}
       >
+        {hasLayout && layout.pairRects.length > 0 && (
+          <div className="absolute inset-0 pointer-events-none">
+            {layout.pairRects.map((rect) => (
+              <div
+                key={rect.key}
+                className="entangled-pair"
+                style={{
+                  left: rect.left,
+                  top: rect.top,
+                  width: rect.width,
+                  height: rect.height
+                }}
+              />
+            ))}
+          </div>
+        )}
+
         {hasLayout && (
           <svg
             className="absolute top-0 left-0 w-full text-gray-300 dark:text-slate-600 pointer-events-none"
@@ -429,7 +470,6 @@ const TreeNode = ({
   showInsertMenuForId,
   setShowInsertMenuForId,
   renderMode = 'classic',
-  entangledRootIds,
   branchSelectionByNodeId,
   onSelectBranch,
   onToggleEntangle,
@@ -448,10 +488,8 @@ const TreeNode = ({
   const isBranchCollapsed = node.isBranchCollapsed === true;
   const isEntangledMode = renderMode === 'entangled';
   const isSingleStreamMode = renderMode === 'singleStream';
-  const entangledRoots = entangledRootIds instanceof Set
-    ? entangledRootIds
-    : new Set(entangledRootIds || []);
-  const isEntangledRoot = entangledRoots.has(nodeId);
+  const peerNode = node.entangledPeerId ? nodes.find(n => n.id === node.entangledPeerId) : null;
+  const isEntangledRoot = !!peerNode && peerNode.parentId === node.parentId;
   const resolvedMenuId = menuId || nodeId;
   const useScopedMenuIds = resolvedMenuId !== nodeId;
   const tableDensityClass = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
@@ -479,34 +517,15 @@ const TreeNode = ({
     const buildMenuKey = (childId) => (
       useScopedMenuIds ? `${resolvedMenuId}::${childId}` : childId
     );
-    if (!isEntangledMode) {
-      return baseChildren.map(child => ({
-        node: child,
-        nodeId: child.id,
-        renderKey: buildMenuKey(child.id),
-        menuKey: buildMenuKey(child.id)
-      }));
-    }
-    return baseChildren.flatMap((child) => {
-      const scopedKey = buildMenuKey(child.id);
-      const baseItem = {
-        node: child,
-        nodeId: child.id,
-        renderKey: scopedKey,
-        menuKey: scopedKey
-      };
-      if (!entangledRoots.has(child.id)) return [baseItem];
-      return [
-        baseItem,
-        {
-          node: child,
-          nodeId: child.id,
-          renderKey: `${scopedKey}::mirror`,
-          menuKey: `${scopedKey}::mirror`
-        }
-      ];
-    });
-  }, [isSingleStreamMode, resolvedSelectedChildId, rawChildren, isEntangledMode, entangledRoots, resolvedMenuId, useScopedMenuIds]);
+    return baseChildren.map(child => ({
+      node: child,
+      nodeId: child.id,
+      renderKey: buildMenuKey(child.id),
+      menuKey: buildMenuKey(child.id),
+      entangledPeerId: isEntangledMode ? child.entangledPeerId : undefined,
+      entangledRootId: isEntangledMode ? child.entangledRootId : undefined
+    }));
+  }, [isSingleStreamMode, resolvedSelectedChildId, rawChildren, isEntangledMode, resolvedMenuId, useScopedMenuIds]);
 
   const showBranchTabs = isSingleStreamMode && rawChildren.length > 1;
 
@@ -588,16 +607,17 @@ const TreeNode = ({
     }
   ];
 
+  const canToggleEntangle = !!node.parentId && (!node.entangledPeerId || isEntangledRoot);
   const entangleMenu = {
     items: [
       {
         key: 'entangle-toggle',
-        label: isEntangledRoot ? 'Remove entangled mirror' : 'Create entangled mirror',
-        disabled: !node.parentId
+        label: node.entangledPeerId ? 'Remove entangled mirror' : 'Create entangled mirror',
+        disabled: !canToggleEntangle
       }
     ],
     onClick: () => {
-      if (!node.parentId) return;
+      if (!canToggleEntangle) return;
       onToggleEntangle?.(nodeId);
     }
   };
@@ -1164,7 +1184,6 @@ const TreeNode = ({
               showInsertMenuForId={showInsertMenuForId}
               setShowInsertMenuForId={setShowInsertMenuForId}
               renderMode={renderMode}
-              entangledRootIds={entangledRootIds}
               branchSelectionByNodeId={branchSelectionByNodeId}
               onSelectBranch={onSelectBranch}
               onToggleEntangle={onToggleEntangle}
@@ -1195,7 +1214,6 @@ const TreeNode = ({
                   showInsertMenuForId={showInsertMenuForId}
                   setShowInsertMenuForId={setShowInsertMenuForId}
                   renderMode={renderMode}
-                  entangledRootIds={entangledRootIds}
                   branchSelectionByNodeId={branchSelectionByNodeId}
                   onSelectBranch={onSelectBranch}
                   onToggleEntangle={onToggleEntangle}
@@ -1314,7 +1332,7 @@ const FreeLayoutCanvas = ({
   }, []);
 
   const handleWheel = React.useCallback((event) => {
-    if (!event.shiftKey) return;
+    if (!event.shiftKey && !event.ctrlKey) return;
     event.preventDefault();
     const container = containerRef.current;
     if (!container) return;
@@ -1332,6 +1350,14 @@ const FreeLayoutCanvas = ({
       };
     });
   }, []);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+    const onWheel = (event) => handleWheel(event);
+    container.addEventListener('wheel', onWheel, { passive: false });
+    return () => container.removeEventListener('wheel', onWheel);
+  }, [handleWheel]);
 
   const handlePanMove = React.useCallback((event) => {
     const state = panStateRef.current;
@@ -1423,12 +1449,15 @@ const FreeLayoutCanvas = ({
       const parentSize = sizes.get(parent.id);
       const childSize = sizes.get(node.id);
       if (!parentPos || !childPos || !parentSize || !childSize) return;
-      lines.push({
-        x1: parentPos.x + parentSize.width / 2,
-        y1: parentPos.y + parentSize.height,
-        x2: childPos.x + childSize.width / 2,
-        y2: childPos.y
-      });
+      const x1 = parentPos.x + parentSize.width / 2;
+      const y1 = parentPos.y + parentSize.height;
+      const x2 = childPos.x + childSize.width / 2;
+      const y2 = childPos.y;
+      const deltaY = Math.max(60, Math.abs(y2 - y1) * 0.5);
+      const c1y = y1 + deltaY;
+      const c2y = y2 - deltaY;
+      const path = `M ${x1} ${y1} C ${x1} ${c1y}, ${x2} ${c2y}, ${x2} ${y2}`;
+      lines.push({ path });
     });
     return lines;
   }, [visibleNodes, nodesById, layoutVersion]);
@@ -1437,7 +1466,6 @@ const FreeLayoutCanvas = ({
     <div
       ref={containerRef}
       className={`free-layout-canvas relative w-full h-full ${isPanning || isDragging ? 'is-panning' : ''}`}
-      onWheel={handleWheel}
       onPointerDown={handlePanStart}
     >
       <div
@@ -1453,12 +1481,10 @@ const FreeLayoutCanvas = ({
           aria-hidden="true"
         >
           {connectors.map((line, index) => (
-            <line
-              key={`${line.x1}-${line.y1}-${line.x2}-${line.y2}-${index}`}
-              x1={line.x1}
-              y1={line.y1}
-              x2={line.x2}
-              y2={line.y2}
+            <path
+              key={`${line.path}-${index}`}
+              d={line.path}
+              fill="none"
               stroke="currentColor"
               strokeWidth={2}
               strokeLinecap="round"
