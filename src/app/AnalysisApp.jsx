@@ -744,36 +744,58 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setShowAddMenuForId(null);
   };
 
-  const insertNode = (type, parentId, subtype = 'TABLE') => {
+  const insertNode = (type, parentId, subtype = 'TABLE', childId = null, insertPosition = null) => {
     const parent = findNodeById(parentId);
     if (!parent) return;
     const fallbackTitle = getDefaultNodeTitle(type, subtype);
     const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
     const newId = createNodeId();
     const entangledRootId = parent.entangledRootId;
-    const newNode = {
-      id: newId,
-      parentId,
+    const targetChild = childId ? findNodeById(childId) : null;
+    const shouldTargetChild = !!targetChild && targetChild.parentId === parentId;
+    const nextPosition = (insertPosition && Number.isFinite(insertPosition.x) && Number.isFinite(insertPosition.y))
+      ? { x: insertPosition.x, y: insertPosition.y }
+      : null;
+    const nodeTemplate = {
       type,
       title,
       titleIsCustom: false,
       isExpanded: true,
       params: getDefaultParams(subtype)
     };
+    const newNode = {
+      id: newId,
+      parentId,
+      ...nodeTemplate,
+      ...(nextPosition ? { position: nextPosition } : {})
+    };
 
-    let updatedNodes = nodes.map(n => n.parentId === parentId ? { ...n, parentId: newId } : n);
+    let updatedNodes = nodes.map((node) => {
+      if (shouldTargetChild) {
+        return node.id === targetChild.id ? { ...node, parentId: newId } : node;
+      }
+      return node.parentId === parentId ? { ...node, parentId: newId } : node;
+    });
 
     if (parent.entangledPeerId) {
       const peerParentId = parent.entangledPeerId;
       const peerId = createNodeId();
       const peerTitle = resolveNodeTitle(peerParentId, undefined, fallbackTitle);
+      const peerTargetChildId = shouldTargetChild ? targetChild.entangledPeerId : null;
+      const peerTargetChild = peerTargetChildId ? findNodeById(peerTargetChildId) : null;
+      const shouldTargetPeerChild = !!peerTargetChild && peerTargetChild.parentId === peerParentId;
       newNode.entangledPeerId = peerId;
       newNode.entangledRootId = entangledRootId;
-      updatedNodes = updatedNodes.map(n => n.parentId === peerParentId ? { ...n, parentId: peerId } : n);
+      updatedNodes = updatedNodes.map((node) => {
+        if (shouldTargetPeerChild) {
+          return node.id === peerTargetChildId ? { ...node, parentId: peerId } : node;
+        }
+        return node.parentId === peerParentId ? { ...node, parentId: peerId } : node;
+      });
       updatedNodes.push({
-        ...newNode,
         id: peerId,
         parentId: peerParentId,
+        ...nodeTemplate,
         title: peerTitle,
         entangledPeerId: newId,
         entangledRootId
@@ -812,8 +834,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setHistory(newHistory);
   };
 
-  const handleSelect = (id) => {
+  const handleSelect = (id, options = {}) => {
+    const { expand = true } = options || {};
     setSelectedNodeId(id);
+    if (!expand) return;
     const newNodes = nodes.map(n => n.id === id ? { ...n, isExpanded: true } : n);
     const newHistory = [...history];
     newHistory[historyIndex] = newNodes;

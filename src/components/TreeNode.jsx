@@ -53,6 +53,22 @@ const FILTER_OPERATOR_LABELS = {
   contains: 'contains'
 };
 
+const INSERT_MENU_ITEMS = [
+  {
+    type: 'group',
+    label: 'Insert Step',
+    children: [
+      { key: 'FILTER', label: 'Filter', icon: <span className="w-1.5 h-1.5 rounded-full bg-orange-400" /> },
+      { key: 'AGGREGATE', label: 'Aggregate', icon: <span className="w-1.5 h-1.5 rounded-full bg-purple-400" /> },
+      { key: 'JOIN', label: 'Join', icon: <span className="w-1.5 h-1.5 rounded-full bg-pink-400" /> },
+      { type: 'divider' },
+      { key: 'COMPONENT:TABLE', label: 'Table', icon: <TableIcon size={12} /> },
+      { key: 'COMPONENT:PIVOT', label: 'Pivot Table', icon: <TableIcon size={12} /> },
+      { key: 'COMPONENT:AI', label: 'AI Assistant', icon: <Share2 size={12} /> }
+    ]
+  }
+];
+
 const { Text, Title } = Typography;
 
 const metricRequiresField = (fn) => ['sum', 'avg', 'min', 'max', 'count_distinct'].includes(fn);
@@ -576,7 +592,8 @@ const TreeNode = ({
   renderChildren = true,
   compactHeader = false,
   menuId,
-  headerDragProps
+  headerDragProps,
+  shouldSuppressSelect
 }) => {
   const node = nodes.find(n => n.id === nodeId);
   if (!node) return null;
@@ -696,22 +713,6 @@ const TreeNode = ({
         { key: 'COMPONENT:CHART', label: 'Chart', icon: <BarChart3 size={14} /> },
         { key: 'COMPONENT:KPI', label: 'KPI', icon: <Hash size={14} /> },
         { key: 'COMPONENT:GAUGE', label: 'Gauge', icon: <Gauge size={14} /> }
-      ]
-    }
-  ];
-
-  const insertMenuItems = [
-    {
-      type: 'group',
-      label: 'Insert Step',
-      children: [
-        { key: 'FILTER', label: 'Filter', icon: <span className="w-1.5 h-1.5 rounded-full bg-orange-400" /> },
-        { key: 'AGGREGATE', label: 'Aggregate', icon: <span className="w-1.5 h-1.5 rounded-full bg-purple-400" /> },
-        { key: 'JOIN', label: 'Join', icon: <span className="w-1.5 h-1.5 rounded-full bg-pink-400" /> },
-        { type: 'divider' },
-        { key: 'COMPONENT:TABLE', label: 'Table', icon: <TableIcon size={12} /> },
-        { key: 'COMPONENT:PIVOT', label: 'Pivot Table', icon: <TableIcon size={12} /> },
-        { key: 'COMPONENT:AI', label: 'AI Assistant', icon: <Share2 size={12} /> }
       ]
     }
   ];
@@ -1251,7 +1252,11 @@ const TreeNode = ({
   const nodeCard = (
     <div className="relative group z-10">
       <div
-        onClick={(e) => { e.stopPropagation(); onSelect(nodeId); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (shouldSuppressSelect?.()) return;
+          onSelect(nodeId);
+        }}
         className={`
           node-card bg-white dark:bg-slate-900 rounded-xl border-2 transition-all cursor-pointer overflow-hidden relative flex flex-col
           ${compactHeader ? 'node-card--compact' : ''}
@@ -1596,7 +1601,7 @@ const TreeNode = ({
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity z-30">
               <div ref={insertMenuRef}>
                 <Dropdown
-                  menu={{ items: insertMenuItems, onClick: handleInsertMenuClick }}
+                  menu={{ items: INSERT_MENU_ITEMS, onClick: handleInsertMenuClick }}
                   trigger={['click']}
                   open={showInsertMenuForId === resolvedMenuId}
                   onOpenChange={(open) => setShowInsertMenuForId(open ? resolvedMenuId : null)}
@@ -1755,19 +1760,126 @@ const FreeLayoutCanvas = ({
   const viewportRef = React.useRef(viewport);
   const [isPanning, setIsPanning] = React.useState(false);
   const [isDragging, setIsDragging] = React.useState(false);
+  const [hoveredConnector, setHoveredConnector] = React.useState(null);
+  const [insertAnchor, setInsertAnchor] = React.useState(null);
   const nodeSizesRef = React.useRef(new Map());
   const [layoutVersion, setLayoutVersion] = React.useState(0);
   const panStateRef = React.useRef(null);
   const dragStateRef = React.useRef(null);
   const dragFrameRef = React.useRef(null);
+  const hoverFrameRef = React.useRef(null);
+  const hoverPayloadRef = React.useRef(null);
+  const connectorInsertRef = React.useRef(null);
+  const activeInsertEdgeRef = React.useRef(null);
+  const suppressSelectRef = React.useRef(false);
   const clampScale = React.useCallback(
     (value) => Math.min(FREE_LAYOUT_MAX_SCALE, Math.max(FREE_LAYOUT_MIN_SCALE, value)),
     []
   );
 
+  const getGraphPointFromEvent = React.useCallback((event) => {
+    const container = containerRef.current;
+    if (!container) return null;
+    const rect = container.getBoundingClientRect();
+    const { x, y, scale } = viewportRef.current;
+    if (!scale) return null;
+    return {
+      x: (event.clientX - rect.left - x) / scale,
+      y: (event.clientY - rect.top - y) / scale
+    };
+  }, []);
+
+  const scheduleConnectorHover = React.useCallback(() => {
+    if (hoverFrameRef.current) return;
+    hoverFrameRef.current = requestAnimationFrame(() => {
+      hoverFrameRef.current = null;
+      if (hoverPayloadRef.current) {
+        setHoveredConnector(hoverPayloadRef.current);
+      }
+    });
+  }, []);
+
+  const handleConnectorHover = React.useCallback((edge, event) => {
+    if (showInsertMenuForId && insertAnchor?.edgeKey === showInsertMenuForId) return;
+    const point = getGraphPointFromEvent(event);
+    if (!point) return;
+    hoverPayloadRef.current = {
+      edgeKey: edge.edgeKey,
+      parentId: edge.parentId,
+      childId: edge.childId,
+      position: point
+    };
+    scheduleConnectorHover();
+  }, [getGraphPointFromEvent, insertAnchor, scheduleConnectorHover, showInsertMenuForId]);
+
+  const handleConnectorLeave = React.useCallback((event, edgeKey) => {
+    if (showInsertMenuForId === edgeKey) return;
+    const related = event.relatedTarget;
+    if (related && connectorInsertRef.current?.contains(related)) return;
+    hoverPayloadRef.current = null;
+    setHoveredConnector((prev) => (prev?.edgeKey === edgeKey ? null : prev));
+  }, [showInsertMenuForId]);
+
+  const handleInsertButtonLeave = React.useCallback(() => {
+    if (showInsertMenuForId) return;
+    hoverPayloadRef.current = null;
+    setHoveredConnector(null);
+  }, [showInsertMenuForId]);
+
+  const resolveInsertPosition = React.useCallback((anchor) => {
+    if (!anchor?.position) return null;
+    const { x, y } = anchor.position;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return {
+      x: Math.round(x - FREE_LAYOUT_DEFAULT_NODE_SIZE.width / 2),
+      y: Math.round(y - FREE_LAYOUT_DEFAULT_NODE_SIZE.height / 2)
+    };
+  }, []);
+
+  const handleConnectorInsertClick = React.useCallback((event, anchor) => {
+    event.stopPropagation();
+    if (!anchor) return;
+    activeInsertEdgeRef.current = anchor;
+    setInsertAnchor(anchor);
+    setShowInsertMenuForId(anchor.edgeKey);
+  }, [setShowInsertMenuForId]);
+
+  const handleConnectorInsertMenuClick = React.useCallback(({ key }) => {
+    const target = activeInsertEdgeRef.current;
+    if (!target || !onInsert) return;
+    const insertPosition = resolveInsertPosition(target);
+    if (key.startsWith('COMPONENT:')) {
+      onInsert('COMPONENT', target.parentId, key.split(':')[1], target.childId, insertPosition);
+    } else {
+      onInsert(key, target.parentId, undefined, target.childId, insertPosition);
+    }
+    setShowInsertMenuForId(null);
+    setInsertAnchor(null);
+  }, [onInsert, resolveInsertPosition, setShowInsertMenuForId]);
+
+  const handleConnectorInsertOpenChange = React.useCallback((open, edgeKey) => {
+    if (open) {
+      setShowInsertMenuForId(edgeKey);
+      return;
+    }
+    setShowInsertMenuForId(null);
+    setInsertAnchor(null);
+  }, [setShowInsertMenuForId]);
+
   React.useEffect(() => {
     viewportRef.current = viewport;
   }, [viewport]);
+
+  React.useEffect(() => {
+    return () => {
+      if (hoverFrameRef.current) cancelAnimationFrame(hoverFrameRef.current);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (showInsertMenuForId) return;
+    setInsertAnchor(null);
+  }, [showInsertMenuForId]);
 
   const nodesById = React.useMemo(() => new Map(nodes.map(node => [node.id, node])), [nodes]);
 
@@ -2015,12 +2127,17 @@ const FreeLayoutCanvas = ({
   const handleNodeDragMove = React.useCallback((event) => {
     const state = dragStateRef.current;
     if (!state) return;
+    const rawDx = event.clientX - state.startX;
+    const rawDy = event.clientY - state.startY;
+    if (!state.hasMoved && (Math.abs(rawDx) > 3 || Math.abs(rawDy) > 3)) {
+      state.hasMoved = true;
+    }
     if (dragFrameRef.current) return;
     dragFrameRef.current = requestAnimationFrame(() => {
       dragFrameRef.current = null;
       const scale = viewportRef.current.scale || 1;
-      const dx = (event.clientX - state.startX) / scale;
-      const dy = (event.clientY - state.startY) / scale;
+      const dx = rawDx / scale;
+      const dy = rawDy / scale;
       onUpdateNodePosition?.(state.nodeId, {
         x: state.originX + dx,
         y: state.originY + dy
@@ -2032,6 +2149,12 @@ const FreeLayoutCanvas = ({
     if (dragFrameRef.current) {
       cancelAnimationFrame(dragFrameRef.current);
       dragFrameRef.current = null;
+    }
+    if (dragStateRef.current?.hasMoved) {
+      suppressSelectRef.current = true;
+      requestAnimationFrame(() => {
+        suppressSelectRef.current = false;
+      });
     }
     dragStateRef.current = null;
     setIsDragging(false);
@@ -2045,7 +2168,8 @@ const FreeLayoutCanvas = ({
     if (target?.closest('button, a, input, textarea, .ant-dropdown, .ant-select, .ant-table')) return;
     event.preventDefault();
     event.stopPropagation();
-    onSelect?.(nodeId);
+    suppressSelectRef.current = false;
+    onSelect?.(nodeId, { expand: false });
     const node = nodesById.get(nodeId);
     const origin = node?.position || { x: 0, y: 0 };
     dragStateRef.current = {
@@ -2053,12 +2177,19 @@ const FreeLayoutCanvas = ({
       startX: event.clientX,
       startY: event.clientY,
       originX: origin.x,
-      originY: origin.y
+      originY: origin.y,
+      hasMoved: false
     };
     setIsDragging(true);
     window.addEventListener('pointermove', handleNodeDragMove);
     window.addEventListener('pointerup', handleNodeDragEnd);
   }, [nodesById, onSelect, handleNodeDragMove, handleNodeDragEnd]);
+
+  const shouldSuppressSelect = React.useCallback(() => {
+    if (!suppressSelectRef.current) return false;
+    suppressSelectRef.current = false;
+    return true;
+  }, []);
 
   const connectors = React.useMemo(() => {
     const lines = [];
@@ -2150,6 +2281,8 @@ const FreeLayoutCanvas = ({
       lines.push({
         path,
         edgeKey,
+        parentId: node.parentId,
+        childId: node.id,
         isUpstream: upstreamEdgeKeys.has(edgeKey),
         x1: start.x,
         y1: start.y,
@@ -2174,7 +2307,7 @@ const FreeLayoutCanvas = ({
         }}
       >
         <svg
-          className="absolute inset-0 pointer-events-none"
+          className="absolute inset-0"
           style={{ overflow: 'visible' }}
           aria-hidden="true"
         >
@@ -2190,13 +2323,60 @@ const FreeLayoutCanvas = ({
                   stroke="currentColor"
                   strokeWidth={line.isUpstream ? 3 : 2}
                   strokeLinecap="round"
+                  pointerEvents="none"
                 />
-                <circle cx={line.x1} cy={line.y1} r={3} fill="currentColor" />
-                <circle cx={line.x2} cy={line.y2} r={3} fill="currentColor" />
+                <path
+                  d={line.path}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={line.isUpstream ? 18 : 14}
+                  strokeLinecap="round"
+                  pointerEvents="stroke"
+                  onPointerMove={(event) => handleConnectorHover(line, event)}
+                  onPointerLeave={(event) => handleConnectorLeave(event, line.edgeKey)}
+                />
+                <circle cx={line.x1} cy={line.y1} r={3} fill="currentColor" pointerEvents="none" />
+                <circle cx={line.x2} cy={line.y2} r={3} fill="currentColor" pointerEvents="none" />
               </g>
             );
           })}
         </svg>
+
+        {(() => {
+          const connectorInsertAnchor = (showInsertMenuForId && insertAnchor?.edgeKey === showInsertMenuForId)
+            ? insertAnchor
+            : hoveredConnector;
+          if (!connectorInsertAnchor || !connectorInsertAnchor.position) return null;
+          if (isDragging || isPanning) return null;
+          return (
+            <div
+              ref={connectorInsertRef}
+              className="absolute z-30"
+              style={{
+                left: connectorInsertAnchor.position.x,
+                top: connectorInsertAnchor.position.y,
+                transform: 'translate(-50%, -50%)'
+              }}
+              onPointerLeave={handleInsertButtonLeave}
+            >
+              <Dropdown
+                menu={{ items: INSERT_MENU_ITEMS, onClick: handleConnectorInsertMenuClick }}
+                trigger={['click']}
+                open={showInsertMenuForId === connectorInsertAnchor.edgeKey}
+                onOpenChange={(open) => handleConnectorInsertOpenChange(open, connectorInsertAnchor.edgeKey)}
+              >
+                <Button
+                  shape="circle"
+                  size="small"
+                  icon={<Plus size={12} strokeWidth={3} />}
+                  title="Insert Step Here"
+                  onClick={(event) => handleConnectorInsertClick(event, connectorInsertAnchor)}
+                  onPointerDown={(event) => event.stopPropagation()}
+                />
+              </Dropdown>
+            </div>
+          );
+        })()}
 
         {visibleNodes.map((node) => {
           const position = node.position || { x: 0, y: 0 };
@@ -2235,6 +2415,7 @@ const FreeLayoutCanvas = ({
                 renderChildren={false}
                 compactHeader
                 menuId={node.id}
+                shouldSuppressSelect={shouldSuppressSelect}
                 headerDragProps={{
                   onPointerDown: (event) => handleNodeDragStart(node.id, event)
                 }}
