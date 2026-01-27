@@ -867,15 +867,32 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     ));
   }, []);
 
+  const applyNodePositions = useCallback((positions, options = {}) => {
+    if (!positions) return;
+    let hasChanges = false;
+    const nextNodes = nodes.map((node) => {
+      const nextPosition = positions[node.id];
+      if (!nextPosition) return node;
+      if (node.position?.x === nextPosition.x && node.position?.y === nextPosition.y) return node;
+      hasChanges = true;
+      return { ...node, position: { x: nextPosition.x, y: nextPosition.y } };
+    });
+    if (!hasChanges) return;
+    if (options.useHistory) {
+      updateNodes(nextNodes);
+    } else {
+      replaceCurrentNodes(nextNodes);
+    }
+  }, [nodes, updateNodes, replaceCurrentNodes]);
+
   const updateNodePosition = useCallback((id, position) => {
     if (!id || !position) return;
-    const nextNodes = nodes.map((node) => {
-      if (node.id !== id) return node;
-      if (node.position?.x === position.x && node.position?.y === position.y) return node;
-      return { ...node, position: { x: position.x, y: position.y } };
-    });
-    replaceCurrentNodes(nextNodes);
-  }, [nodes, replaceCurrentNodes]);
+    applyNodePositions({ [id]: position });
+  }, [applyNodePositions]);
+
+  const applyAutoLayout = useCallback((positions) => {
+    applyNodePositions(positions, { useHistory: true });
+  }, [applyNodePositions]);
 
   const buildInValue = (values) => values.map((value) => String(value)).join(', ');
 
@@ -2034,6 +2051,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 showInsertMenuForId={showInsertMenuForId}
                 setShowInsertMenuForId={setShowInsertMenuForId}
                 onUpdateNodePosition={updateNodePosition}
+                onAutoLayout={applyAutoLayout}
               />
             ) : (
               <div className="min-w-full inline-flex justify-center p-20 items-start min-h-full">

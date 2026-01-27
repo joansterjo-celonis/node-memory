@@ -17,7 +17,8 @@ import {
   Gauge,
   LinkIcon,
   Minimize2,
-  Share2
+  Share2,
+  Layout
 } from '../ui/icons';
 import { getChildren, countDescendants, getNodeResult, formatNumber } from '../utils/nodeUtils';
 import { normalizeFilters, resolveFilterMode } from '../utils/filterUtils';
@@ -29,6 +30,10 @@ const BRANCH_CONNECTOR_STROKE = 2;
 const FREE_LAYOUT_MIN_SCALE = 0.4;
 const FREE_LAYOUT_MAX_SCALE = 2.2;
 const FREE_LAYOUT_ZOOM_STEP = 1.15;
+const FREE_LAYOUT_DEFAULT_NODE_SIZE = { width: 640, height: 320 };
+const FREE_LAYOUT_BASE_OFFSET = { x: 80, y: 80 };
+const FREE_LAYOUT_MIN_GAP_X = 80;
+const FREE_LAYOUT_MIN_GAP_Y = 60;
 const KPI_LABELS = {
   count: 'Count',
   count_distinct: 'Distinct Count',
@@ -1742,7 +1747,8 @@ const FreeLayoutCanvas = ({
   setShowAddMenuForId,
   showInsertMenuForId,
   setShowInsertMenuForId,
-  onUpdateNodePosition
+  onUpdateNodePosition,
+  onAutoLayout
 }) => {
   const containerRef = React.useRef(null);
   const [viewport, setViewport] = React.useState({ x: 0, y: 0, scale: 1 });
@@ -1797,6 +1803,119 @@ const FreeLayoutCanvas = ({
     }
     return keys;
   }, [selectedNodeId, nodesById]);
+
+  const buildOptimizedLayout = React.useCallback(() => {
+    if (visibleNodes.length === 0) return null;
+    const sizeMap = nodeSizesRef.current;
+    const fallbackSize = FREE_LAYOUT_DEFAULT_NODE_SIZE;
+    const getSize = (nodeId) => sizeMap.get(nodeId) || fallbackSize;
+    const samples = visibleNodes.map((node) => getSize(node.id));
+    const averageWidth = samples.reduce((sum, size) => sum + size.width, 0) / samples.length;
+    const averageHeight = samples.reduce((sum, size) => sum + size.height, 0) / samples.length;
+    const horizontalGap = Math.max(FREE_LAYOUT_MIN_GAP_X, Math.round(averageWidth * 0.15));
+    const verticalGap = Math.max(FREE_LAYOUT_MIN_GAP_Y, Math.round(averageHeight * 0.25));
+    const rootGap = verticalGap * 2;
+    const offset = FREE_LAYOUT_BASE_OFFSET;
+
+    const visibleIds = new Set(visibleNodes.map((node) => node.id));
+    const childrenByParent = new Map();
+    visibleNodes.forEach((node) => {
+      const parentKey = node.parentId;
+      if (!childrenByParent.has(parentKey)) childrenByParent.set(parentKey, []);
+      childrenByParent.get(parentKey).push(node);
+    });
+
+    const roots = visibleNodes.filter((node) => !node.parentId || !visibleIds.has(node.parentId));
+    const depthById = new Map();
+    const assignDepth = (nodeId, depth) => {
+      if (depthById.has(nodeId)) return;
+      depthById.set(nodeId, depth);
+      const children = childrenByParent.get(nodeId) || [];
+      children.forEach((child) => assignDepth(child.id, depth + 1));
+    };
+    roots.forEach((root) => assignDepth(root.id, 0));
+
+    const columnWidths = [];
+    visibleNodes.forEach((node) => {
+      const depth = depthById.get(node.id) ?? 0;
+      const size = getSize(node.id);
+      columnWidths[depth] = Math.max(columnWidths[depth] || 0, size.width);
+    });
+
+    const columnOffsets = [];
+    let currentX = offset.x;
+    columnWidths.forEach((width, depth) => {
+      columnOffsets[depth] = currentX;
+      currentX += width + horizontalGap;
+    });
+
+    const subtreeHeights = new Map();
+    const measureSubtree = (nodeId) => {
+      const size = getSize(nodeId);
+      const children = childrenByParent.get(nodeId) || [];
+      if (children.length === 0) {
+        subtreeHeights.set(nodeId, size.height);
+        return size.height;
+      }
+      let childrenTotal = 0;
+      children.forEach((child, index) => {
+        const childHeight = measureSubtree(child.id);
+        if (index > 0) childrenTotal += verticalGap;
+        childrenTotal += childHeight;
+      });
+      const subtreeHeight = Math.max(size.height, childrenTotal);
+      subtreeHeights.set(nodeId, subtreeHeight);
+      return subtreeHeight;
+    };
+    roots.forEach((root) => measureSubtree(root.id));
+
+    const positions = {};
+    const assignPositions = (nodeId, top) => {
+      const size = getSize(nodeId);
+      const depth = depthById.get(nodeId) ?? 0;
+      const children = childrenByParent.get(nodeId) || [];
+      const subtreeHeight = subtreeHeights.get(nodeId) || size.height;
+      let centerY = top + subtreeHeight / 2;
+
+      if (children.length > 0) {
+        let childrenTotal = 0;
+        children.forEach((child, index) => {
+          const childHeight = subtreeHeights.get(child.id) || getSize(child.id).height;
+          if (index > 0) childrenTotal += verticalGap;
+          childrenTotal += childHeight;
+        });
+        let cursor = top + (subtreeHeight - childrenTotal) / 2;
+        const childCenters = [];
+        children.forEach((child) => {
+          assignPositions(child.id, cursor);
+          const childSize = getSize(child.id);
+          const childPos = positions[child.id];
+          childCenters.push(childPos.y + childSize.height / 2);
+          cursor += (subtreeHeights.get(child.id) || childSize.height) + verticalGap;
+        });
+        centerY = childCenters.reduce((sum, value) => sum + value, 0) / childCenters.length;
+      }
+
+      positions[nodeId] = {
+        x: Math.round(columnOffsets[depth] ?? offset.x),
+        y: Math.round(centerY - size.height / 2)
+      };
+    };
+
+    let rootTop = offset.y;
+    roots.forEach((root) => {
+      assignPositions(root.id, rootTop);
+      rootTop += (subtreeHeights.get(root.id) || getSize(root.id).height) + rootGap;
+    });
+
+    return positions;
+  }, [visibleNodes]);
+
+  const handleAutoLayout = React.useCallback(() => {
+    const positions = buildOptimizedLayout();
+    if (!positions) return;
+    onAutoLayout?.(positions);
+  }, [buildOptimizedLayout, onAutoLayout]);
 
   const handleMeasureNode = React.useCallback((nodeId, width, height) => {
     const prev = nodeSizesRef.current.get(nodeId);
@@ -1944,33 +2063,98 @@ const FreeLayoutCanvas = ({
   const connectors = React.useMemo(() => {
     const lines = [];
     const sizes = nodeSizesRef.current;
+    const getSize = (nodeId) => sizes.get(nodeId) || FREE_LAYOUT_DEFAULT_NODE_SIZE;
+    const getRect = (node) => {
+      const pos = node.position;
+      if (!pos) return null;
+      const size = getSize(node.id);
+      const left = pos.x;
+      const top = pos.y;
+      return {
+        left,
+        top,
+        right: left + size.width,
+        bottom: top + size.height,
+        centerX: left + size.width / 2,
+        centerY: top + size.height / 2,
+        width: size.width,
+        height: size.height
+      };
+    };
+    const resolveAnchor = (rect, side) => {
+      if (side === 'left') return { x: rect.left, y: rect.centerY };
+      if (side === 'right') return { x: rect.right, y: rect.centerY };
+      if (side === 'top') return { x: rect.centerX, y: rect.top };
+      return { x: rect.centerX, y: rect.bottom };
+    };
+    const chooseSides = (parentRect, childRect) => {
+      const horizontalSeparation = Math.max(
+        0,
+        childRect.left - parentRect.right,
+        parentRect.left - childRect.right
+      );
+      const verticalSeparation = Math.max(
+        0,
+        childRect.top - parentRect.bottom,
+        parentRect.top - childRect.bottom
+      );
+      let orientation = 'vertical';
+      if (horizontalSeparation > verticalSeparation) {
+        orientation = 'horizontal';
+      } else if (horizontalSeparation === verticalSeparation) {
+        const dx = childRect.centerX - parentRect.centerX;
+        const dy = childRect.centerY - parentRect.centerY;
+        orientation = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical';
+      }
+      if (orientation === 'horizontal') {
+        const isRight = childRect.centerX >= parentRect.centerX;
+        return {
+          orientation,
+          parentSide: isRight ? 'right' : 'left',
+          childSide: isRight ? 'left' : 'right'
+        };
+      }
+      const isBelow = childRect.centerY >= parentRect.centerY;
+      return {
+        orientation,
+        parentSide: isBelow ? 'bottom' : 'top',
+        childSide: isBelow ? 'top' : 'bottom'
+      };
+    };
     const visibleIds = new Set(visibleNodes.map(node => node.id));
     visibleNodes.forEach((node) => {
       if (!node.parentId || !visibleIds.has(node.parentId)) return;
       const parent = nodesById.get(node.parentId);
       if (!parent) return;
-      const parentPos = parent.position;
-      const childPos = node.position;
-      const parentSize = sizes.get(parent.id);
-      const childSize = sizes.get(node.id);
-      if (!parentPos || !childPos || !parentSize || !childSize) return;
-      const x1 = parentPos.x + parentSize.width / 2;
-      const y1 = parentPos.y + parentSize.height;
-      const x2 = childPos.x + childSize.width / 2;
-      const y2 = childPos.y;
-      const deltaY = Math.max(60, Math.abs(y2 - y1) * 0.5);
-      const c1y = y1 + deltaY;
-      const c2y = y2 - deltaY;
-      const path = `M ${x1} ${y1} C ${x1} ${c1y}, ${x2} ${c2y}, ${x2} ${y2}`;
+      const parentRect = getRect(parent);
+      const childRect = getRect(node);
+      if (!parentRect || !childRect) return;
+      const { orientation, parentSide, childSide } = chooseSides(parentRect, childRect);
+      const start = resolveAnchor(parentRect, parentSide);
+      const end = resolveAnchor(childRect, childSide);
+      let path = '';
+      if (orientation === 'horizontal') {
+        const deltaX = Math.max(60, Math.abs(end.x - start.x) * 0.5);
+        const direction = end.x >= start.x ? 1 : -1;
+        const c1x = start.x + deltaX * direction;
+        const c2x = end.x - deltaX * direction;
+        path = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
+      } else {
+        const deltaY = Math.max(60, Math.abs(end.y - start.y) * 0.5);
+        const direction = end.y >= start.y ? 1 : -1;
+        const c1y = start.y + deltaY * direction;
+        const c2y = end.y - deltaY * direction;
+        path = `M ${start.x} ${start.y} C ${start.x} ${c1y}, ${end.x} ${c2y}, ${end.x} ${end.y}`;
+      }
       const edgeKey = `${node.parentId}::${node.id}`;
       lines.push({
         path,
         edgeKey,
         isUpstream: upstreamEdgeKeys.has(edgeKey),
-        x1,
-        y1,
-        x2,
-        y2
+        x1: start.x,
+        y1: start.y,
+        x2: end.x,
+        y2: end.y
       });
     });
     return lines;
@@ -2080,6 +2264,15 @@ const FreeLayoutCanvas = ({
           title="Reset zoom"
         >
           {Math.round(viewport.scale * 100)}%
+        </button>
+        <div className="my-1 h-px bg-gray-200 dark:bg-slate-700" />
+        <button
+          onClick={handleAutoLayout}
+          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800 flex items-center justify-center"
+          title="Optimize layout"
+          aria-label="Optimize layout"
+        >
+          <Layout size={14} />
         </button>
       </div>
     </div>
