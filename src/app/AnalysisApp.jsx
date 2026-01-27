@@ -256,17 +256,6 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
   const findNodeById = (id, nodesList = nodes) => nodesList.find(node => node.id === id);
 
-  const getNearestBranchLabel = (startId, nodesList = nodes) => {
-    let currentId = startId;
-    while (currentId) {
-      const current = findNodeById(currentId, nodesList);
-      if (!current) break;
-      if (current.branchName) return current.branchName;
-      currentId = current.parentId;
-    }
-    return '';
-  };
-
   const collectSubtreeIds = (rootId, nodesList = nodes) => {
     const ids = new Set();
     const stack = [rootId];
@@ -282,39 +271,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     return ids;
   };
 
-  const collectBranchSubtreeIds = (rootId, nodesList = nodes) => {
-    const ids = new Set();
-    const stack = [rootId];
-    while (stack.length > 0) {
-      const currentId = stack.pop();
-      if (ids.has(currentId)) continue;
-      const current = findNodeById(currentId, nodesList);
-      if (!current) continue;
-      ids.add(currentId);
-      const children = getChildren(nodesList, currentId);
-      children.forEach((child) => {
-        if (child.branchName && child.id !== rootId) return;
-        stack.push(child.id);
-      });
-    }
-    return ids;
-  };
-
-  const applyBranchLabelToSubtree = (nodesList, rootId, nextBranchLabel) => {
-    if (!nextBranchLabel) return nodesList;
-    const ids = collectBranchSubtreeIds(rootId, nodesList);
-    return nodesList.map((node) => {
-      if (!ids.has(node.id)) return node;
-      if (node.titleIsCustom === true) return node;
-      return { ...node, title: nextBranchLabel };
-    });
-  };
-
-  const resolveNodeTitle = (parentId, branchName, fallbackTitle) => {
-    const inherited = getNearestBranchLabel(parentId);
-    const label = branchName || inherited;
-    return label || fallbackTitle;
-  };
+  const resolveNodeTitle = (parentId, branchName, fallbackTitle) => fallbackTitle;
 
   const EXPLORATION_STORAGE_KEY = 'nma-explorations';
   const loadExplorations = () => {
@@ -374,12 +331,6 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       if (isMeta) return { ...n, ...updates };
       return { ...n, params: updates };
     });
-
-    if (isMeta && updates && Object.prototype.hasOwnProperty.call(updates, 'branchName') && targetNode) {
-      if (updates.branchName !== targetNode.branchName) {
-        newNodes = applyBranchLabelToSubtree(newNodes, id, updates.branchName);
-      }
-    }
 
     if (silent) {
       const newHistory = [...history];
@@ -667,6 +618,21 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     assistantPlan: []
   });
 
+  const COMPONENT_TITLE_BY_SUBTYPE = {
+    TABLE: 'Table',
+    PIVOT: 'Pivot Table',
+    AI: 'AI Assistant',
+    CHART: 'Chart',
+    KPI: 'KPI',
+    GAUGE: 'Gauge'
+  };
+
+  const getComponentTitle = (subtype) => {
+    if (!subtype) return 'Component';
+    const key = String(subtype).toUpperCase();
+    return COMPONENT_TITLE_BY_SUBTYPE[key] || `${key} View`;
+  };
+
   const cloneSubtree = (rootId, newParentId) => {
     const mapping = new Map();
     const reverseMapping = new Map();
@@ -701,7 +667,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     if (!parent) return;
     const siblings = getChildren(nodes, parentId);
     const branchName = siblings.length > 0 ? `Fork ${siblings.length + 1}` : undefined;
-    const title = resolveNodeTitle(parentId, branchName, 'New Step');
+    const fallbackTitle = type === 'COMPONENT' ? getComponentTitle(subtype) : 'New Step';
+    const title = resolveNodeTitle(parentId, branchName, fallbackTitle);
     const newId = createNodeId();
     const entangledRootId = parent.entangledRootId;
 
@@ -713,12 +680,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         nextNodes = nextNodes.map((node) => (
           node.id === existingChild.id ? { ...node, branchName: firstBranchLabel } : node
         ));
-        nextNodes = applyBranchLabelToSubtree(nextNodes, existingChild.id, firstBranchLabel);
         if (existingChild.entangledPeerId) {
           nextNodes = nextNodes.map((node) => (
             node.id === existingChild.entangledPeerId ? { ...node, branchName: firstBranchLabel } : node
           ));
-          nextNodes = applyBranchLabelToSubtree(nextNodes, existingChild.entangledPeerId, firstBranchLabel);
         }
       }
     }
@@ -737,7 +702,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     nextNodes.push(newNode);
     if (parent.entangledPeerId) {
       const peerId = createNodeId();
-      const peerTitle = resolveNodeTitle(parent.entangledPeerId, branchName, 'New Step');
+      const peerTitle = resolveNodeTitle(parent.entangledPeerId, branchName, fallbackTitle);
       newNode.entangledPeerId = peerId;
       newNode.entangledRootId = entangledRootId;
       nextNodes.push({
@@ -758,7 +723,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const insertNode = (type, parentId, subtype = 'TABLE') => {
     const parent = findNodeById(parentId);
     if (!parent) return;
-    const title = resolveNodeTitle(parentId, undefined, 'Inserted Step');
+    const fallbackTitle = type === 'COMPONENT' ? getComponentTitle(subtype) : 'Inserted Step';
+    const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
     const newId = createNodeId();
     const entangledRootId = parent.entangledRootId;
     const newNode = {
@@ -776,7 +742,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     if (parent.entangledPeerId) {
       const peerParentId = parent.entangledPeerId;
       const peerId = createNodeId();
-      const peerTitle = resolveNodeTitle(peerParentId, undefined, 'Inserted Step');
+      const peerTitle = resolveNodeTitle(peerParentId, undefined, fallbackTitle);
       newNode.entangledPeerId = peerId;
       newNode.entangledRootId = entangledRootId;
       updatedNodes = updatedNodes.map(n => n.parentId === peerParentId ? { ...n, parentId: peerId } : n);
