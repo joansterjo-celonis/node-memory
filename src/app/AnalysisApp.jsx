@@ -28,6 +28,7 @@ const createInitialNodes = () => ([
 
 const TABLE_DENSITY_STORAGE_KEY = 'nma-table-density';
 const DEFAULT_TABLE_DENSITY = 'comfortable';
+const DEFAULT_ENTANGLED_COLOR = '#facc15';
 const readStoredTableDensity = () => {
   if (typeof window === 'undefined' || !window.localStorage) return DEFAULT_TABLE_DENSITY;
   try {
@@ -111,7 +112,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   // -------------------------------------------------------------------
   const [history, setHistory] = useState([createInitialNodes()]);
   const [historyIndex, setHistoryIndex] = useState(0);
-  const nodes = history[historyIndex];
+  const safeHistoryIndex = Math.max(0, Math.min(historyIndex, history.length - 1));
+  const nodes = Array.isArray(history[safeHistoryIndex]) ? history[safeHistoryIndex] : [];
 
   const [selectedNodeId, setSelectedNodeId] = useState('node-start');
   const [showAddMenuForId, setShowAddMenuForId] = useState(null);
@@ -146,6 +148,12 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       setActiveFilterTarget(null);
     }
   }, [activeFilterTarget, selectedNodeId]);
+
+  useEffect(() => {
+    if (historyIndex !== safeHistoryIndex) {
+      setHistoryIndex(safeHistoryIndex);
+    }
+  }, [historyIndex, safeHistoryIndex]);
 
   // -------------------------------------------------------------------
   // File ingestion pipeline (triggered by explicit "Ingest Data" button)
@@ -250,15 +258,20 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   // History helpers
   // -------------------------------------------------------------------
   const updateNodes = (newNodes) => {
-    const newHistory = history.slice(0, historyIndex + 1);
+    const newHistory = history.slice(0, safeHistoryIndex + 1);
     newHistory.push(newNodes);
     setHistory(newHistory);
     setHistoryIndex(newHistory.length - 1);
   };
 
   const replaceCurrentNodes = (newNodes) => {
+    if (history.length === 0) {
+      setHistory([newNodes]);
+      setHistoryIndex(0);
+      return;
+    }
     const newHistory = [...history];
-    newHistory[historyIndex] = newNodes;
+    newHistory[safeHistoryIndex] = newNodes;
     setHistory(newHistory);
   };
 
@@ -281,6 +294,43 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     }
     return ids;
   };
+
+  const resolveEntangledColor = useCallback((rootId) => {
+    if (!rootId) return DEFAULT_ENTANGLED_COLOR;
+    const match = nodes.find((node) => node.entangledRootId === rootId && node.entangledColor);
+    return match?.entangledColor || DEFAULT_ENTANGLED_COLOR;
+  }, [nodes]);
+
+  const updateEntangledGroupColor = useCallback((rootId, color) => {
+    if (!rootId || !color || !Array.isArray(nodes)) return;
+    let targetRootId = rootId;
+    let fallbackIds = null;
+    const hasDirectMatch = nodes.some((node) => node.entangledRootId === targetRootId);
+    if (!hasDirectMatch) {
+      const match = nodes.find((node) => (
+        node.id === targetRootId || node.entangledPeerId === targetRootId
+      ));
+      if (match?.entangledRootId) {
+        targetRootId = match.entangledRootId;
+      } else if (match) {
+        targetRootId = null;
+        fallbackIds = new Set([match.id, match.entangledPeerId].filter(Boolean));
+      }
+    }
+    if (!targetRootId && (!fallbackIds || fallbackIds.size === 0)) return;
+    const nextNodes = nodes.map((node) => {
+      if (targetRootId) {
+        return node.entangledRootId === targetRootId ? { ...node, entangledColor: color } : node;
+      }
+      if (fallbackIds && (fallbackIds.has(node.id) || fallbackIds.has(node.entangledPeerId))) {
+        return { ...node, entangledColor: color };
+      }
+      return node;
+    });
+    const changed = nextNodes.some((node, index) => node !== nodes[index]);
+    if (!changed) return;
+    updateNodes(nextNodes);
+  }, [nodes, updateNodes]);
 
   const resolveNodeTitle = (parentId, branchName, fallbackTitle) => fallbackTitle;
 
@@ -695,6 +745,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const title = resolveNodeTitle(parentId, branchName, fallbackTitle);
     const newId = createNodeId();
     const entangledRootId = parent.entangledRootId;
+    const entangledColor = entangledRootId ? resolveEntangledColor(entangledRootId) : undefined;
 
     let nextNodes = [...nodes];
     if (siblings.length === 1) {
@@ -729,13 +780,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       const peerTitle = resolveNodeTitle(parent.entangledPeerId, branchName, fallbackTitle);
       newNode.entangledPeerId = peerId;
       newNode.entangledRootId = entangledRootId;
+      newNode.entangledColor = entangledColor;
       nextNodes.push({
         ...newNode,
         id: peerId,
         parentId: parent.entangledPeerId,
         title: peerTitle,
         entangledPeerId: newId,
-        entangledRootId
+        entangledRootId,
+        entangledColor
       });
     }
 
@@ -751,6 +804,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
     const newId = createNodeId();
     const entangledRootId = parent.entangledRootId;
+    const entangledColor = entangledRootId ? resolveEntangledColor(entangledRootId) : undefined;
     const targetChild = childId ? findNodeById(childId) : null;
     const shouldTargetChild = !!targetChild && targetChild.parentId === parentId;
     const nextPosition = (insertPosition && Number.isFinite(insertPosition.x) && Number.isFinite(insertPosition.y))
@@ -786,6 +840,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       const shouldTargetPeerChild = !!peerTargetChild && peerTargetChild.parentId === peerParentId;
       newNode.entangledPeerId = peerId;
       newNode.entangledRootId = entangledRootId;
+      newNode.entangledColor = entangledColor;
       updatedNodes = updatedNodes.map((node) => {
         if (shouldTargetPeerChild) {
           return node.id === peerTargetChildId ? { ...node, parentId: peerId } : node;
@@ -798,7 +853,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         ...nodeTemplate,
         title: peerTitle,
         entangledPeerId: newId,
-        entangledRootId
+        entangledRootId,
+        entangledColor
       });
     }
 
@@ -856,7 +912,12 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         .filter(node => !peerIds.has(node.id))
         .map((node) => (
           selfIds.has(node.id)
-            ? { ...node, entangledPeerId: undefined, entangledRootId: undefined }
+            ? {
+              ...node,
+              entangledPeerId: undefined,
+              entangledRootId: undefined,
+              entangledColor: undefined
+            }
             : node
         ));
       updateNodes(nextNodes);
@@ -864,13 +925,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     }
 
     const groupId = `entangled-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const entangledColor = DEFAULT_ENTANGLED_COLOR;
     const { newNodes, mapping, reverseMapping } = cloneSubtree(target.id, target.parentId);
     const updatedExisting = nodes.map((node) => {
       if (!mapping.has(node.id)) return node;
       return {
         ...node,
         entangledPeerId: mapping.get(node.id),
-        entangledRootId: groupId
+        entangledRootId: groupId,
+        entangledColor
       };
     });
     const mirrored = newNodes.map((node) => {
@@ -878,7 +941,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       return {
         ...node,
         entangledPeerId: originalId,
-        entangledRootId: groupId
+        entangledRootId: groupId,
+        entangledColor
       };
     });
     updateNodes([...updatedExisting, ...mirrored]);
@@ -946,6 +1010,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     if (!parent) return;
     const newId = createNodeId();
     const entangledRootId = parent.entangledRootId;
+    const entangledColor = entangledRootId ? resolveEntangledColor(entangledRootId) : undefined;
     const fallbackTitle = getDefaultNodeTitle('FILTER');
     const title = resolveNodeTitle(parentId, undefined, fallbackTitle);
     const filterPayload = { id: createFilterId(), field, operator, value, mode };
@@ -965,13 +1030,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       const peerTitle = resolveNodeTitle(parent.entangledPeerId, undefined, fallbackTitle);
       newNode.entangledPeerId = peerId;
       newNode.entangledRootId = entangledRootId;
+      newNode.entangledColor = entangledColor;
       nextNodes.push({
         ...newNode,
         id: peerId,
         parentId: parent.entangledPeerId,
         title: peerTitle,
         entangledPeerId: newId,
-        entangledRootId
+        entangledRootId,
+        entangledColor
       });
     }
 
@@ -1671,6 +1738,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     let parentId = nodeId;
     let peerParentId = baseNode.entangledPeerId;
     const entangledRootId = baseNode.entangledRootId;
+    const entangledColor = entangledRootId ? resolveEntangledColor(entangledRootId) : undefined;
     const newNodes = [];
     const peerNodes = [];
 
@@ -1696,13 +1764,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         const peerTitle = resolveNodeTitle(peerParentId, undefined, fallbackTitle);
         newNode.entangledPeerId = peerId;
         newNode.entangledRootId = entangledRootId;
+        newNode.entangledColor = entangledColor;
         peerNodes.push({
           ...newNode,
           id: peerId,
           parentId: peerParentId,
           title: peerTitle,
           entangledPeerId: newId,
-          entangledRootId
+          entangledRootId,
+          entangledColor
         });
         peerParentId = peerId;
       }
@@ -2076,6 +2146,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 setShowInsertMenuForId={setShowInsertMenuForId}
                 onUpdateNodePosition={updateNodePosition}
                 onAutoLayout={applyAutoLayout}
+                onEntangledColorChange={updateEntangledGroupColor}
               />
             ) : (
               <div className="min-w-full inline-flex justify-center p-20 items-start min-h-full">
@@ -2107,6 +2178,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                   branchSelectionByNodeId={branchSelectionByNodeId}
                   onSelectBranch={setBranchSelection}
                   onToggleEntangle={toggleEntangledBranch}
+                  onEntangledColorChange={updateEntangledGroupColor}
                 />
               </div>
             )}
