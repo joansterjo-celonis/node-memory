@@ -25,6 +25,9 @@ import WorldMapChart from '../ui/WorldMapChart';
 
 const BRANCH_CONNECTOR_HEIGHT = 16;
 const BRANCH_CONNECTOR_STROKE = 2;
+const FREE_LAYOUT_MIN_SCALE = 0.4;
+const FREE_LAYOUT_MAX_SCALE = 2.2;
+const FREE_LAYOUT_ZOOM_STEP = 1.15;
 const KPI_LABELS = {
   count: 'Count',
   count_distinct: 'Distinct Count',
@@ -1317,6 +1320,10 @@ const FreeLayoutCanvas = ({
   const panStateRef = React.useRef(null);
   const dragStateRef = React.useRef(null);
   const dragFrameRef = React.useRef(null);
+  const clampScale = React.useCallback(
+    (value) => Math.min(FREE_LAYOUT_MAX_SCALE, Math.max(FREE_LAYOUT_MIN_SCALE, value)),
+    []
+  );
 
   React.useEffect(() => {
     viewportRef.current = viewport;
@@ -1346,6 +1353,17 @@ const FreeLayoutCanvas = ({
     [nodes, hiddenNodeIds]
   );
 
+  const upstreamEdgeKeys = React.useMemo(() => {
+    const keys = new Set();
+    if (!selectedNodeId) return keys;
+    let current = nodesById.get(selectedNodeId);
+    while (current?.parentId) {
+      keys.add(`${current.parentId}::${current.id}`);
+      current = nodesById.get(current.parentId);
+    }
+    return keys;
+  }, [selectedNodeId, nodesById]);
+
   const handleMeasureNode = React.useCallback((nodeId, width, height) => {
     const prev = nodeSizesRef.current.get(nodeId);
     if (prev && prev.width === width && prev.height === height) return;
@@ -1353,24 +1371,55 @@ const FreeLayoutCanvas = ({
     setLayoutVersion((version) => version + 1);
   }, []);
 
+  const zoomBy = React.useCallback((factor, point) => {
+    if (!point) return;
+    setViewport((prev) => {
+      const nextScale = clampScale(prev.scale * factor);
+      if (nextScale === prev.scale) return prev;
+      const ratio = nextScale / prev.scale;
+      return {
+        scale: nextScale,
+        x: point.x - (point.x - prev.x) * ratio,
+        y: point.y - (point.y - prev.y) * ratio
+      };
+    });
+  }, [clampScale]);
+
   const handleWheel = React.useCallback((event) => {
-    if (!event.shiftKey && !event.ctrlKey) return;
+    const isZoomShortcut = event.shiftKey || event.ctrlKey || event.metaKey;
+    if (!isZoomShortcut) return;
     event.preventDefault();
     const container = containerRef.current;
     if (!container) return;
     const rect = container.getBoundingClientRect();
-    const pointerX = event.clientX - rect.left;
-    const pointerY = event.clientY - rect.top;
-    const zoomFactor = Math.exp(-event.deltaY * 0.001);
-    setViewport((prev) => {
-      const nextScale = Math.min(2.2, Math.max(0.4, prev.scale * zoomFactor));
-      const ratio = nextScale / prev.scale;
-      return {
-        scale: nextScale,
-        x: pointerX - (pointerX - prev.x) * ratio,
-        y: pointerY - (pointerY - prev.y) * ratio
-      };
-    });
+    const pointer = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
+    const dominantDelta = Math.abs(event.deltaY) > Math.abs(event.deltaX)
+      ? event.deltaY
+      : event.deltaX;
+    const zoomFactor = Math.exp(-dominantDelta * 0.001);
+    zoomBy(zoomFactor, pointer);
+  }, [zoomBy]);
+
+  const getViewportCenter = React.useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return null;
+    const rect = container.getBoundingClientRect();
+    return { x: rect.width / 2, y: rect.height / 2 };
+  }, []);
+
+  const handleZoomIn = React.useCallback(() => {
+    zoomBy(FREE_LAYOUT_ZOOM_STEP, getViewportCenter());
+  }, [zoomBy, getViewportCenter]);
+
+  const handleZoomOut = React.useCallback(() => {
+    zoomBy(1 / FREE_LAYOUT_ZOOM_STEP, getViewportCenter());
+  }, [zoomBy, getViewportCenter]);
+
+  const handleResetZoom = React.useCallback(() => {
+    setViewport({ x: 0, y: 0, scale: 1 });
   }, []);
 
   React.useEffect(() => {
@@ -1479,10 +1528,19 @@ const FreeLayoutCanvas = ({
       const c1y = y1 + deltaY;
       const c2y = y2 - deltaY;
       const path = `M ${x1} ${y1} C ${x1} ${c1y}, ${x2} ${c2y}, ${x2} ${y2}`;
-      lines.push({ path });
+      const edgeKey = `${node.parentId}::${node.id}`;
+      lines.push({
+        path,
+        edgeKey,
+        isUpstream: upstreamEdgeKeys.has(edgeKey),
+        x1,
+        y1,
+        x2,
+        y2
+      });
     });
     return lines;
-  }, [visibleNodes, nodesById, layoutVersion]);
+  }, [visibleNodes, nodesById, layoutVersion, upstreamEdgeKeys]);
 
   return (
     <div
@@ -1498,20 +1556,28 @@ const FreeLayoutCanvas = ({
         }}
       >
         <svg
-          className="absolute inset-0 pointer-events-none text-gray-300 dark:text-slate-600"
+          className="absolute inset-0 pointer-events-none"
           style={{ overflow: 'visible' }}
           aria-hidden="true"
         >
-          {connectors.map((line, index) => (
-            <path
-              key={`${line.path}-${index}`}
-              d={line.path}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={2}
-              strokeLinecap="round"
-            />
-          ))}
+          {connectors.map((line, index) => {
+            const colorClass = line.isUpstream
+              ? 'text-blue-500 dark:text-blue-300'
+              : 'text-gray-300 dark:text-slate-600';
+            return (
+              <g key={`${line.edgeKey}-${index}`} className={colorClass}>
+                <path
+                  d={line.path}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={line.isUpstream ? 3 : 2}
+                  strokeLinecap="round"
+                />
+                <circle cx={line.x1} cy={line.y1} r={3} fill="currentColor" />
+                <circle cx={line.x2} cy={line.y2} r={3} fill="currentColor" />
+              </g>
+            );
+          })}
         </svg>
 
         {visibleNodes.map((node) => {
@@ -1554,6 +1620,29 @@ const FreeLayoutCanvas = ({
             </FreeLayoutNode>
           );
         })}
+      </div>
+      <div className="absolute right-4 top-4 z-20 flex flex-col gap-1 rounded-lg border border-gray-200 bg-white/90 p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+        <button
+          onClick={handleZoomIn}
+          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800"
+          title="Zoom in"
+        >
+          +
+        </button>
+        <button
+          onClick={handleZoomOut}
+          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800"
+          title="Zoom out"
+        >
+          −
+        </button>
+        <button
+          onClick={handleResetZoom}
+          className="h-7 w-7 rounded text-[10px] font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800"
+          title="Reset zoom"
+        >
+          {Math.round(viewport.scale * 100)}%
+        </button>
       </div>
     </div>
   );
