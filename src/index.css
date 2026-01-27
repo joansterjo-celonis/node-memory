@@ -77,3 +77,38 @@
   font-size: 13px;
   line-height: 1.2;
 }
+
+/* Free layout canvas + compact node header */
+.free-layout-canvas {
+  cursor: default;
+}
+
+.free-layout-canvas.is-panning {
+  cursor: grabbing;
+}
+
+.node-drag-handle {
+  cursor: grab;
+}
+
+.node-drag-handle:active {
+  cursor: grabbing;
+}
+
+.node-card-header--compact {
+  padding: 8px 12px;
+  gap: 8px;
+}
+
+.node-card--compact .node-card-icon {
+  width: 32px;
+  height: 32px;
+}
+
+.node-card--compact .node-card-title {
+  font-size: 13px;
+}
+
+.node-card--compact .node-card-subtitle {
+  font-size: 10px;
+}

@@ -4,7 +4,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Button, Card, Dropdown, Empty, Modal, Space, Tag, Typography } from 'antd';
 import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
-import { TreeNode } from '../components/TreeNode';
+import { TreeNode, FreeLayoutCanvas } from '../components/TreeNode';
 import { Layout, Database, AppsIcon, Settings, Undo, Redo, TableIcon, X, Plus, Trash2, Play, Save } from '../ui/icons';
 import { parseCSVFile, readFileAsArrayBuffer, parseXLSX, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
 import { getChildren, getCalculationOrder, getNodeResult } from '../utils/nodeUtils';
@@ -48,6 +48,47 @@ const getDefaultStatsPanelRect = () => {
   return { x, y, width, height };
 };
 
+const buildDefaultFreeLayout = (nodesToLayout) => {
+  const positions = {};
+  const childrenByParent = new Map();
+  nodesToLayout.forEach((node) => {
+    const list = childrenByParent.get(node.parentId) || [];
+    list.push(node);
+    childrenByParent.set(node.parentId, list);
+  });
+
+  const columnGap = 720;
+  const rowGap = 380;
+  const offset = { x: 80, y: 80 };
+  let leafIndex = 0;
+
+  const assign = (nodeId, depth) => {
+    const children = childrenByParent.get(nodeId) || [];
+    if (children.length === 0) {
+      const y = leafIndex * rowGap;
+      positions[nodeId] = { x: depth * columnGap, y };
+      leafIndex += 1;
+      return y;
+    }
+    const childYs = children.map(child => assign(child.id, depth + 1));
+    const y = childYs.reduce((sum, value) => sum + value, 0) / childYs.length;
+    positions[nodeId] = { x: depth * columnGap, y };
+    return y;
+  };
+
+  const roots = nodesToLayout.filter(node => node.parentId === null);
+  roots.forEach(root => assign(root.id, 0));
+
+  Object.keys(positions).forEach((id) => {
+    positions[id] = {
+      x: positions[id].x + offset.x,
+      y: positions[id].y + offset.y
+    };
+  });
+
+  return positions;
+};
+
 const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   // -------------------------------------------------------------------
   // Ingestion state
@@ -76,6 +117,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [showInsertMenuForId, setShowInsertMenuForId] = useState(null);
   const [showDataModel, setShowDataModel] = useState(false);
   const [viewMode, setViewMode] = useState('canvas');
+  const [renderMode, setRenderMode] = useState('classic');
   const [dataModelSorts, setDataModelSorts] = useState({});
   const [explorations, setExplorations] = useState([]);
   const [activeExplorationId, setActiveExplorationId] = useState(null);
@@ -85,6 +127,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [isStatsDetached, setIsStatsDetached] = useState(false);
   const [statsPanelRect, setStatsPanelRect] = useState(getDefaultStatsPanelRect);
   const [isPropertiesCollapsed, setIsPropertiesCollapsed] = useState(false);
+  const [entangledRootIds, setEntangledRootIds] = useState(() => new Set());
+  const [branchSelectionByNodeId, setBranchSelectionByNodeId] = useState({});
   const statsDragStateRef = useRef(null);
   const statsDragFrameRef = useRef(null);
   const statsResizeStateRef = useRef(null);
@@ -199,6 +243,12 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setHistoryIndex(newHistory.length - 1);
   };
 
+  const replaceCurrentNodes = (newNodes) => {
+    const newHistory = [...history];
+    newHistory[historyIndex] = newNodes;
+    setHistory(newHistory);
+  };
+
   const undo = () => { if (historyIndex > 0) setHistoryIndex(historyIndex - 1); };
   const redo = () => { if (historyIndex < history.length - 1) setHistoryIndex(historyIndex + 1); };
 
@@ -232,6 +282,23 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       // Ignore storage errors.
     }
   }, [tableDensity]);
+
+  useEffect(() => {
+    if (renderMode !== 'freeLayout') return;
+    const needsLayout = nodes.some((node) => (
+      !node.position || !Number.isFinite(node.position.x) || !Number.isFinite(node.position.y)
+    ));
+    if (!needsLayout) return;
+    const defaults = buildDefaultFreeLayout(nodes);
+    const nextNodes = nodes.map((node) => {
+      if (node.position && Number.isFinite(node.position.x) && Number.isFinite(node.position.y)) {
+        return node;
+      }
+      const fallback = defaults[node.id] || { x: 80, y: 80 };
+      return { ...node, position: { x: fallback.x, y: fallback.y } };
+    });
+    replaceCurrentNodes(nextNodes);
+  }, [renderMode, nodes, buildDefaultFreeLayout, replaceCurrentNodes]);
 
   // -------------------------------------------------------------------
   // Node updates (params + metadata)
@@ -601,6 +668,35 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     newHistory[historyIndex] = newNodes;
     setHistory(newHistory);
   };
+
+  const toggleEntangledRoot = useCallback((id) => {
+    setEntangledRootIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const setBranchSelection = useCallback((parentId, childId) => {
+    if (!parentId || !childId) return;
+    setBranchSelectionByNodeId(prev => (
+      prev[parentId] === childId ? prev : { ...prev, [parentId]: childId }
+    ));
+  }, []);
+
+  const updateNodePosition = useCallback((id, position) => {
+    if (!id || !position) return;
+    const nextNodes = nodes.map((node) => {
+      if (node.id !== id) return node;
+      if (node.position?.x === position.x && node.position?.y === position.y) return node;
+      return { ...node, position: { x: position.x, y: position.y } };
+    });
+    replaceCurrentNodes(nextNodes);
+  }, [nodes, replaceCurrentNodes]);
 
   const buildInValue = (values) => values.map((value) => String(value)).join(', ');
 
@@ -1366,6 +1462,48 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const selectedSchema = selectedResult?.schema || [];
   const selectedData = selectedResult?.sampleRows || selectedResult?.data || [];
 
+  const renderModeLabels = {
+    classic: 'Classic',
+    entangled: 'Entangled',
+    singleStream: 'Single stream',
+    freeLayout: 'Free layout'
+  };
+  const renderModeMenu = useMemo(() => ({
+    items: [
+      { key: 'classic', label: 'Classic' },
+      {
+        key: 'entangled',
+        label: (
+          <Space size="small">
+            <span>Entangled</span>
+            <Tag color="gold">Beta</Tag>
+          </Space>
+        )
+      },
+      {
+        key: 'singleStream',
+        label: (
+          <Space size="small">
+            <span>Single stream</span>
+            <Tag color="gold">Beta</Tag>
+          </Space>
+        )
+      },
+      {
+        key: 'freeLayout',
+        label: (
+          <Space size="small">
+            <span>Free layout</span>
+            <Tag color="gold">Beta</Tag>
+          </Space>
+        )
+      }
+    ],
+    selectable: true,
+    selectedKeys: [renderMode],
+    onClick: ({ key }) => setRenderMode(key)
+  }), [renderMode]);
+
   const settingsMenu = useMemo(() => ({
     items: [
       {
@@ -1413,6 +1551,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const dataModelCellPadding = tableDensity === 'dense' ? 'p-2' : 'p-3';
   const dataModelTextSize = tableDensity === 'dense' ? 'text-xs' : 'text-sm';
   const dataModelHeaderTextSize = tableDensity === 'dense' ? 'text-[11px]' : 'text-xs';
+  const activeRenderModeLabel = renderModeLabels[renderMode] || 'Classic';
 
   // -------------------------------------------------------------------
   // Render
@@ -1471,6 +1610,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     aria-label="Redo"
                   />
                 </Space.Compact>
+                <Dropdown menu={renderModeMenu} trigger={['click']} placement="bottomRight">
+                  <Button icon={<Layout size={14} />}>
+                    {activeRenderModeLabel}
+                  </Button>
+                </Dropdown>
                 <Button type="primary" icon={<Save size={14} />} onClick={saveExploration}>
                   Save & Exit
                 </Button>
@@ -1568,15 +1712,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           </div>
         ) : (
           <div
-            className="flex-1 overflow-auto bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] bg-slate-50 dark:bg-slate-950 dark:bg-none cursor-grab active:cursor-grabbing"
+            className={renderMode === 'freeLayout'
+              ? 'flex-1 overflow-hidden bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-slate-50 dark:bg-slate-950 dark:bg-none'
+              : 'flex-1 overflow-auto bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-slate-50 dark:bg-slate-950 dark:bg-none cursor-grab active:cursor-grabbing'}
             onClick={() => {
               setShowAddMenuForId(null);
               setShowInsertMenuForId(null);
             }}
           >
-            <div className="min-w-full inline-flex justify-center p-20 items-start min-h-full">
-              <TreeNode
-                nodeId="node-start"
+            {renderMode === 'freeLayout' ? (
+              <FreeLayoutCanvas
                 nodes={nodes}
                 selectedNodeId={selectedNodeId}
                 chainData={chainData}
@@ -1595,8 +1740,38 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 setShowAddMenuForId={setShowAddMenuForId}
                 showInsertMenuForId={showInsertMenuForId}
                 setShowInsertMenuForId={setShowInsertMenuForId}
+                onUpdateNodePosition={updateNodePosition}
               />
-            </div>
+            ) : (
+              <div className="min-w-full inline-flex justify-center p-20 items-start min-h-full">
+                <TreeNode
+                  nodeId="node-start"
+                  nodes={nodes}
+                  selectedNodeId={selectedNodeId}
+                  chainData={chainData}
+                  tableDensity={tableDensity}
+                  onSelect={handleSelect}
+                  onAdd={addNode}
+                  onInsert={insertNode}
+                  onRemove={removeNode}
+                  onToggleExpand={toggleNodeExpansion}
+                  onToggleBranch={toggleBranchCollapse}
+                  onDrillDown={handleChartDrillDown}
+                  onTableCellClick={handleTableCellClick}
+                  onTableSortChange={handleTableSortChange}
+                  onAssistantRequest={handleAssistantRequest}
+                  showAddMenuForId={showAddMenuForId}
+                  setShowAddMenuForId={setShowAddMenuForId}
+                  showInsertMenuForId={showInsertMenuForId}
+                  setShowInsertMenuForId={setShowInsertMenuForId}
+                  renderMode={renderMode}
+                  entangledRootIds={entangledRootIds}
+                  branchSelectionByNodeId={branchSelectionByNodeId}
+                  onSelectBranch={setBranchSelection}
+                  onToggleEntangle={toggleEntangledRoot}
+                />
+              </div>
+            )}
           </div>
         )}
 

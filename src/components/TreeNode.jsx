@@ -394,7 +394,7 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
         )}
         {childrenNodes.map((child, idx) => (
           <div
-            key={child.id}
+            key={child.renderKey || child.id || child.nodeId}
             ref={(el) => {
               if (el) childRefs.current[idx] = el;
             }}
@@ -427,35 +427,104 @@ const TreeNode = ({
   showAddMenuForId,
   setShowAddMenuForId,
   showInsertMenuForId,
-  setShowInsertMenuForId
+  setShowInsertMenuForId,
+  renderMode = 'classic',
+  entangledRootIds,
+  branchSelectionByNodeId,
+  onSelectBranch,
+  onToggleEntangle,
+  renderChildren = true,
+  compactHeader = false,
+  menuId,
+  headerDragProps
 }) => {
   const node = nodes.find(n => n.id === nodeId);
   if (!node) return null;
 
   const result = getNodeResult(chainData, nodeId);
-  const children = getChildren(nodes, nodeId);
+  const rawChildren = getChildren(nodes, nodeId);
   const isActive = selectedNodeId === nodeId;
   const isExpanded = node.isExpanded !== false;
   const isBranchCollapsed = node.isBranchCollapsed === true;
+  const isEntangledMode = renderMode === 'entangled';
+  const isSingleStreamMode = renderMode === 'singleStream';
+  const entangledRoots = entangledRootIds instanceof Set
+    ? entangledRootIds
+    : new Set(entangledRootIds || []);
+  const isEntangledRoot = entangledRoots.has(nodeId);
+  const resolvedMenuId = menuId || nodeId;
+  const useScopedMenuIds = resolvedMenuId !== nodeId;
   const tableDensityClass = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
   const addMenuRef = React.useRef(null);
   const insertMenuRef = React.useRef(null);
 
+  const resolvedSelectedChildId = React.useMemo(() => {
+    if (!isSingleStreamMode || rawChildren.length === 0) return null;
+    const preferred = branchSelectionByNodeId?.[nodeId];
+    const exists = rawChildren.some(child => child.id === preferred);
+    return exists ? preferred : rawChildren[0].id;
+  }, [isSingleStreamMode, rawChildren, branchSelectionByNodeId, nodeId]);
+
   React.useEffect(() => {
-    if (showAddMenuForId !== nodeId || !addMenuRef.current) return undefined;
+    if (!isSingleStreamMode || rawChildren.length <= 1 || !resolvedSelectedChildId) return;
+    if (branchSelectionByNodeId?.[nodeId] !== resolvedSelectedChildId) {
+      onSelectBranch?.(nodeId, resolvedSelectedChildId);
+    }
+  }, [isSingleStreamMode, rawChildren, resolvedSelectedChildId, branchSelectionByNodeId, nodeId, onSelectBranch]);
+
+  const renderChildrenItems = React.useMemo(() => {
+    const baseChildren = (isSingleStreamMode && resolvedSelectedChildId)
+      ? rawChildren.filter(child => child.id === resolvedSelectedChildId)
+      : rawChildren;
+    const buildMenuKey = (childId) => (
+      useScopedMenuIds ? `${resolvedMenuId}::${childId}` : childId
+    );
+    if (!isEntangledMode) {
+      return baseChildren.map(child => ({
+        node: child,
+        nodeId: child.id,
+        renderKey: buildMenuKey(child.id),
+        menuKey: buildMenuKey(child.id)
+      }));
+    }
+    return baseChildren.flatMap((child) => {
+      const scopedKey = buildMenuKey(child.id);
+      const baseItem = {
+        node: child,
+        nodeId: child.id,
+        renderKey: scopedKey,
+        menuKey: scopedKey
+      };
+      if (!entangledRoots.has(child.id)) return [baseItem];
+      return [
+        baseItem,
+        {
+          node: child,
+          nodeId: child.id,
+          renderKey: `${scopedKey}::mirror`,
+          menuKey: `${scopedKey}::mirror`
+        }
+      ];
+    });
+  }, [isSingleStreamMode, resolvedSelectedChildId, rawChildren, isEntangledMode, entangledRoots, resolvedMenuId, useScopedMenuIds]);
+
+  const showBranchTabs = isSingleStreamMode && rawChildren.length > 1;
+
+  React.useEffect(() => {
+    if (showAddMenuForId !== resolvedMenuId || !addMenuRef.current) return undefined;
     const frame = requestAnimationFrame(() => {
       addMenuRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
     });
     return () => cancelAnimationFrame(frame);
-  }, [showAddMenuForId, nodeId]);
+  }, [showAddMenuForId, resolvedMenuId]);
 
   React.useEffect(() => {
-    if (showInsertMenuForId !== nodeId || !insertMenuRef.current) return undefined;
+    if (showInsertMenuForId !== resolvedMenuId || !insertMenuRef.current) return undefined;
     const frame = requestAnimationFrame(() => {
       insertMenuRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
     });
     return () => cancelAnimationFrame(frame);
-  }, [showInsertMenuForId, nodeId]);
+  }, [showInsertMenuForId, resolvedMenuId]);
 
 
   const handleAddMenuClick = ({ key }) => {
@@ -518,6 +587,20 @@ const TreeNode = ({
       ]
     }
   ];
+
+  const entangleMenu = {
+    items: [
+      {
+        key: 'entangle-toggle',
+        label: isEntangledRoot ? 'Remove entangled mirror' : 'Create entangled mirror',
+        disabled: !node.parentId
+      }
+    ],
+    onClick: () => {
+      if (!node.parentId) return;
+      onToggleEntangle?.(nodeId);
+    }
+  };
 
   // Resolve icon by node type (and component subtype).
   let Icon = Database;
@@ -713,87 +796,113 @@ const TreeNode = ({
     );
   }
 
-  return (
-    <div className="flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
-      {/* NODE CARD */}
-      <div className="relative group z-10">
+  const nodeCard = (
+    <div className="relative group z-10">
+      <div
+        onClick={(e) => { e.stopPropagation(); onSelect(nodeId); }}
+        className={`
+          node-card bg-white dark:bg-slate-900 rounded-xl border-2 transition-all cursor-pointer overflow-hidden relative flex flex-col
+          ${compactHeader ? 'node-card--compact' : ''}
+          ${isActive
+            ? 'border-blue-500 shadow-xl shadow-blue-500/10 ring-1 ring-blue-500 z-20 dark:shadow-blue-500/20'
+            : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md dark:border-slate-700 dark:hover:border-slate-600 dark:shadow-black/40'}
+        `}
+        style={{
+          width: 640,
+          height: isExpanded ? (node.params.subtype === 'AI' ? 'auto' : 320) : 'auto',
+          minWidth: 520,
+          minHeight: isExpanded ? (node.params.subtype === 'AI' ? 0 : 180) : 0,
+          resize: isExpanded && node.params.subtype !== 'AI' ? 'both' : 'none'
+        }}
+        data-node-resize="true"
+      >
+        {/* Header */}
         <div
-          onClick={(e) => { e.stopPropagation(); onSelect(nodeId); }}
-          className={`
-            bg-white dark:bg-slate-900 rounded-xl border-2 transition-all cursor-pointer overflow-hidden relative flex flex-col
-            ${isActive
-              ? 'border-blue-500 shadow-xl shadow-blue-500/10 ring-1 ring-blue-500 z-20 dark:shadow-blue-500/20'
-              : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md dark:border-slate-700 dark:hover:border-slate-600 dark:shadow-black/40'}
-          `}
-          style={{
-            width: 640,
-            height: isExpanded ? (node.params.subtype === 'AI' ? 'auto' : 320) : 'auto',
-            minWidth: 520,
-            minHeight: isExpanded ? (node.params.subtype === 'AI' ? 0 : 180) : 0,
-            resize: isExpanded && node.params.subtype !== 'AI' ? 'both' : 'none'
-          }}
-          data-node-resize="true"
+          className={`node-card-header p-4 flex items-center gap-3 ${compactHeader ? 'node-card-header--compact' : ''} ${headerDragProps ? 'node-drag-handle' : ''}`}
+          {...headerDragProps}
         >
-          {/* Header */}
-          <div className="p-4 flex items-center gap-3">
-            <Button
-              type="text"
-              size="small"
-              icon={isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-              onClick={(e) => { e.stopPropagation(); onToggleExpand(nodeId); }}
-            />
-            <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${isActive ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-slate-800 dark:text-slate-400'}`}>
-              <Icon size={20} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <Space size="small" align="center">
-                <Text strong className="truncate">{node.title}</Text>
-                {node.branchName && (
-                  <Tag color="geekblue" className="uppercase text-[9px] font-bold">
-                    {node.branchName}
-                  </Tag>
-                )}
-              </Space>
-              <Text type="secondary" className="text-xs truncate block mt-0.5">
-                {node.type === 'FILTER' && node.params.field ? `${node.params.field} ${node.params.operator} ${node.params.value}` :
-                  node.type === 'AGGREGATE' ? `Group by ${node.params.groupBy}` :
-                  node.type === 'JOIN' ? `with ${node.params.rightTable || '...'}` :
-                  node.type === 'COMPONENT' ? (node.params.subtype === 'AI' ? 'AI Assistant' : `${node.params.subtype} View`) :
-                  node.description || node.type}
-              </Text>
-            </div>
-            <Space size="small">
-              <Tooltip title="Fork Branch">
-                <Button
-                  type="text"
-                  icon={<GitBranch size={16} />}
-                  onClick={(e) => { e.stopPropagation(); onAdd('FILTER', nodeId); }}
-                />
-              </Tooltip>
-
-              {node.parentId && (
-                <Tooltip title="Minimize Node">
-                  <Button
-                    type="text"
-                    icon={<Minimize2 size={16} />}
-                    onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
-                  />
-                </Tooltip>
-              )}
-
-              {node.type !== 'SOURCE' && (
-                <Button
-                  type="text"
-                  danger
-                  icon={<Trash2 size={16} />}
-                  onClick={(e) => { e.stopPropagation(); onRemove(nodeId); }}
-                />
+          <Button
+            type="text"
+            size="small"
+            icon={isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            onClick={(e) => { e.stopPropagation(); onToggleExpand(nodeId); }}
+          />
+          <div className={`node-card-icon w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${isActive ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-slate-800 dark:text-slate-400'}`}>
+            <Icon size={20} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <Space size="small" align="center">
+              <Text strong className="truncate node-card-title">{node.title}</Text>
+              {node.branchName && (
+                <Tag color="geekblue" className="uppercase text-[9px] font-bold">
+                  {node.branchName}
+                </Tag>
               )}
             </Space>
+            <Text type="secondary" className="text-xs truncate block mt-0.5 node-card-subtitle">
+              {node.type === 'FILTER' && node.params.field ? `${node.params.field} ${node.params.operator} ${node.params.value}` :
+                node.type === 'AGGREGATE' ? `Group by ${node.params.groupBy}` :
+                node.type === 'JOIN' ? `with ${node.params.rightTable || '...'}` :
+                node.type === 'COMPONENT' ? (node.params.subtype === 'AI' ? 'AI Assistant' : `${node.params.subtype} View`) :
+                node.description || node.type}
+            </Text>
           </div>
+          <Space size="small">
+            <Tooltip title="Fork Branch">
+              <Button
+                type="text"
+                icon={<GitBranch size={16} />}
+                onClick={(e) => { e.stopPropagation(); onAdd('FILTER', nodeId); }}
+              />
+            </Tooltip>
 
-          {/* Content Preview */}
-          {isExpanded && result && (() => {
+            {node.parentId && (
+              <Tooltip title="Minimize Node">
+                <Button
+                  type="text"
+                  icon={<Minimize2 size={16} />}
+                  onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
+                />
+              </Tooltip>
+            )}
+
+            {node.type !== 'SOURCE' && (
+              <Button
+                type="text"
+                danger
+                icon={<Trash2 size={16} />}
+                onClick={(e) => { e.stopPropagation(); onRemove(nodeId); }}
+              />
+            )}
+          </Space>
+        </div>
+
+        {showBranchTabs && (
+          <div className="px-4 pb-2">
+            <Space size="small" wrap>
+              {rawChildren.map((child, index) => {
+                const label = child.branchName || `Branch ${index + 1}`;
+                const isActiveBranch = child.id === resolvedSelectedChildId;
+                return (
+                  <Button
+                    key={child.id}
+                    size="small"
+                    type={isActiveBranch ? 'primary' : 'default'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectBranch?.(nodeId, child.id);
+                    }}
+                  >
+                    {label}
+                  </Button>
+                );
+              })}
+            </Space>
+          </div>
+        )}
+
+        {/* Content Preview */}
+        {isExpanded && result && (() => {
             const isTablePreview = node.params.subtype === 'TABLE' || (node.type !== 'COMPONENT' && node.type !== 'JOIN');
             const isPivotPreview = node.params.subtype === 'PIVOT';
             const isAssistantPreview = node.params.subtype === 'AI';
@@ -975,31 +1084,41 @@ const TreeNode = ({
             </div>
             );
           })()}
-        </div>
-
-        {/* ADD BUTTON - Only show if NO children */}
-        {children.length === 0 && (
-          <div className={`absolute -bottom-6 left-1/2 -translate-x-1/2 translate-y-full z-20 transition-all ${!isExpanded ? '-mt-4' : ''}`}>
-            <div ref={addMenuRef}>
-              <Dropdown
-                menu={{ items: addMenuItems, onClick: handleAddMenuClick }}
-                trigger={['click']}
-                open={showAddMenuForId === nodeId}
-                onOpenChange={(open) => setShowAddMenuForId(open ? nodeId : null)}
-              >
-                <Button
-                  shape="circle"
-                  icon={<Plus size={16} strokeWidth={3} />}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </Dropdown>
-            </div>
-          </div>
-        )}
       </div>
 
+      {/* ADD BUTTON - Only show if NO children */}
+      {rawChildren.length === 0 && (
+        <div className={`absolute -bottom-6 left-1/2 -translate-x-1/2 translate-y-full z-20 transition-all ${!isExpanded ? '-mt-4' : ''}`}>
+          <div ref={addMenuRef}>
+            <Dropdown
+              menu={{ items: addMenuItems, onClick: handleAddMenuClick }}
+              trigger={['click']}
+              open={showAddMenuForId === resolvedMenuId}
+              onOpenChange={(open) => setShowAddMenuForId(open ? resolvedMenuId : null)}
+            >
+              <Button
+                shape="circle"
+                icon={<Plus size={16} strokeWidth={3} />}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </Dropdown>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
+      {/* NODE CARD */}
+      {isEntangledMode ? (
+        <Dropdown menu={entangleMenu} trigger={['contextMenu']}>
+          {nodeCard}
+        </Dropdown>
+      ) : nodeCard}
+
       {/* CONNECTORS & CHILDREN */}
-      {children.length > 0 && (
+      {renderChildren && renderChildrenItems.length > 0 && (
         <div className="flex flex-col items-center">
           <div className="w-0.5 h-8 bg-gray-300 dark:bg-slate-600 rounded-full relative group/line">
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity z-30">
@@ -1007,8 +1126,8 @@ const TreeNode = ({
                 <Dropdown
                   menu={{ items: insertMenuItems, onClick: handleInsertMenuClick }}
                   trigger={['click']}
-                  open={showInsertMenuForId === nodeId}
-                  onOpenChange={(open) => setShowInsertMenuForId(open ? nodeId : null)}
+                  open={showInsertMenuForId === resolvedMenuId}
+                  onOpenChange={(open) => setShowInsertMenuForId(open ? resolvedMenuId : null)}
                 >
                   <Button
                     shape="circle"
@@ -1022,9 +1141,10 @@ const TreeNode = ({
             </div>
           </div>
 
-          {children.length === 1 ? (
+          {renderChildrenItems.length === 1 ? (
             <TreeNode
-              nodeId={children[0].id}
+              nodeId={renderChildrenItems[0].nodeId}
+              menuId={renderChildrenItems[0].menuKey}
               nodes={nodes}
               selectedNodeId={selectedNodeId}
               chainData={chainData}
@@ -1043,13 +1163,19 @@ const TreeNode = ({
               setShowAddMenuForId={setShowAddMenuForId}
               showInsertMenuForId={showInsertMenuForId}
               setShowInsertMenuForId={setShowInsertMenuForId}
+              renderMode={renderMode}
+              entangledRootIds={entangledRootIds}
+              branchSelectionByNodeId={branchSelectionByNodeId}
+              onSelectBranch={onSelectBranch}
+              onToggleEntangle={onToggleEntangle}
             />
           ) : (
             <MultiBranchGroup
-              childrenNodes={children}
+              childrenNodes={renderChildrenItems}
               renderChild={(child) => (
                 <TreeNode
-                  nodeId={child.id}
+                  nodeId={child.nodeId}
+                  menuId={child.menuKey}
                   nodes={nodes}
                   selectedNodeId={selectedNodeId}
                   chainData={chainData}
@@ -1068,6 +1194,11 @@ const TreeNode = ({
                   setShowAddMenuForId={setShowAddMenuForId}
                   showInsertMenuForId={showInsertMenuForId}
                   setShowInsertMenuForId={setShowInsertMenuForId}
+                  renderMode={renderMode}
+                  entangledRootIds={entangledRootIds}
+                  branchSelectionByNodeId={branchSelectionByNodeId}
+                  onSelectBranch={onSelectBranch}
+                  onToggleEntangle={onToggleEntangle}
                 />
               )}
             />
@@ -1078,4 +1209,306 @@ const TreeNode = ({
   );
 };
 
-export { TreeNode, TablePreview };
+const FreeLayoutNode = ({ nodeId, position, onMeasure, children }) => {
+  const ref = React.useRef(null);
+
+  const measure = React.useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const width = el.offsetWidth || 0;
+    const height = el.offsetHeight || 0;
+    onMeasure(nodeId, width, height);
+  }, [nodeId, onMeasure]);
+
+  React.useLayoutEffect(() => {
+    measure();
+  }, [measure]);
+
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: 'absolute',
+        left: position.x,
+        top: position.y
+      }}
+    >
+      {children}
+    </div>
+  );
+};
+
+const FreeLayoutCanvas = ({
+  nodes,
+  selectedNodeId,
+  chainData,
+  tableDensity = 'comfortable',
+  onSelect,
+  onAdd,
+  onInsert,
+  onRemove,
+  onToggleExpand,
+  onToggleBranch,
+  onDrillDown,
+  onTableCellClick,
+  onTableSortChange,
+  onAssistantRequest,
+  showAddMenuForId,
+  setShowAddMenuForId,
+  showInsertMenuForId,
+  setShowInsertMenuForId,
+  onUpdateNodePosition
+}) => {
+  const containerRef = React.useRef(null);
+  const [viewport, setViewport] = React.useState({ x: 0, y: 0, scale: 1 });
+  const viewportRef = React.useRef(viewport);
+  const [isPanning, setIsPanning] = React.useState(false);
+  const [isDragging, setIsDragging] = React.useState(false);
+  const nodeSizesRef = React.useRef(new Map());
+  const [layoutVersion, setLayoutVersion] = React.useState(0);
+  const panStateRef = React.useRef(null);
+  const dragStateRef = React.useRef(null);
+  const dragFrameRef = React.useRef(null);
+
+  React.useEffect(() => {
+    viewportRef.current = viewport;
+  }, [viewport]);
+
+  const nodesById = React.useMemo(() => new Map(nodes.map(node => [node.id, node])), [nodes]);
+
+  const hiddenNodeIds = React.useMemo(() => {
+    const hidden = new Set();
+    nodes.forEach((node) => {
+      let current = node;
+      while (current?.parentId) {
+        const parent = nodesById.get(current.parentId);
+        if (!parent) break;
+        if (parent.isBranchCollapsed) {
+          hidden.add(node.id);
+          break;
+        }
+        current = parent;
+      }
+    });
+    return hidden;
+  }, [nodes, nodesById]);
+
+  const visibleNodes = React.useMemo(
+    () => nodes.filter(node => !hiddenNodeIds.has(node.id)),
+    [nodes, hiddenNodeIds]
+  );
+
+  const handleMeasureNode = React.useCallback((nodeId, width, height) => {
+    const prev = nodeSizesRef.current.get(nodeId);
+    if (prev && prev.width === width && prev.height === height) return;
+    nodeSizesRef.current.set(nodeId, { width, height });
+    setLayoutVersion((version) => version + 1);
+  }, []);
+
+  const handleWheel = React.useCallback((event) => {
+    if (!event.shiftKey) return;
+    event.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const pointerX = event.clientX - rect.left;
+    const pointerY = event.clientY - rect.top;
+    const zoomFactor = Math.exp(-event.deltaY * 0.001);
+    setViewport((prev) => {
+      const nextScale = Math.min(2.2, Math.max(0.4, prev.scale * zoomFactor));
+      const ratio = nextScale / prev.scale;
+      return {
+        scale: nextScale,
+        x: pointerX - (pointerX - prev.x) * ratio,
+        y: pointerY - (pointerY - prev.y) * ratio
+      };
+    });
+  }, []);
+
+  const handlePanMove = React.useCallback((event) => {
+    const state = panStateRef.current;
+    if (!state) return;
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+    setViewport((prev) => ({ ...prev, x: state.originX + dx, y: state.originY + dy }));
+  }, []);
+
+  const handlePanEnd = React.useCallback(() => {
+    panStateRef.current = null;
+    setIsPanning(false);
+    window.removeEventListener('pointermove', handlePanMove);
+    window.removeEventListener('pointerup', handlePanEnd);
+  }, [handlePanMove]);
+
+  const handlePanStart = React.useCallback((event) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    panStateRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: viewportRef.current.x,
+      originY: viewportRef.current.y
+    };
+    setIsPanning(true);
+    window.addEventListener('pointermove', handlePanMove);
+    window.addEventListener('pointerup', handlePanEnd);
+  }, [handlePanMove, handlePanEnd]);
+
+  const handleNodeDragMove = React.useCallback((event) => {
+    const state = dragStateRef.current;
+    if (!state) return;
+    if (dragFrameRef.current) return;
+    dragFrameRef.current = requestAnimationFrame(() => {
+      dragFrameRef.current = null;
+      const scale = viewportRef.current.scale || 1;
+      const dx = (event.clientX - state.startX) / scale;
+      const dy = (event.clientY - state.startY) / scale;
+      onUpdateNodePosition?.(state.nodeId, {
+        x: state.originX + dx,
+        y: state.originY + dy
+      });
+    });
+  }, [onUpdateNodePosition]);
+
+  const handleNodeDragEnd = React.useCallback(() => {
+    if (dragFrameRef.current) {
+      cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = null;
+    }
+    dragStateRef.current = null;
+    setIsDragging(false);
+    window.removeEventListener('pointermove', handleNodeDragMove);
+    window.removeEventListener('pointerup', handleNodeDragEnd);
+  }, [handleNodeDragMove]);
+
+  const handleNodeDragStart = React.useCallback((nodeId, event) => {
+    if (event.button !== 0) return;
+    const target = event.target;
+    if (target?.closest('button, a, input, textarea, .ant-dropdown, .ant-select, .ant-table')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect?.(nodeId);
+    const node = nodesById.get(nodeId);
+    const origin = node?.position || { x: 0, y: 0 };
+    dragStateRef.current = {
+      nodeId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: origin.x,
+      originY: origin.y
+    };
+    setIsDragging(true);
+    window.addEventListener('pointermove', handleNodeDragMove);
+    window.addEventListener('pointerup', handleNodeDragEnd);
+  }, [nodesById, onSelect, handleNodeDragMove, handleNodeDragEnd]);
+
+  const connectors = React.useMemo(() => {
+    const lines = [];
+    const sizes = nodeSizesRef.current;
+    const visibleIds = new Set(visibleNodes.map(node => node.id));
+    visibleNodes.forEach((node) => {
+      if (!node.parentId || !visibleIds.has(node.parentId)) return;
+      const parent = nodesById.get(node.parentId);
+      if (!parent) return;
+      const parentPos = parent.position;
+      const childPos = node.position;
+      const parentSize = sizes.get(parent.id);
+      const childSize = sizes.get(node.id);
+      if (!parentPos || !childPos || !parentSize || !childSize) return;
+      lines.push({
+        x1: parentPos.x + parentSize.width / 2,
+        y1: parentPos.y + parentSize.height,
+        x2: childPos.x + childSize.width / 2,
+        y2: childPos.y
+      });
+    });
+    return lines;
+  }, [visibleNodes, nodesById, layoutVersion]);
+
+  return (
+    <div
+      ref={containerRef}
+      className={`free-layout-canvas relative w-full h-full ${isPanning || isDragging ? 'is-panning' : ''}`}
+      onWheel={handleWheel}
+      onPointerDown={handlePanStart}
+    >
+      <div
+        className="absolute inset-0"
+        style={{
+          transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
+          transformOrigin: '0 0'
+        }}
+      >
+        <svg
+          className="absolute inset-0 pointer-events-none text-gray-300 dark:text-slate-600"
+          style={{ overflow: 'visible' }}
+          aria-hidden="true"
+        >
+          {connectors.map((line, index) => (
+            <line
+              key={`${line.x1}-${line.y1}-${line.x2}-${line.y2}-${index}`}
+              x1={line.x1}
+              y1={line.y1}
+              x2={line.x2}
+              y2={line.y2}
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+            />
+          ))}
+        </svg>
+
+        {visibleNodes.map((node) => {
+          const position = node.position || { x: 0, y: 0 };
+          return (
+            <FreeLayoutNode
+              key={node.id}
+              nodeId={node.id}
+              position={position}
+              onMeasure={handleMeasureNode}
+            >
+              <TreeNode
+                nodeId={node.id}
+                nodes={nodes}
+                selectedNodeId={selectedNodeId}
+                chainData={chainData}
+                tableDensity={tableDensity}
+                onSelect={onSelect}
+                onAdd={onAdd}
+                onInsert={onInsert}
+                onRemove={onRemove}
+                onToggleExpand={onToggleExpand}
+                onToggleBranch={onToggleBranch}
+                onDrillDown={onDrillDown}
+                onTableCellClick={onTableCellClick}
+                onTableSortChange={onTableSortChange}
+                onAssistantRequest={onAssistantRequest}
+                showAddMenuForId={showAddMenuForId}
+                setShowAddMenuForId={setShowAddMenuForId}
+                showInsertMenuForId={showInsertMenuForId}
+                setShowInsertMenuForId={setShowInsertMenuForId}
+                renderMode="freeLayout"
+                renderChildren={false}
+                compactHeader
+                menuId={node.id}
+                headerDragProps={{
+                  onPointerDown: (event) => handleNodeDragStart(node.id, event)
+                }}
+              />
+            </FreeLayoutNode>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+export { TreeNode, TablePreview, FreeLayoutCanvas };
