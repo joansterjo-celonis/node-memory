@@ -29,6 +29,10 @@ const createInitialNodes = () => ([
 const TABLE_DENSITY_STORAGE_KEY = 'nma-table-density';
 const DEFAULT_TABLE_DENSITY = 'comfortable';
 const DEFAULT_ENTANGLED_COLOR = '#facc15';
+const SESSION_STORAGE_KEY = 'nma-session-v1';
+const SESSION_VERSION = 1;
+const VALID_VIEW_MODES = new Set(['canvas', 'landing']);
+const VALID_RENDER_MODES = new Set(['classic', 'entangled', 'singleStream', 'freeLayout']);
 const readStoredTableDensity = () => {
   if (typeof window === 'undefined' || !window.localStorage) return DEFAULT_TABLE_DENSITY;
   try {
@@ -40,6 +44,24 @@ const readStoredTableDensity = () => {
   return DEFAULT_TABLE_DENSITY;
 };
 
+const sanitizeNodesForStorage = (nodesToSave = []) => {
+  if (!Array.isArray(nodesToSave)) return [];
+  return nodesToSave.map((node) => {
+    if (!node || typeof node !== 'object') return node;
+    if (node.type !== 'SOURCE') return node;
+    const params = node.params || {};
+    if (!Object.prototype.hasOwnProperty.call(params, '__files')) return node;
+    return { ...node, params: { ...params, __files: [] } };
+  });
+};
+
+const sanitizeHistoryForStorage = (historyToSave = []) => {
+  if (!Array.isArray(historyToSave)) return [];
+  return historyToSave
+    .filter((entry) => Array.isArray(entry))
+    .map((entry) => sanitizeNodesForStorage(entry));
+};
+
 const getDefaultStatsPanelRect = () => {
   const fallback = { x: 64, y: 96, width: 320, height: 520 };
   if (typeof window === 'undefined') return fallback;
@@ -48,6 +70,83 @@ const getDefaultStatsPanelRect = () => {
   const x = Math.max(16, window.innerWidth - width - 32);
   const y = fallback.y;
   return { x, y, width, height };
+};
+
+const isValidStatsPanelRect = (rect) => (
+  rect
+  && Number.isFinite(rect.x)
+  && Number.isFinite(rect.y)
+  && Number.isFinite(rect.width)
+  && Number.isFinite(rect.height)
+);
+
+const readSessionState = () => {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || parsed.version !== SESSION_VERSION) return null;
+
+    const history = Array.isArray(parsed.history)
+      ? sanitizeHistoryForStorage(parsed.history)
+      : [];
+    const resolvedHistory = history.length ? history : [createInitialNodes()];
+    const historyIndex = Number.isFinite(parsed.historyIndex)
+      ? Math.max(0, Math.min(parsed.historyIndex, resolvedHistory.length - 1))
+      : 0;
+    const activeNodes = Array.isArray(resolvedHistory[historyIndex])
+      ? resolvedHistory[historyIndex]
+      : (resolvedHistory[0] || []);
+    const selectedNodeId = typeof parsed.selectedNodeId === 'string'
+      && activeNodes.some((node) => node.id === parsed.selectedNodeId)
+      ? parsed.selectedNodeId
+      : (activeNodes[0]?.id || 'node-start');
+
+    const viewMode = VALID_VIEW_MODES.has(parsed.viewMode) ? parsed.viewMode : 'canvas';
+    const renderMode = VALID_RENDER_MODES.has(parsed.renderMode) ? parsed.renderMode : 'classic';
+    const dataModel = parsed.dataModel
+      && typeof parsed.dataModel === 'object'
+      && parsed.dataModel.tables
+      && Array.isArray(parsed.dataModel.order)
+      ? parsed.dataModel
+      : { tables: {}, order: [] };
+
+    return {
+      history: resolvedHistory,
+      historyIndex,
+      selectedNodeId,
+      dataModel,
+      rawDataName: typeof parsed.rawDataName === 'string' ? parsed.rawDataName : null,
+      viewMode,
+      renderMode,
+      dataModelSorts: parsed.dataModelSorts && typeof parsed.dataModelSorts === 'object' ? parsed.dataModelSorts : {},
+      branchSelectionByNodeId: parsed.branchSelectionByNodeId && typeof parsed.branchSelectionByNodeId === 'object'
+        ? parsed.branchSelectionByNodeId
+        : {},
+      isStatsCollapsed: parsed.isStatsCollapsed === true,
+      isStatsDetached: parsed.isStatsDetached === true,
+      statsPanelRect: isValidStatsPanelRect(parsed.statsPanelRect)
+        ? parsed.statsPanelRect
+        : getDefaultStatsPanelRect(),
+      isPropertiesCollapsed: parsed.isPropertiesCollapsed === true,
+      showDataModel: parsed.showDataModel === true,
+      activeExplorationId: typeof parsed.activeExplorationId === 'string' ? parsed.activeExplorationId : null
+    };
+  } catch (err) {
+    return null;
+  }
+};
+
+const writeSessionState = (snapshot) => {
+  if (typeof window === 'undefined' || !window.localStorage) return false;
+  try {
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(snapshot));
+    return true;
+  } catch (err) {
+    console.warn('Unable to persist session state.', err);
+    return false;
+  }
 };
 
 const buildDefaultFreeLayout = (nodesToLayout) => {
@@ -92,11 +191,19 @@ const buildDefaultFreeLayout = (nodesToLayout) => {
 };
 
 const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
+  const initialSession = useMemo(() => readSessionState(), []);
+  const initialHistory = initialSession?.history ?? [createInitialNodes()];
+  const initialHistoryIndex = initialSession?.historyIndex ?? 0;
+  const initialNodes = Array.isArray(initialHistory[initialHistoryIndex])
+    ? initialHistory[initialHistoryIndex]
+    : (initialHistory[0] || []);
+  const initialSelectedNodeId = initialSession?.selectedNodeId ?? (initialNodes[0]?.id || 'node-start');
+  const initialStatsPanelRect = initialSession?.statsPanelRect ?? getDefaultStatsPanelRect();
   // -------------------------------------------------------------------
   // Ingestion state
   // -------------------------------------------------------------------
-  const [dataModel, setDataModel] = useState({ tables: {}, order: [] });
-  const [rawDataName, setRawDataName] = useState(null);
+  const [dataModel, setDataModel] = useState(initialSession?.dataModel ?? { tables: {}, order: [] });
+  const [rawDataName, setRawDataName] = useState(initialSession?.rawDataName ?? null);
   const [loadError, setLoadError] = useState(null);
   const [isLoadingFile, setIsLoadingFile] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
@@ -110,27 +217,27 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   // -------------------------------------------------------------------
   // History state (undo / redo)
   // -------------------------------------------------------------------
-  const [history, setHistory] = useState([createInitialNodes()]);
-  const [historyIndex, setHistoryIndex] = useState(0);
+  const [history, setHistory] = useState(initialHistory);
+  const [historyIndex, setHistoryIndex] = useState(initialHistoryIndex);
   const safeHistoryIndex = Math.max(0, Math.min(historyIndex, history.length - 1));
   const nodes = Array.isArray(history[safeHistoryIndex]) ? history[safeHistoryIndex] : [];
 
-  const [selectedNodeId, setSelectedNodeId] = useState('node-start');
+  const [selectedNodeId, setSelectedNodeId] = useState(initialSelectedNodeId);
   const [showAddMenuForId, setShowAddMenuForId] = useState(null);
   const [showInsertMenuForId, setShowInsertMenuForId] = useState(null);
-  const [showDataModel, setShowDataModel] = useState(false);
-  const [viewMode, setViewMode] = useState('canvas');
-  const [renderMode, setRenderMode] = useState('classic');
-  const [dataModelSorts, setDataModelSorts] = useState({});
+  const [showDataModel, setShowDataModel] = useState(initialSession?.showDataModel ?? false);
+  const [viewMode, setViewMode] = useState(initialSession?.viewMode ?? 'canvas');
+  const [renderMode, setRenderMode] = useState(initialSession?.renderMode ?? 'classic');
+  const [dataModelSorts, setDataModelSorts] = useState(initialSession?.dataModelSorts ?? {});
   const [explorations, setExplorations] = useState([]);
-  const [activeExplorationId, setActiveExplorationId] = useState(null);
+  const [activeExplorationId, setActiveExplorationId] = useState(initialSession?.activeExplorationId ?? null);
   const [saveError, setSaveError] = useState(null);
   const [tableDensity, setTableDensity] = useState(readStoredTableDensity);
-  const [isStatsCollapsed, setIsStatsCollapsed] = useState(false);
-  const [isStatsDetached, setIsStatsDetached] = useState(false);
-  const [statsPanelRect, setStatsPanelRect] = useState(getDefaultStatsPanelRect);
-  const [isPropertiesCollapsed, setIsPropertiesCollapsed] = useState(false);
-  const [branchSelectionByNodeId, setBranchSelectionByNodeId] = useState({});
+  const [isStatsCollapsed, setIsStatsCollapsed] = useState(initialSession?.isStatsCollapsed ?? false);
+  const [isStatsDetached, setIsStatsDetached] = useState(initialSession?.isStatsDetached ?? false);
+  const [statsPanelRect, setStatsPanelRect] = useState(initialStatsPanelRect);
+  const [isPropertiesCollapsed, setIsPropertiesCollapsed] = useState(initialSession?.isPropertiesCollapsed ?? false);
+  const [branchSelectionByNodeId, setBranchSelectionByNodeId] = useState(initialSession?.branchSelectionByNodeId ?? {});
   const [activeFilterTarget, setActiveFilterTarget] = useState(null);
   const statsDragStateRef = useRef(null);
   const statsDragFrameRef = useRef(null);
@@ -355,6 +462,49 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   useEffect(() => {
     setExplorations(loadExplorations());
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return undefined;
+    const timeout = window.setTimeout(() => {
+      const snapshot = {
+        version: SESSION_VERSION,
+        savedAt: new Date().toISOString(),
+        history: sanitizeHistoryForStorage(history),
+        historyIndex: safeHistoryIndex,
+        selectedNodeId,
+        dataModel,
+        rawDataName,
+        viewMode,
+        renderMode,
+        dataModelSorts,
+        branchSelectionByNodeId,
+        isStatsCollapsed,
+        isStatsDetached,
+        statsPanelRect,
+        isPropertiesCollapsed,
+        showDataModel,
+        activeExplorationId
+      };
+      writeSessionState(snapshot);
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [
+    history,
+    safeHistoryIndex,
+    selectedNodeId,
+    dataModel,
+    rawDataName,
+    viewMode,
+    renderMode,
+    dataModelSorts,
+    branchSelectionByNodeId,
+    isStatsCollapsed,
+    isStatsDetached,
+    statsPanelRect,
+    isPropertiesCollapsed,
+    showDataModel,
+    activeExplorationId
+  ]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.localStorage) return;
@@ -955,6 +1105,23 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     ));
   }, []);
 
+  const renameBranch = useCallback((branchId, nextName) => {
+    if (!branchId) return;
+    const target = findNodeById(branchId);
+    if (!target) return;
+    const trimmed = typeof nextName === 'string' ? nextName.trim() : '';
+    const currentName = target.branchName || '';
+    const peer = target.entangledPeerId ? findNodeById(target.entangledPeerId) : null;
+    const peerName = peer?.branchName || '';
+    if (trimmed === currentName && trimmed === peerName) return;
+    const idsToUpdate = new Set([branchId]);
+    if (target.entangledPeerId) idsToUpdate.add(target.entangledPeerId);
+    const nextNodes = nodes.map((node) => (
+      idsToUpdate.has(node.id) ? { ...node, branchName: trimmed } : node
+    ));
+    updateNodes(nextNodes);
+  }, [nodes, findNodeById, updateNodes]);
+
   const applyNodePositions = useCallback((positions, options = {}) => {
     if (!positions) return;
     let hasChanges = false;
@@ -1156,12 +1323,6 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const rowCount = order.reduce((sum, name) => sum + ((model.tables?.[name] || []).length), 0);
     return { tableCount: order.length, rowCount };
   };
-
-  const sanitizeNodesForStorage = (nodesToSave) =>
-    nodesToSave.map(node => {
-      if (node.type !== 'SOURCE') return node;
-      return { ...node, params: { ...node.params, __files: [] } };
-    });
 
   const saveExploration = () => {
     setSaveError(null);
@@ -2147,6 +2308,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 onUpdateNodePosition={updateNodePosition}
                 onAutoLayout={applyAutoLayout}
                 onEntangledColorChange={updateEntangledGroupColor}
+                onRenameBranch={renameBranch}
               />
             ) : (
               <div className="min-w-full inline-flex justify-center p-20 items-start min-h-full">
@@ -2177,6 +2339,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                   renderMode={renderMode}
                   branchSelectionByNodeId={branchSelectionByNodeId}
                   onSelectBranch={setBranchSelection}
+                  onRenameBranch={renameBranch}
                   onToggleEntangle={toggleEntangledBranch}
                   onEntangledColorChange={updateEntangledGroupColor}
                 />
