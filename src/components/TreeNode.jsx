@@ -776,7 +776,8 @@ const TreeNode = ({
   const isExpanded = node.isExpanded !== false;
   const isBranchCollapsed = node.isBranchCollapsed === true;
   const isEntangledMode = renderMode === 'entangled';
-  const isSingleStreamMode = renderMode === 'singleStream';
+  const isMobileMode = renderMode === 'mobile';
+  const isSingleStreamMode = renderMode === 'singleStream' || isMobileMode;
   const peerNode = node.entangledPeerId ? nodes.find(n => n.id === node.entangledPeerId) : null;
   const isEntangledRoot = !!peerNode && peerNode.parentId === node.parentId;
   const resolvedMenuId = menuId || nodeId;
@@ -851,11 +852,15 @@ const TreeNode = ({
 
   const showBranchTabs = isSingleStreamMode && rawChildren.length > 1;
 
-  const nodeCardWidth = isSingleStreamMode ? '65vw' : 640;
-  const nodeCardMaxWidth = isSingleStreamMode ? 1800 : undefined;
-  const nodeCardMinWidth = isSingleStreamMode ? 'min(520px, 65vw)' : 520;
+  const nodeCardWidth = isMobileMode
+    ? 'min(92vw, 560px)'
+    : (isSingleStreamMode ? '65vw' : 640);
+  const nodeCardMaxWidth = isMobileMode ? '92vw' : (isSingleStreamMode ? 1800 : undefined);
+  const nodeCardMinWidth = isMobileMode
+    ? 'min(92vw, 320px)'
+    : (isSingleStreamMode ? 'min(520px, 65vw)' : 520);
   const nodeCardResize = isExpanded && node.params.subtype !== 'AI'
-    ? (isSingleStreamMode ? 'vertical' : 'both')
+    ? (isMobileMode ? 'none' : (isSingleStreamMode ? 'vertical' : 'both'))
     : 'none';
 
   React.useEffect(() => {

@@ -70,7 +70,8 @@ const PropertiesPanel = ({
   onClearData,
   onShowDataModel,
   onCollapse,
-  activeFilterIndex
+  activeFilterIndex,
+  isMobile = false
 }) => {
   // Local staging for JOIN config (so user can edit multiple fields then commit).
   const [localParams, setLocalParams] = useState({});
@@ -102,10 +103,16 @@ const PropertiesPanel = ({
     [schema, numericFields]
   );
 
+  const containerWidthClass = isMobile ? 'w-full' : 'w-80';
+  const containerBorderClass = isMobile ? 'border-transparent' : 'border-l border-gray-200 dark:border-slate-700';
+  const headerPaddingClass = isMobile ? 'p-4' : 'p-5';
+  const bodyPaddingClass = isMobile ? 'p-4' : 'p-5';
+  const emptyCardMarginClass = isMobile ? 'm-3' : 'm-4';
+
   if (!node) {
     return (
-      <div className="h-full flex flex-col bg-white border-l border-gray-200 dark:bg-slate-900 dark:border-slate-700">
-        <div className="p-5 border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700">
+      <div className={`h-full flex flex-col bg-white dark:bg-slate-900 ${containerBorderClass}`}>
+        <div className={`${headerPaddingClass} border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700`}>
           <div className="flex items-center justify-between gap-3">
             <Text type="secondary" className="uppercase tracking-wider text-[11px]">
               Properties
@@ -122,7 +129,7 @@ const PropertiesPanel = ({
             )}
           </div>
         </div>
-        <Card className="m-4">
+        <Card className={emptyCardMarginClass}>
           <Empty
             image={<Settings size={48} className="opacity-20" />}
             description="Select a step in the chain to configure its logic."
@@ -258,9 +265,9 @@ const PropertiesPanel = ({
   };
 
   return (
-    <div className="h-full flex flex-col bg-white border-l border-gray-200 shadow-xl shadow-gray-200/50 dark:bg-slate-900 dark:border-slate-700 dark:shadow-black/40 w-80 animate-in slide-in-from-right duration-300 z-50">
+    <div className={`h-full flex flex-col bg-white shadow-xl shadow-gray-200/50 dark:bg-slate-900 dark:shadow-black/40 animate-in slide-in-from-right duration-300 z-50 ${containerWidthClass} ${containerBorderClass}`}>
       {/* Header */}
-      <div className="p-5 border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700">
+      <div className={`${headerPaddingClass} border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700`}>
         <div className="flex items-start justify-between gap-3">
           <Space orientation="vertical" size={6} style={{ width: '100%' }}>
             <Text type="secondary" className="uppercase tracking-wider text-[11px]">
@@ -292,7 +299,7 @@ const PropertiesPanel = ({
       </div>
 
       {/* Body */}
-      <div className="p-5 flex-1 overflow-y-auto space-y-6">
+      <div className={`${bodyPaddingClass} flex-1 overflow-y-auto space-y-6`}>
         <Form layout="vertical" requiredMark={false}>
           {/* Shared: Branch label */}
           <Form.Item label="Branch Label">

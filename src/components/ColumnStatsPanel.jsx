@@ -40,6 +40,7 @@ const ColumnStatsPanel = ({
   onCollapse,
   onToggleDetach,
   isDetached = false,
+  isMobile = false,
   dragHandleProps
 }) => {
   const [selectedColumn, setSelectedColumn] = React.useState('');
@@ -111,15 +112,17 @@ const ColumnStatsPanel = ({
   const hasData = schema.length > 0 && totalRows > 0;
   const nullRate = stats && stats.totalRows > 0 ? (stats.nullCount / stats.totalRows) * 100 : 0;
 
-  const selectDropdownProps = { popupMatchSelectWidth: false, styles: { popup: { root: { minWidth: 320 } } } };
+  const selectDropdownProps = { popupMatchSelectWidth: false, styles: { popup: { root: { minWidth: isMobile ? 240 : 320 } } } };
 
-  const containerClassName = isDetached ? 'h-full w-full' : 'h-full w-72';
-  const borderClassName = isDetached ? 'border border-transparent' : 'border-l border-gray-200 dark:border-slate-700';
+  const containerClassName = (isDetached || isMobile) ? 'h-full w-full' : 'h-full w-72';
+  const borderClassName = (isDetached || isMobile)
+    ? 'border border-transparent'
+    : 'border-l border-gray-200 dark:border-slate-700';
   const detachTitle = isDetached ? 'Dock panel' : 'Detach panel';
 
   return (
     <div className={`${containerClassName} ${borderClassName} flex flex-col bg-white shadow-xl shadow-gray-200/40 dark:bg-slate-900 dark:shadow-black/40 z-40`}>
-      <div className="p-4 border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700">
+      <div className={`${isMobile ? 'p-3' : 'p-4'} border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700`}>
         <div className="flex items-start justify-between gap-3">
           <div
             {...(isDetached ? dragHandleProps : undefined)}
@@ -129,7 +132,7 @@ const ColumnStatsPanel = ({
             <Text type="secondary">Summary for the selected column</Text>
           </div>
           <div className="flex items-center gap-1">
-            {onToggleDetach && (
+            {onToggleDetach && !isMobile && (
               <Button
                 type="text"
                 size="small"
@@ -152,7 +155,7 @@ const ColumnStatsPanel = ({
           </div>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className={`flex-1 overflow-y-auto ${isMobile ? 'p-3' : 'p-4'} space-y-4`}>
         {!node && (
           <Empty description="Select a node to see column statistics." />
         )}
@@ -178,7 +181,7 @@ const ColumnStatsPanel = ({
 
         {node && hasData && stats && (
           <>
-            <div className="grid grid-cols-2 gap-3">
+            <div className={`grid ${isMobile ? 'grid-cols-1' : 'grid-cols-2'} gap-3`}>
               <StatCard label="Rows" value={formatNumber(stats.totalRows)} />
               <StatCard label="Non-null" value={formatNumber(stats.nonNullCount)} />
               <StatCard
@@ -190,7 +193,7 @@ const ColumnStatsPanel = ({
             </div>
 
             <Card size="small" title="Numeric Summary">
-              <div className="grid grid-cols-3 gap-2">
+              <div className={`grid ${isMobile ? 'grid-cols-1' : 'grid-cols-3'} gap-2`}>
                 <Statistic title="Min" value={formatNumeric(stats.min)} />
                 <Statistic title="Max" value={formatNumeric(stats.max)} />
                 <Statistic title="Avg" value={formatNumeric(stats.avg)} />
