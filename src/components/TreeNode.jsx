@@ -95,6 +95,11 @@ const formatFilterLabel = (filter) => {
   return `${resolvedField} ${operator} ${value}`.trim();
 };
 
+const getElementLayoutHeight = (element) => {
+  if (!element) return 0;
+  return element.offsetHeight || element.clientHeight || 0;
+};
+
 const AssistantPanel = React.memo(({ node, schema, onRun }) => {
   const [question, setQuestion] = React.useState(node.params.assistantQuestion || '');
 
@@ -199,12 +204,14 @@ const TablePreview = React.memo(({
     if (!el) return undefined;
 
     const updateLayoutMetrics = () => {
-      const rect = el.getBoundingClientRect();
-      if (rect.height) setTableHeight(rect.height);
+      const nextHeight = getElementLayoutHeight(el);
+      if (nextHeight) setTableHeight(nextHeight);
       const header = el.querySelector('.ant-table-header') || el.querySelector('.ant-table-thead');
       if (header) {
-        const nextHeaderHeight = Math.ceil(header.getBoundingClientRect().height);
-        setHeaderHeight((prev) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+        const nextHeaderHeight = getElementLayoutHeight(header);
+        if (nextHeaderHeight) {
+          setHeaderHeight((prev) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+        }
       }
     };
     updateLayoutMetrics();
@@ -1130,12 +1137,14 @@ const TreeNode = ({
     if (!el) return undefined;
 
     const updateLayoutMetrics = () => {
-      const rect = el.getBoundingClientRect();
-      if (rect.height) setPivotTableHeight(rect.height);
+      const nextHeight = getElementLayoutHeight(el);
+      if (nextHeight) setPivotTableHeight(nextHeight);
       const header = el.querySelector('.ant-table-header') || el.querySelector('.ant-table-thead');
       if (header) {
-        const nextHeaderHeight = Math.ceil(header.getBoundingClientRect().height);
-        setPivotHeaderHeight((prev) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+        const nextHeaderHeight = getElementLayoutHeight(header);
+        if (nextHeaderHeight) {
+          setPivotHeaderHeight((prev) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+        }
       }
     };
     updateLayoutMetrics();
@@ -1763,6 +1772,9 @@ const FreeLayoutCanvas = ({
   const [hoveredConnector, setHoveredConnector] = React.useState(null);
   const [insertAnchor, setInsertAnchor] = React.useState(null);
   const nodeSizesRef = React.useRef(new Map());
+  const dragPositionsRef = React.useRef(new Map());
+  const pendingDragPositionsRef = React.useRef(new Map());
+  const [dragVersion, setDragVersion] = React.useState(0);
   const [layoutVersion, setLayoutVersion] = React.useState(0);
   const panStateRef = React.useRef(null);
   const dragStateRef = React.useRef(null);
@@ -1787,6 +1799,12 @@ const FreeLayoutCanvas = ({
       x: (event.clientX - rect.left - x) / scale,
       y: (event.clientY - rect.top - y) / scale
     };
+  }, []);
+
+  const resolveNodePosition = React.useCallback((node) => {
+    const override = dragPositionsRef.current.get(node.id);
+    if (override) return override;
+    return node.position || null;
   }, []);
 
   const scheduleConnectorHover = React.useCallback(() => {
@@ -1904,6 +1922,44 @@ const FreeLayoutCanvas = ({
     () => nodes.filter(node => !hiddenNodeIds.has(node.id)),
     [nodes, hiddenNodeIds]
   );
+
+  React.useEffect(() => {
+    if (dragStateRef.current) return;
+    if (dragPositionsRef.current.size === 0 && pendingDragPositionsRef.current.size === 0) return;
+
+    const committed = [];
+    const stale = [];
+    pendingDragPositionsRef.current.forEach((position, nodeId) => {
+      const node = nodesById.get(nodeId);
+      if (!node) {
+        stale.push(nodeId);
+        return;
+      }
+      const current = node.position;
+      if (current && current.x === position.x && current.y === position.y) {
+        committed.push(nodeId);
+      }
+    });
+
+    const orphaned = [];
+    dragPositionsRef.current.forEach((_position, nodeId) => {
+      if (!pendingDragPositionsRef.current.has(nodeId)) {
+        orphaned.push(nodeId);
+      }
+    });
+
+    [...committed, ...stale].forEach((nodeId) => {
+      pendingDragPositionsRef.current.delete(nodeId);
+      dragPositionsRef.current.delete(nodeId);
+    });
+    orphaned.forEach((nodeId) => {
+      dragPositionsRef.current.delete(nodeId);
+    });
+
+    if (committed.length || stale.length || orphaned.length) {
+      setDragVersion((version) => version + 1);
+    }
+  }, [nodesById]);
 
   const upstreamEdgeKeys = React.useMemo(() => {
     const keys = new Set();
@@ -2127,6 +2183,8 @@ const FreeLayoutCanvas = ({
   const handleNodeDragMove = React.useCallback((event) => {
     const state = dragStateRef.current;
     if (!state) return;
+    state.lastX = event.clientX;
+    state.lastY = event.clientY;
     const rawDx = event.clientX - state.startX;
     const rawDy = event.clientY - state.startY;
     if (!state.hasMoved && (Math.abs(rawDx) > 3 || Math.abs(rawDy) > 3)) {
@@ -2136,31 +2194,60 @@ const FreeLayoutCanvas = ({
     dragFrameRef.current = requestAnimationFrame(() => {
       dragFrameRef.current = null;
       const scale = viewportRef.current.scale || 1;
-      const dx = rawDx / scale;
-      const dy = rawDy / scale;
-      onUpdateNodePosition?.(state.nodeId, {
+      const lastX = Number.isFinite(state.lastX) ? state.lastX : state.startX;
+      const lastY = Number.isFinite(state.lastY) ? state.lastY : state.startY;
+      const dx = (lastX - state.startX) / scale;
+      const dy = (lastY - state.startY) / scale;
+      const nextPosition = {
         x: state.originX + dx,
         y: state.originY + dy
-      });
+      };
+      dragPositionsRef.current.set(state.nodeId, nextPosition);
+      setDragVersion((version) => version + 1);
     });
-  }, [onUpdateNodePosition]);
+  }, []);
 
   const handleNodeDragEnd = React.useCallback(() => {
     if (dragFrameRef.current) {
       cancelAnimationFrame(dragFrameRef.current);
       dragFrameRef.current = null;
     }
-    if (dragStateRef.current?.hasMoved) {
+    const state = dragStateRef.current;
+    if (state?.hasMoved) {
       suppressSelectRef.current = true;
       requestAnimationFrame(() => {
         suppressSelectRef.current = false;
       });
     }
+    if (state) {
+      const scale = viewportRef.current.scale || 1;
+      const lastX = Number.isFinite(state.lastX) ? state.lastX : state.startX;
+      const lastY = Number.isFinite(state.lastY) ? state.lastY : state.startY;
+      const dx = (lastX - state.startX) / scale;
+      const dy = (lastY - state.startY) / scale;
+      const hasDelta = dx !== 0 || dy !== 0;
+      if (hasDelta) {
+        const finalPosition = {
+          x: state.originX + dx,
+          y: state.originY + dy
+        };
+        const prevPosition = dragPositionsRef.current.get(state.nodeId);
+        if (!prevPosition || prevPosition.x !== finalPosition.x || prevPosition.y !== finalPosition.y) {
+          dragPositionsRef.current.set(state.nodeId, finalPosition);
+          setDragVersion((version) => version + 1);
+        }
+        pendingDragPositionsRef.current.set(state.nodeId, finalPosition);
+        onUpdateNodePosition?.(state.nodeId, finalPosition);
+      } else if (dragPositionsRef.current.has(state.nodeId)) {
+        dragPositionsRef.current.delete(state.nodeId);
+        setDragVersion((version) => version + 1);
+      }
+    }
     dragStateRef.current = null;
     setIsDragging(false);
     window.removeEventListener('pointermove', handleNodeDragMove);
     window.removeEventListener('pointerup', handleNodeDragEnd);
-  }, [handleNodeDragMove]);
+  }, [handleNodeDragMove, onUpdateNodePosition]);
 
   const handleNodeDragStart = React.useCallback((nodeId, event) => {
     if (event.button !== 0) return;
@@ -2169,13 +2256,16 @@ const FreeLayoutCanvas = ({
     event.preventDefault();
     event.stopPropagation();
     suppressSelectRef.current = false;
+    pendingDragPositionsRef.current.delete(nodeId);
     onSelect?.(nodeId, { expand: false });
     const node = nodesById.get(nodeId);
-    const origin = node?.position || { x: 0, y: 0 };
+    const origin = dragPositionsRef.current.get(nodeId) || node?.position || { x: 0, y: 0 };
     dragStateRef.current = {
       nodeId,
       startX: event.clientX,
       startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
       originX: origin.x,
       originY: origin.y,
       hasMoved: false
@@ -2196,7 +2286,7 @@ const FreeLayoutCanvas = ({
     const sizes = nodeSizesRef.current;
     const getSize = (nodeId) => sizes.get(nodeId) || FREE_LAYOUT_DEFAULT_NODE_SIZE;
     const getRect = (node) => {
-      const pos = node.position;
+      const pos = resolveNodePosition(node);
       if (!pos) return null;
       const size = getSize(node.id);
       const left = pos.x;
@@ -2291,7 +2381,7 @@ const FreeLayoutCanvas = ({
       });
     });
     return lines;
-  }, [visibleNodes, nodesById, layoutVersion, upstreamEdgeKeys]);
+  }, [visibleNodes, nodesById, layoutVersion, upstreamEdgeKeys, dragVersion, resolveNodePosition]);
 
   return (
     <div
@@ -2379,7 +2469,7 @@ const FreeLayoutCanvas = ({
         })()}
 
         {visibleNodes.map((node) => {
-          const position = node.position || { x: 0, y: 0 };
+          const position = resolveNodePosition(node) || { x: 0, y: 0 };
           return (
             <FreeLayoutNode
               key={node.id}
