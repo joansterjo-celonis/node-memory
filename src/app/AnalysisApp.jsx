@@ -5,7 +5,7 @@ import { Button, Card, Drawer, Dropdown, Empty, Modal, Space, Tag, Typography } 
 import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
 import { TreeNode, FreeLayoutCanvas } from '../components/TreeNode';
-import { Layout, Database, AppsIcon, Settings, Undo, Redo, TableIcon, X, Plus, Trash2, Play, Save } from '../ui/icons';
+import { Layout, Database, AppsIcon, Settings, Undo, Redo, TableIcon, X, Plus, Trash2, Play, Save, ArrowLeft, Edit as EditIcon } from '../ui/icons';
 import { parseCSVFile, readFileAsArrayBuffer, parseXLSX, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
 import { getChildren, getCalculationOrder, getNodeResult } from '../utils/nodeUtils';
 import { createDataEngine } from '../utils/dataEngine';
@@ -240,6 +240,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [dataModelSorts, setDataModelSorts] = useState(initialSession?.dataModelSorts ?? {});
   const [explorations, setExplorations] = useState([]);
   const [activeExplorationId, setActiveExplorationId] = useState(initialSession?.activeExplorationId ?? null);
+  const [draftExplorationName, setDraftExplorationName] = useState(null);
+  const [draftExplorationDescription, setDraftExplorationDescription] = useState(null);
+  const [editingExplorationId, setEditingExplorationId] = useState(null);
+  const [editingExplorationNameDraft, setEditingExplorationNameDraft] = useState('');
+  const [editingExplorationDescriptionId, setEditingExplorationDescriptionId] = useState(null);
+  const [editingExplorationDescriptionDraft, setEditingExplorationDescriptionDraft] = useState('');
+  const [isEditingActiveName, setIsEditingActiveName] = useState(false);
+  const [activeNameDraft, setActiveNameDraft] = useState('');
+  const [isEditingActiveDescription, setIsEditingActiveDescription] = useState(false);
+  const [activeDescriptionDraft, setActiveDescriptionDraft] = useState('');
   const [saveError, setSaveError] = useState(null);
   const [tableDensity, setTableDensity] = useState(readStoredTableDensity);
   const [isStatsCollapsed, setIsStatsCollapsed] = useState(initialSession?.isStatsCollapsed ?? false);
@@ -252,6 +262,14 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const statsDragFrameRef = useRef(null);
   const statsResizeStateRef = useRef(null);
   const statsResizeFrameRef = useRef(null);
+  const explorationNameInputRef = useRef(null);
+  const explorationDescriptionInputRef = useRef(null);
+  const activeNameInputRef = useRef(null);
+  const activeDescriptionInputRef = useRef(null);
+  const skipExplorationNameCommitRef = useRef(false);
+  const skipExplorationDescriptionCommitRef = useRef(false);
+  const skipActiveNameCommitRef = useRef(false);
+  const skipActiveDescriptionCommitRef = useRef(false);
   const nodeIdCounterRef = useRef(0);
   const filterIdCounterRef = useRef(0);
   const isMobileMode = renderMode === 'mobile';
@@ -271,6 +289,30 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       setHistoryIndex(safeHistoryIndex);
     }
   }, [historyIndex, safeHistoryIndex]);
+
+  useEffect(() => {
+    if (editingExplorationId) {
+      explorationNameInputRef.current?.focus?.();
+    }
+  }, [editingExplorationId]);
+
+  useEffect(() => {
+    if (editingExplorationDescriptionId) {
+      explorationDescriptionInputRef.current?.focus?.();
+    }
+  }, [editingExplorationDescriptionId]);
+
+  useEffect(() => {
+    if (isEditingActiveName) {
+      activeNameInputRef.current?.focus?.();
+    }
+  }, [isEditingActiveName]);
+
+  useEffect(() => {
+    if (isEditingActiveDescription) {
+      activeDescriptionInputRef.current?.focus?.();
+    }
+  }, [isEditingActiveDescription]);
 
   useEffect(() => {
     if (!shouldAutoMobile) return;
@@ -1342,6 +1384,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     });
   };
 
+  const normalizeExplorationName = (value) => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    return trimmed || 'Exploration';
+  };
+
+  const normalizeExplorationDescription = (value) => (
+    typeof value === 'string' ? value.trim() : ''
+  );
+
   const getExplorationStats = (model) => {
     const order = model?.order || [];
     const rowCount = order.reduce((sum, name) => sum + ((model.tables?.[name] || []).length), 0);
@@ -1353,11 +1404,13 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const now = new Date().toISOString();
     const stats = getExplorationStats(dataModel);
     const existing = explorations.find(exp => exp.id === activeExplorationId);
-    const baseName = rawDataName || 'Exploration';
+    const baseName = normalizeExplorationName(draftExplorationName || rawDataName);
     const name = existing?.name || baseName;
+    const description = existing?.description ?? normalizeExplorationDescription(draftExplorationDescription);
     const payload = {
       id: existing?.id || `exp-${Date.now()}`,
       name,
+      description,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
       nodes: sanitizeNodesForStorage(nodes),
@@ -1373,6 +1426,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       persistExplorations(next);
       setExplorations(next);
       setActiveExplorationId(payload.id);
+      setDraftExplorationName(null);
+      setDraftExplorationDescription(null);
       setShowDataModel(false);
       setViewMode('landing');
     } catch (err) {
@@ -1381,8 +1436,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   };
 
   const updateExplorationName = (id, nextName) => {
-    const trimmed = typeof nextName === 'string' ? nextName.trim() : '';
-    const safeName = trimmed || 'Exploration';
+    const safeName = normalizeExplorationName(nextName);
     setExplorations((prev) => {
       const target = prev.find(exp => exp.id === id);
       if (!target || target.name === safeName) {
@@ -1401,6 +1455,113 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     });
   };
 
+  const updateExplorationDescription = (id, nextDescription) => {
+    const safeDescription = normalizeExplorationDescription(nextDescription);
+    setExplorations((prev) => {
+      const target = prev.find(exp => exp.id === id);
+      if (!target || (target.description || '') === safeDescription) {
+        return prev;
+      }
+      const now = new Date().toISOString();
+      const next = prev.map(exp => (
+        exp.id === id ? { ...exp, description: safeDescription, updatedAt: now } : exp
+      ));
+      try {
+        persistExplorations(next);
+      } catch (err) {
+        // Ignore storage errors on description edit.
+      }
+      return next;
+    });
+  };
+
+  const handleExplorationRename = (value) => {
+    const safeName = normalizeExplorationName(value);
+    if (activeExplorationId) {
+      updateExplorationName(activeExplorationId, safeName);
+      return;
+    }
+    setDraftExplorationName(safeName);
+  };
+
+  const handleExplorationDescriptionChange = (value) => {
+    const safeDescription = normalizeExplorationDescription(value);
+    if (activeExplorationId) {
+      updateExplorationDescription(activeExplorationId, safeDescription);
+      return;
+    }
+    setDraftExplorationDescription(safeDescription);
+  };
+
+  const startEditingExplorationName = (id, currentName) => {
+    setEditingExplorationId(id);
+    setEditingExplorationNameDraft(currentName || 'Exploration');
+  };
+
+  const cancelEditingExplorationName = () => {
+    setEditingExplorationId(null);
+    setEditingExplorationNameDraft('');
+  };
+
+  const commitEditingExplorationName = (id) => {
+    if (!id || editingExplorationId !== id) return;
+    updateExplorationName(id, editingExplorationNameDraft);
+    cancelEditingExplorationName();
+  };
+
+  const startEditingExplorationDescription = (id, currentDescription) => {
+    setEditingExplorationDescriptionId(id);
+    setEditingExplorationDescriptionDraft(currentDescription || '');
+  };
+
+  const cancelEditingExplorationDescription = () => {
+    setEditingExplorationDescriptionId(null);
+    setEditingExplorationDescriptionDraft('');
+  };
+
+  const commitEditingExplorationDescription = (id) => {
+    if (!id || editingExplorationDescriptionId !== id) return;
+    updateExplorationDescription(id, editingExplorationDescriptionDraft);
+    cancelEditingExplorationDescription();
+  };
+
+  const startEditingActiveName = () => {
+    setActiveNameDraft(explorationDisplayName);
+    setIsEditingActiveName(true);
+  };
+
+  const cancelEditingActiveName = () => {
+    setIsEditingActiveName(false);
+    setActiveNameDraft('');
+  };
+
+  const commitEditingActiveName = () => {
+    handleExplorationRename(activeNameDraft);
+    cancelEditingActiveName();
+  };
+
+  const startEditingActiveDescription = () => {
+    setActiveDescriptionDraft(explorationDescription);
+    setIsEditingActiveDescription(true);
+  };
+
+  const cancelEditingActiveDescription = () => {
+    setIsEditingActiveDescription(false);
+    setActiveDescriptionDraft('');
+  };
+
+  const commitEditingActiveDescription = () => {
+    handleExplorationDescriptionChange(activeDescriptionDraft);
+    cancelEditingActiveDescription();
+  };
+
+  const goToExplorations = () => {
+    cancelEditingActiveName();
+    cancelEditingActiveDescription();
+    setShowDataModel(false);
+    setViewMode('landing');
+  };
+
   const openExploration = (exploration) => {
     if (!exploration) return;
     const nextNodes = exploration.nodes || createInitialNodes();
@@ -1412,6 +1573,14 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setLoadError(null);
     setSelectedFiles([]);
     setPendingFiles([]);
+    setDraftExplorationName(null);
+    setDraftExplorationDescription(null);
+    setEditingExplorationId(null);
+    setEditingExplorationDescriptionId(null);
+    setEditingExplorationNameDraft('');
+    setEditingExplorationDescriptionDraft('');
+    setIsEditingActiveName(false);
+    setIsEditingActiveDescription(false);
     setShowDataModel(false);
     setShowAddMenuForId(null);
     setShowInsertMenuForId(null);
@@ -1442,6 +1611,14 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setLoadError(null);
     setSelectedFiles([]);
     setPendingFiles([]);
+    setDraftExplorationName(null);
+    setDraftExplorationDescription(null);
+    setEditingExplorationId(null);
+    setEditingExplorationDescriptionId(null);
+    setEditingExplorationNameDraft('');
+    setEditingExplorationDescriptionDraft('');
+    setIsEditingActiveName(false);
+    setIsEditingActiveDescription(false);
     setShowDataModel(false);
     setShowAddMenuForId(null);
     setShowInsertMenuForId(null);
@@ -2164,6 +2341,22 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     }
   }), [themePreference, onThemeChange, tableDensity]);
 
+  const activeExploration = explorations.find(exp => exp.id === activeExplorationId);
+  const explorationDisplayName = activeExploration?.name || draftExplorationName || rawDataName || 'Exploration';
+  const explorationDescription = activeExploration?.description ?? draftExplorationDescription ?? '';
+  const explorationDescriptionLabel = explorationDescription || 'Add a description';
+  const explorationDescriptionTone = explorationDescription
+    ? 'text-gray-400 dark:text-slate-400'
+    : 'text-gray-400 dark:text-slate-500 italic';
+  const editButtonClass = 'inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-slate-600 shadow-sm transition hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200';
+  const editIconSize = 12;
+  const editableFieldPadding = 'pl-1 pr-8 py-0.5';
+  const titleTextClass = isMobileMode ? 'text-base leading-5' : 'text-lg leading-6';
+  const titleHeightClass = isMobileMode ? 'min-h-[24px]' : 'min-h-[28px]';
+  const descriptionTextClass = 'text-xs leading-4';
+  const descriptionHeightClass = 'min-h-[20px]';
+  const cardTitleTextClass = 'text-sm font-semibold leading-5';
+  const cardTitleHeightClass = 'min-h-[24px]';
   const dataModelCellPadding = tableDensity === 'dense' ? 'p-2' : 'p-3';
   const dataModelTextSize = tableDensity === 'dense' ? 'text-xs' : 'text-sm';
   const dataModelHeaderTextSize = tableDensity === 'dense' ? 'text-[11px]' : 'text-xs';
@@ -2183,8 +2376,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           <div className="flex-1 w-full flex flex-col items-center py-6 gap-6">
             <div
               onClick={() => {
-                setShowDataModel(false);
-                setViewMode('landing');
+                goToExplorations();
               }}
               className={`p-2.5 rounded-lg cursor-pointer transition-colors relative group ${
                 viewMode === 'landing' ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100' : 'hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -2206,11 +2398,136 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       <div className="flex-1 flex flex-col relative overflow-hidden bg-[#F8FAFC] dark:bg-slate-950">
         <header className={`bg-white border-b border-gray-200 flex items-center justify-between shadow-sm z-40 relative dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'flex-wrap gap-2 px-4 py-3' : 'h-16 px-8'}`}>
           <div className={`flex items-center gap-4 ${isMobileMode ? 'w-full justify-between' : ''}`}>
-            <div>
-              <div className={`font-bold text-gray-900 dark:text-slate-100 ${isMobileMode ? 'text-base' : 'text-lg'}`}>Node Memory Analytics</div>
-              {!isMobileMode && (
-                <div className="text-xs text-gray-400 dark:text-slate-400">Exploration workspace</div>
+            <div className="flex items-center gap-3 min-w-0">
+              {viewMode === 'canvas' && (
+                <Button
+                  size={isMobileMode ? 'small' : 'middle'}
+                  type="text"
+                  icon={<ArrowLeft size={16} />}
+                  onClick={goToExplorations}
+                  className={`${isMobileMode ? 'h-8 w-8' : 'h-9 w-9'} p-0`}
+                  style={{ padding: 0 }}
+                  aria-label="Back to explorations"
+                />
               )}
+              <div className="min-w-0 flex flex-col gap-0.5">
+                {viewMode === 'canvas' ? (
+                  <div className={`relative group/exp-title min-w-0 ${titleHeightClass}`}>
+                    <div className={isEditingActiveName ? 'opacity-0' : ''}>
+                      <div
+                        className={`truncate font-semibold text-gray-900 dark:text-slate-100 ${titleTextClass} ${editableFieldPadding}`}
+                        title={explorationDisplayName}
+                      >
+                        {explorationDisplayName}
+                      </div>
+                    </div>
+                    {isEditingActiveName && (
+                      <input
+                        ref={activeNameInputRef}
+                        className={`absolute inset-0 h-full w-full rounded-md border border-blue-400 bg-white/95 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-slate-900 dark:text-slate-100 ${titleTextClass} ${editableFieldPadding}`}
+                        value={activeNameDraft}
+                        onChange={(e) => setActiveNameDraft(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            skipActiveNameCommitRef.current = true;
+                            e.preventDefault();
+                            commitEditingActiveName();
+                          }
+                          if (e.key === 'Escape') {
+                            skipActiveNameCommitRef.current = true;
+                            e.preventDefault();
+                            cancelEditingActiveName();
+                          }
+                        }}
+                        onBlur={() => {
+                          if (skipActiveNameCommitRef.current) {
+                            skipActiveNameCommitRef.current = false;
+                            return;
+                          }
+                          commitEditingActiveName();
+                        }}
+                        aria-label="Rename exploration"
+                      />
+                    )}
+                    {!isEditingActiveName && (
+                      <button
+                        type="button"
+                        className={`absolute right-0 top-1/2 -translate-y-1/2 z-10 opacity-0 transition-opacity pointer-events-none group-hover/exp-title:opacity-100 group-hover/exp-title:pointer-events-auto ${editButtonClass}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startEditingActiveName();
+                        }}
+                        aria-label="Rename exploration"
+                      >
+                        <EditIcon size={editIconSize} />
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className={`font-bold text-gray-900 dark:text-slate-100 ${isMobileMode ? 'text-base' : 'text-lg'}`}>Node Memory Analytics</div>
+                )}
+                {!isMobileMode && (
+                  viewMode === 'canvas' ? (
+                    <div className={`relative group/exp-desc min-w-0 ${descriptionHeightClass}`}>
+                      <div className={isEditingActiveDescription ? 'opacity-0' : ''}>
+                        <div
+                          className={`truncate ${descriptionTextClass} ${explorationDescriptionTone} ${editableFieldPadding}`}
+                          title={explorationDescriptionLabel}
+                        >
+                          {explorationDescriptionLabel}
+                        </div>
+                      </div>
+                      {isEditingActiveDescription && (
+                        <input
+                          ref={activeDescriptionInputRef}
+                          className={`absolute inset-0 h-full w-full rounded-md border border-blue-400 bg-white/95 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-slate-900 dark:text-slate-100 ${descriptionTextClass} ${editableFieldPadding}`}
+                          value={activeDescriptionDraft}
+                          onChange={(e) => setActiveDescriptionDraft(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              skipActiveDescriptionCommitRef.current = true;
+                              e.preventDefault();
+                              commitEditingActiveDescription();
+                            }
+                            if (e.key === 'Escape') {
+                              skipActiveDescriptionCommitRef.current = true;
+                              e.preventDefault();
+                              cancelEditingActiveDescription();
+                            }
+                          }}
+                          onBlur={() => {
+                            if (skipActiveDescriptionCommitRef.current) {
+                              skipActiveDescriptionCommitRef.current = false;
+                              return;
+                            }
+                            commitEditingActiveDescription();
+                          }}
+                          aria-label="Edit exploration description"
+                        />
+                      )}
+                      {!isEditingActiveDescription && (
+                        <button
+                          type="button"
+                          className={`absolute right-0 top-1/2 -translate-y-1/2 z-10 opacity-0 transition-opacity pointer-events-none group-hover/exp-desc:opacity-100 group-hover/exp-desc:pointer-events-auto ${editButtonClass}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditingActiveDescription();
+                          }}
+                          aria-label="Edit exploration description"
+                        >
+                          <EditIcon size={editIconSize} />
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-gray-400 dark:text-slate-400">Exploration workspace</div>
+                  )
+                )}
+              </div>
             </div>
             {isMobileMode && (
               <div className="flex items-center gap-2">
@@ -2219,8 +2536,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                   type={viewMode === 'landing' ? 'primary' : 'default'}
                   icon={<AppsIcon size={16} />}
                   onClick={() => {
-                    setShowDataModel(false);
-                    setViewMode('landing');
+                    goToExplorations();
                   }}
                   aria-label="Explorations"
                 />
@@ -2325,8 +2641,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                       getChildren(nodesList, node.id).length === 0 ? sum + 1 : sum
                     ), 0);
                     const displayName = exp.name || 'Exploration';
+                    const description = exp.description || '';
+                    const descriptionLabel = description || 'Add a description';
+                    const descriptionTone = description
+                      ? 'text-slate-700 dark:text-slate-200'
+                      : 'text-slate-500 dark:text-slate-400 italic';
                     const updated = exp.updatedAt ? new Date(exp.updatedAt).toLocaleString() : '';
                     const updatedLabel = updated ? `Updated ${updated}` : 'Updated just now';
+                    const isEditingName = editingExplorationId === exp.id;
+                    const isEditingDescription = editingExplorationDescriptionId === exp.id;
                     return (
                       <Card
                         key={exp.id}
@@ -2336,17 +2659,114 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                         styles={{ body: { padding: 16 }, header: { padding: '12px 16px' } }}
                         title={(
                           <div className="exploration-card-title">
-                            <Text
-                              strong
-                              className="exploration-card-title-text"
-                              ellipsis={{ tooltip: displayName }}
-                              editable={{
-                                tooltip: 'Rename',
-                                onChange: (value) => updateExplorationName(exp.id, value)
-                              }}
-                            >
-                              {displayName}
-                            </Text>
+                            <div className="flex flex-col gap-1 w-full min-w-0">
+                              <div className={`relative flex-1 min-w-0 group/exp-card-title ${cardTitleHeightClass}`}>
+                                <div className={isEditingName ? 'opacity-0' : ''}>
+                                  <div
+                                    className={`exploration-card-title-text truncate text-slate-900 dark:text-slate-100 ${cardTitleTextClass} ${editableFieldPadding}`}
+                                    title={displayName}
+                                  >
+                                    {displayName}
+                                  </div>
+                                </div>
+                                {isEditingName && (
+                                  <input
+                                    ref={explorationNameInputRef}
+                                    className={`absolute inset-0 h-full w-full rounded-md border border-blue-400 bg-white/95 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-slate-900 dark:text-slate-100 ${cardTitleTextClass} ${editableFieldPadding}`}
+                                    value={editingExplorationNameDraft}
+                                    onChange={(e) => setEditingExplorationNameDraft(e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        skipExplorationNameCommitRef.current = true;
+                                        e.preventDefault();
+                                        commitEditingExplorationName(exp.id);
+                                      }
+                                      if (e.key === 'Escape') {
+                                        skipExplorationNameCommitRef.current = true;
+                                        e.preventDefault();
+                                        cancelEditingExplorationName();
+                                      }
+                                    }}
+                                    onBlur={() => {
+                                      if (skipExplorationNameCommitRef.current) {
+                                        skipExplorationNameCommitRef.current = false;
+                                        return;
+                                      }
+                                      commitEditingExplorationName(exp.id);
+                                    }}
+                                    aria-label="Rename exploration"
+                                  />
+                                )}
+                                {!isEditingName && (
+                                  <button
+                                    type="button"
+                                    className={`absolute right-0 top-1/2 -translate-y-1/2 z-10 opacity-0 transition-opacity pointer-events-none group-hover/exp-card-title:opacity-100 group-hover/exp-card-title:pointer-events-auto ${editButtonClass}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startEditingExplorationName(exp.id, displayName);
+                                    }}
+                                    aria-label="Rename exploration"
+                                  >
+                                    <EditIcon size={editIconSize} />
+                                  </button>
+                                )}
+                              </div>
+                              <div className={`relative group/exp-card-desc w-full min-w-0 ${descriptionHeightClass}`}>
+                                <div className={isEditingDescription ? 'opacity-0' : ''}>
+                                  <div
+                                    className={`truncate ${descriptionTextClass} ${descriptionTone} ${editableFieldPadding}`}
+                                    title={descriptionLabel}
+                                  >
+                                    {descriptionLabel}
+                                  </div>
+                                </div>
+                                {isEditingDescription && (
+                                  <input
+                                    ref={explorationDescriptionInputRef}
+                                    className={`absolute inset-0 h-full w-full rounded-md border border-blue-400 bg-white/95 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-slate-900 dark:text-slate-100 ${descriptionTextClass} ${editableFieldPadding}`}
+                                    value={editingExplorationDescriptionDraft}
+                                    onChange={(e) => setEditingExplorationDescriptionDraft(e.target.value)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') {
+                                        skipExplorationDescriptionCommitRef.current = true;
+                                        e.preventDefault();
+                                        commitEditingExplorationDescription(exp.id);
+                                      }
+                                      if (e.key === 'Escape') {
+                                        skipExplorationDescriptionCommitRef.current = true;
+                                        e.preventDefault();
+                                        cancelEditingExplorationDescription();
+                                      }
+                                    }}
+                                    onBlur={() => {
+                                      if (skipExplorationDescriptionCommitRef.current) {
+                                        skipExplorationDescriptionCommitRef.current = false;
+                                        return;
+                                      }
+                                      commitEditingExplorationDescription(exp.id);
+                                    }}
+                                    aria-label="Edit exploration description"
+                                  />
+                                )}
+                                {!isEditingDescription && (
+                                  <button
+                                    type="button"
+                                    className={`absolute right-0 top-1/2 -translate-y-1/2 z-10 opacity-0 transition-opacity pointer-events-none group-hover/exp-card-desc:opacity-100 group-hover/exp-card-desc:pointer-events-auto ${editButtonClass}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startEditingExplorationDescription(exp.id, description);
+                                    }}
+                                    aria-label="Edit exploration description"
+                                  >
+                                    <EditIcon size={editIconSize} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         )}
                         extra={
@@ -2361,7 +2781,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                           </Button>
                         }
                       >
-                        <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                        <div className="flex w-full flex-col gap-2">
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             {updatedLabel}
                           </Text>
@@ -2379,15 +2799,18 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                               {branchCount} branches
                             </Tag>
                           </Space>
-                          <Button
-                            type="default"
-                            block
-                            icon={<Play size={14} />}
-                            onClick={() => openExploration(exp)}
-                          >
-                            Open Exploration
-                          </Button>
-                        </Space>
+                          <div className="w-full">
+                            <Button
+                              type="default"
+                              block
+                              className="w-full"
+                              icon={<Play size={14} />}
+                              onClick={() => openExploration(exp)}
+                            >
+                              Open Exploration
+                            </Button>
+                          </div>
+                        </div>
                       </Card>
                     );
                   })}
