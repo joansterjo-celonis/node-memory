@@ -561,7 +561,7 @@ const MultiBranchGroup = ({ childrenNodes, renderChild, isClassicSmartMode, pare
     () => new Map(childrenNodes.map((child) => [child.nodeId, child])),
     [childrenNodes]
   );
-  // Classic smart mode: weight columns by subtree leaf count to prevent overlaps.
+  // Smart mode: weight columns by subtree leaf count to prevent overlaps.
   const resolveLeafWeight = (nodeId) => {
     if (!leafCountById) return 1;
     const value = leafCountById instanceof Map ? leafCountById.get(nodeId) : leafCountById?.[nodeId];
@@ -823,8 +823,8 @@ const TreeNode = ({
   const isActive = selectedNodeId === nodeId;
   const isExpanded = node.isExpanded !== false;
   const isBranchCollapsed = node.isBranchCollapsed === true;
-  const isEntangledMode = renderMode === 'entangled';
-  const isClassicSmartMode = renderMode === 'classicSmart';
+  const isEntangledMode = renderMode === 'entangled' || renderMode === 'entangledSmart';
+  const isClassicSmartMode = renderMode === 'classicSmart' || renderMode === 'entangledSmart';
   const isMobileMode = renderMode === 'mobile';
   const isSingleStreamMode = renderMode === 'singleStream' || isMobileMode;
   const peerNode = node.entangledPeerId ? nodes.find(n => n.id === node.entangledPeerId) : null;

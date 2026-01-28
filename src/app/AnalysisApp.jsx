@@ -32,7 +32,15 @@ const DEFAULT_ENTANGLED_COLOR = '#facc15';
 const SESSION_STORAGE_KEY = 'nma-session-v1';
 const SESSION_VERSION = 1;
 const VALID_VIEW_MODES = new Set(['canvas', 'landing']);
-const VALID_RENDER_MODES = new Set(['classic', 'classicSmart', 'entangled', 'singleStream', 'freeLayout', 'mobile']);
+const VALID_RENDER_MODES = new Set([
+  'classic',
+  'classicSmart',
+  'entangledSmart',
+  'entangled',
+  'singleStream',
+  'freeLayout',
+  'mobile'
+]);
 const MOBILE_UA_REGEX = /Mobi|Android|iPhone|iPad|iPod|Windows Phone|BlackBerry|IEMobile|Opera Mini|webOS/i;
 const isMobileUserAgent = () => {
   if (typeof navigator === 'undefined') return false;
@@ -273,9 +281,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const nodeIdCounterRef = useRef(0);
   const filterIdCounterRef = useRef(0);
   const isMobileMode = renderMode === 'mobile';
+  const isSmartMode = renderMode === 'classicSmart' || renderMode === 'entangledSmart';
   const leafCountById = useMemo(
-    () => (renderMode === 'classicSmart' ? buildLeafCountMap(nodes, { treatCollapsedAsLeaf: true }) : null),
-    [nodes, renderMode]
+    () => (isSmartMode ? buildLeafCountMap(nodes, { treatCollapsedAsLeaf: true }) : null),
+    [nodes, isSmartMode]
   );
 
   const createNodeId = useCallback(() => `node-${Date.now()}-${nodeIdCounterRef.current++}`, []);
@@ -2252,6 +2261,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const renderModeLabels = {
     classic: 'Classic',
     classicSmart: 'Classic smart',
+    entangledSmart: 'Entangled smart',
     entangled: 'Entangled',
     singleStream: 'Single stream',
     mobile: 'Mobile',
@@ -2261,23 +2271,14 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     items: [
       { key: 'classic', label: 'Classic' },
       { key: 'classicSmart', label: 'Classic smart' },
+      { key: 'entangledSmart', label: 'Entangled smart' },
       {
         key: 'entangled',
-        label: (
-          <Space size="small">
-            <span>Entangled</span>
-            <Tag color="gold">Beta</Tag>
-          </Space>
-        )
+        label: 'Entangled'
       },
       {
         key: 'singleStream',
-        label: (
-          <Space size="small">
-            <span>Single stream</span>
-            <Tag color="gold">Beta</Tag>
-          </Space>
-        )
+        label: 'Single stream'
       },
       {
         key: 'mobile',
@@ -2290,12 +2291,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       },
       {
         key: 'freeLayout',
-        label: (
-          <Space size="small">
-            <span>Free layout</span>
-            <Tag color="gold">Beta</Tag>
-          </Space>
-        )
+        label: 'Free layout'
       }
     ],
     selectable: true,
@@ -2876,7 +2872,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
             ) : (
               <div className={isMobileMode
                 ? 'w-full flex justify-center px-4 py-6 items-start min-h-full'
-                : (renderMode === 'classicSmart'
+                : (isSmartMode
                   ? 'w-full flex justify-start px-20 pt-6 items-start min-h-full'
                   : 'min-w-full inline-flex justify-center p-20 items-start min-h-full')}>
                 <TreeNode
