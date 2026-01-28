@@ -5,6 +5,7 @@ import {
   Add,
   ArrowClockwise,
   ArrowCounterclockwise,
+  ArrowLeft as FluentArrowLeft,
   ArrowMinimize,
   ArrowTrending,
   Apps,
@@ -56,6 +57,7 @@ export const Sigma = MathSymbols;
 export const Layout = LayoutCellFour;
 export const Undo = ArrowCounterclockwise;
 export const Redo = ArrowClockwise;
+export const ArrowLeft = FluentArrowLeft;
 export const Share2 = Share;
 export const FileJson = Code;
 export const X = Dismiss;
