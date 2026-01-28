@@ -5,7 +5,29 @@ import { Button, Card, Drawer, Dropdown, Empty, Modal, Space, Tag, Typography } 
 import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
 import { TreeNode, FreeLayoutCanvas } from '../components/TreeNode';
-import { Layout, Database, AppsIcon, Settings, Undo, Redo, TableIcon, X, Plus, Trash2, Play, Save, ArrowLeft, Edit as EditIcon } from '../ui/icons';
+import {
+  Layout,
+  LayoutClassic,
+  LayoutClassicSmart,
+  LayoutEntangled,
+  LayoutEntangledSmart,
+  LayoutSingleStream,
+  LayoutMobile,
+  LayoutFree,
+  Database,
+  AppsIcon,
+  Settings,
+  Undo,
+  Redo,
+  TableIcon,
+  X,
+  Plus,
+  Trash2,
+  Play,
+  Save,
+  ArrowLeft,
+  Edit as EditIcon
+} from '../ui/icons';
 import { parseCSVFile, readFileAsArrayBuffer, parseXLSX, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
 import { getChildren, getCalculationOrder, getNodeResult, buildLeafCountMap } from '../utils/nodeUtils';
 import { createDataEngine } from '../utils/dataEngine';
@@ -2267,31 +2289,49 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     mobile: 'Mobile',
     freeLayout: 'Free layout'
   };
+  const renderModeIcons = {
+    classic: LayoutClassic,
+    classicSmart: LayoutClassicSmart,
+    entangledSmart: LayoutEntangledSmart,
+    entangled: LayoutEntangled,
+    singleStream: LayoutSingleStream,
+    mobile: LayoutMobile,
+    freeLayout: LayoutFree
+  };
+  const renderModeIconSize = 14;
+  const renderModeMenuLabel = (IconComponent, label, tag) => (
+    <Space size="small">
+      <IconComponent size={renderModeIconSize} />
+      <span>{label}</span>
+      {tag}
+    </Space>
+  );
   const renderModeMenu = useMemo(() => ({
     items: [
-      { key: 'classic', label: 'Classic' },
-      { key: 'classicSmart', label: 'Classic smart' },
-      { key: 'entangledSmart', label: 'Entangled smart' },
+      { key: 'classic', label: renderModeMenuLabel(LayoutClassic, 'Classic') },
+      { key: 'classicSmart', label: renderModeMenuLabel(LayoutClassicSmart, 'Classic smart') },
+      { key: 'entangledSmart', label: renderModeMenuLabel(LayoutEntangledSmart, 'Entangled smart') },
       {
         key: 'entangled',
-        label: 'Entangled'
+        label: renderModeMenuLabel(LayoutEntangled, 'Entangled')
       },
       {
         key: 'singleStream',
-        label: 'Single stream'
+        label: renderModeMenuLabel(LayoutSingleStream, 'Single stream')
       },
       {
         key: 'mobile',
         label: (
-          <Space size="small">
-            <span>Mobile</span>
+          renderModeMenuLabel(
+            LayoutMobile,
+            'Mobile',
             <Tag color="green">Auto</Tag>
-          </Space>
+          )
         )
       },
       {
         key: 'freeLayout',
-        label: 'Free layout'
+        label: renderModeMenuLabel(LayoutFree, 'Free layout')
       }
     ],
     selectable: true,
@@ -2363,6 +2403,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const dataModelTextSize = tableDensity === 'dense' ? 'text-xs' : 'text-sm';
   const dataModelHeaderTextSize = tableDensity === 'dense' ? 'text-[11px]' : 'text-xs';
   const activeRenderModeLabel = renderModeLabels[renderMode] || 'Classic';
+  const ActiveRenderModeIcon = renderModeIcons[renderMode] || LayoutClassic;
 
   // -------------------------------------------------------------------
   // Render
@@ -2586,7 +2627,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                   />
                 </Space.Compact>
                 <Dropdown menu={renderModeMenu} trigger={['click']} placement="bottomRight">
-                  <Button size={isMobileMode ? 'small' : 'middle'} icon={<Layout size={14} />}>
+                  <Button size={isMobileMode ? 'small' : 'middle'} icon={<ActiveRenderModeIcon size={renderModeIconSize} />}>
                     {activeRenderModeLabel}
                   </Button>
                 </Dropdown>

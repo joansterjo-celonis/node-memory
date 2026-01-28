@@ -3,13 +3,19 @@
 import {
   createIcon,
   Add,
+  AlignCenterVertical,
+  AppTitle,
   ArrowClockwise,
   ArrowCounterclockwise,
   ArrowLeft as FluentArrowLeft,
   ArrowMinimize,
+  ArrowRoutingRectangleMultiple,
   ArrowTrending,
   Apps,
   Branch,
+  BorderBottomDouble,
+  BorderTopBottomDouble,
+  CenterVertical,
   CheckmarkSquare,
   ChevronDoubleDown,
   ChevronDoubleUp,
@@ -29,6 +35,7 @@ import {
   MathSymbols,
   NumberSymbol,
   MoreHorizontal as FluentMoreHorizontal,
+  Phone,
   Play as FluentPlay,
   Save as FluentSave,
   Settings as FluentSettings,
@@ -56,6 +63,13 @@ export const ChevronsDown = ChevronDoubleDown;
 export const ChevronsUp = ChevronDoubleUp;
 export const Sigma = MathSymbols;
 export const Layout = LayoutCellFour;
+export const LayoutClassic = AppTitle;
+export const LayoutClassicSmart = CenterVertical;
+export const LayoutEntangled = BorderTopBottomDouble;
+export const LayoutEntangledSmart = BorderBottomDouble;
+export const LayoutSingleStream = AlignCenterVertical;
+export const LayoutMobile = Phone;
+export const LayoutFree = ArrowRoutingRectangleMultiple;
 export const Undo = ArrowCounterclockwise;
 export const Redo = ArrowClockwise;
 export const ArrowLeft = FluentArrowLeft;
