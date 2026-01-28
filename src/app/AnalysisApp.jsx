@@ -32,7 +32,7 @@ const DEFAULT_ENTANGLED_COLOR = '#facc15';
 const SESSION_STORAGE_KEY = 'nma-session-v1';
 const SESSION_VERSION = 1;
 const VALID_VIEW_MODES = new Set(['canvas', 'landing']);
-const VALID_RENDER_MODES = new Set(['classic', 'entangled', 'singleStream', 'freeLayout', 'mobile']);
+const VALID_RENDER_MODES = new Set(['classic', 'classicSmart', 'entangled', 'singleStream', 'freeLayout', 'mobile']);
 const MOBILE_UA_REGEX = /Mobi|Android|iPhone|iPad|iPod|Windows Phone|BlackBerry|IEMobile|Opera Mini|webOS/i;
 const isMobileUserAgent = () => {
   if (typeof navigator === 'undefined') return false;
@@ -2247,6 +2247,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
   const renderModeLabels = {
     classic: 'Classic',
+    classicSmart: 'Classic smart',
     entangled: 'Entangled',
     singleStream: 'Single stream',
     mobile: 'Mobile',
@@ -2255,6 +2256,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const renderModeMenu = useMemo(() => ({
     items: [
       { key: 'classic', label: 'Classic' },
+      { key: 'classicSmart', label: 'Classic smart' },
       {
         key: 'entangled',
         label: (
@@ -2868,7 +2870,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 onRenameBranch={renameBranch}
               />
             ) : (
-              <div className={isMobileMode ? 'w-full flex justify-center px-4 py-6 items-start min-h-full' : 'min-w-full inline-flex justify-center p-20 items-start min-h-full'}>
+              <div className={isMobileMode
+                ? 'w-full flex justify-center px-4 py-6 items-start min-h-full'
+                : (renderMode === 'classicSmart'
+                  ? 'w-full flex justify-start px-20 pt-6 items-start min-h-full'
+                  : 'min-w-full inline-flex justify-center p-20 items-start min-h-full')}>
                 <TreeNode
                   nodeId="node-start"
                   nodes={nodes}
