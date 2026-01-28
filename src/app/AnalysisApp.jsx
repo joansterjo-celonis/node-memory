@@ -1380,6 +1380,27 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     }
   };
 
+  const updateExplorationName = (id, nextName) => {
+    const trimmed = typeof nextName === 'string' ? nextName.trim() : '';
+    const safeName = trimmed || 'Exploration';
+    setExplorations((prev) => {
+      const target = prev.find(exp => exp.id === id);
+      if (!target || target.name === safeName) {
+        return prev;
+      }
+      const now = new Date().toISOString();
+      const next = prev.map(exp => (
+        exp.id === id ? { ...exp, name: safeName, updatedAt: now } : exp
+      ));
+      try {
+        persistExplorations(next);
+      } catch (err) {
+        // Ignore storage errors on rename.
+      }
+      return next;
+    });
+  };
+
   const openExploration = (exploration) => {
     if (!exploration) return;
     const nextNodes = exploration.nodes || createInitialNodes();
@@ -2298,18 +2319,36 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     const order = exp.dataModel?.order || [];
                     const tableCount = exp.tableCount ?? order.length;
                     const rowCount = exp.rowCount ?? order.reduce((sum, name) => sum + ((exp.dataModel?.tables?.[name] || []).length), 0);
+                    const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+                    const nodeCount = nodesList.length;
+                    const branchCount = nodesList.reduce((sum, node) => (
+                      getChildren(nodesList, node.id).length === 0 ? sum + 1 : sum
+                    ), 0);
+                    const displayName = exp.name || 'Exploration';
                     const updated = exp.updatedAt ? new Date(exp.updatedAt).toLocaleString() : '';
                     const updatedLabel = updated ? `Updated ${updated}` : 'Updated just now';
                     return (
                       <Card
                         key={exp.id}
                         size="small"
-                        className="shadow-sm"
-                        title={
-                          <Text strong ellipsis={{ tooltip: exp.name || 'Exploration' }}>
-                            {exp.name || 'Exploration'}
-                          </Text>
-                        }
+                        bordered={false}
+                        className="exploration-card group h-full rounded-2xl border border-slate-200/70 bg-white/90 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/80"
+                        styles={{ body: { padding: 16 }, header: { padding: '12px 16px' } }}
+                        title={(
+                          <div className="exploration-card-title">
+                            <Text
+                              strong
+                              className="exploration-card-title-text"
+                              ellipsis={{ tooltip: displayName }}
+                              editable={{
+                                tooltip: 'Rename',
+                                onChange: (value) => updateExplorationName(exp.id, value)
+                              }}
+                            >
+                              {displayName}
+                            </Text>
+                          </div>
+                        )}
                         extra={
                           <Button
                             type="text"
@@ -2327,11 +2366,21 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                             {updatedLabel}
                           </Text>
                           <Space size="small" wrap>
-                            <Tag color="blue">{tableCount} tables</Tag>
-                            <Tag>{rowCount} rows</Tag>
+                            <Tag color="blue" bordered={false} className="rounded-full px-2">
+                              {tableCount} tables
+                            </Tag>
+                            <Tag color="cyan" bordered={false} className="rounded-full px-2">
+                              {rowCount} rows
+                            </Tag>
+                            <Tag color="purple" bordered={false} className="rounded-full px-2">
+                              {nodeCount} nodes
+                            </Tag>
+                            <Tag color="gold" bordered={false} className="rounded-full px-2">
+                              {branchCount} branches
+                            </Tag>
                           </Space>
                           <Button
-                            type="primary"
+                            type="default"
                             block
                             icon={<Play size={14} />}
                             onClick={() => openExploration(exp)}
