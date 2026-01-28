@@ -31,6 +31,8 @@ const BRANCH_CONNECTOR_HEIGHT = 16;
 const BRANCH_CONNECTOR_STROKE = 2;
 const CLASSIC_SMART_MIN_WIDTH = 250;
 const CLASSIC_SMART_COLUMN_GAP = 32;
+const CLASSIC_SMART_COLLAPSED_SCALE = 0.6;
+const CLASSIC_SMART_COLLAPSED_MIN_WIDTH = 160;
 const FREE_LAYOUT_MIN_SCALE = 0.4;
 const FREE_LAYOUT_MAX_SCALE = 2.2;
 const FREE_LAYOUT_ZOOM_STEP = 1.15;
@@ -566,15 +568,22 @@ const MultiBranchGroup = ({ childrenNodes, renderChild, isClassicSmartMode, pare
     if (!Number.isFinite(value) || value <= 0) return 1;
     return value;
   };
-  const resolveMinWidth = (leafWeight) => (
-    CLASSIC_SMART_MIN_WIDTH * leafWeight
-    + CLASSIC_SMART_COLUMN_GAP * Math.max(leafWeight - 1, 0)
-  );
+  const resolveMinWidth = (leafWeight, { isCollapsed = false } = {}) => {
+    const baseWidth = CLASSIC_SMART_MIN_WIDTH * leafWeight
+      + CLASSIC_SMART_COLUMN_GAP * Math.max(leafWeight - 1, 0);
+    if (!isCollapsed) return baseWidth;
+    return Math.max(CLASSIC_SMART_COLLAPSED_MIN_WIDTH, baseWidth * CLASSIC_SMART_COLLAPSED_SCALE);
+  };
+  const resolveFlexWeight = (leafWeight, { isCollapsed = false } = {}) => {
+    if (!isCollapsed) return leafWeight;
+    return Math.max(CLASSIC_SMART_COLLAPSED_SCALE, leafWeight * CLASSIC_SMART_COLLAPSED_SCALE);
+  };
   const layoutKey = React.useMemo(
     () => childrenNodes
       .map((child) => {
         const leafWeight = isClassicSmartMode ? resolveLeafWeight(child.nodeId) : 1;
-        return `${child.nodeId}:${child.entangledPeerId || ''}:${leafWeight}`;
+        const collapsedFlag = child.node?.isBranchCollapsed ? '1' : '0';
+        return `${child.nodeId}:${child.entangledPeerId || ''}:${leafWeight}:${collapsedFlag}`;
       })
       .join('|'),
     [childrenNodes, isClassicSmartMode, leafCountById]
@@ -735,8 +744,12 @@ const MultiBranchGroup = ({ childrenNodes, renderChild, isClassicSmartMode, pare
         )}
         {childrenNodes.map((child, idx) => {
           const leafWeight = isClassicSmartMode ? resolveLeafWeight(child.nodeId) : 1;
+          const isCollapsed = isClassicSmartMode && child.node?.isBranchCollapsed;
           const childStyle = isClassicSmartMode
-            ? { flex: `${leafWeight} 1 0`, minWidth: resolveMinWidth(leafWeight) }
+            ? {
+              flex: `${resolveFlexWeight(leafWeight, { isCollapsed })} 1 0`,
+              minWidth: resolveMinWidth(leafWeight, { isCollapsed })
+            }
             : undefined;
           return (
             <div
@@ -1497,31 +1510,6 @@ const TreeNode = ({
   const chartData = chartDataInfo.data;
   const resolvedChartYAxis = chartDataInfo.yField;
 
-  // Compact collapsed branch representation.
-  if (isBranchCollapsed) {
-    return (
-      <div className="flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
-        <div className="relative z-10">
-          <Button
-            onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
-            icon={<GitBranch size={14} />}
-            shape="round"
-          >
-            <Space size="small">
-              <Text className="text-xs">{node.title}</Text>
-              <Tag>
-                <Space size={2}>
-                  <Plus size={8} />
-                  {countDescendants(nodes, nodeId) + 1}
-                </Space>
-              </Tag>
-            </Space>
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   const actionMenuItems = React.useMemo(() => {
     const items = [
       { key: 'fork', label: 'Fork branch', icon: <GitBranch size={14} /> }
@@ -1549,6 +1537,44 @@ const TreeNode = ({
       onRemove(nodeId);
     }
   }, [nodeId, onAdd, onToggleBranch, onRemove]);
+
+  // Compact collapsed branch representation.
+  if (isBranchCollapsed) {
+    const collapsedTitle = isClassicSmartMode ? (
+      <Text
+        className="text-xs"
+        ellipsis={{ tooltip: node.title }}
+        style={{ maxWidth: 140, display: 'inline-block' }}
+      >
+        {node.title}
+      </Text>
+    ) : (
+      <Text className="text-xs">{node.title}</Text>
+    );
+
+    return (
+      <div className="flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
+        <div className="relative z-10">
+          <Button
+            onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
+            icon={<GitBranch size={14} />}
+            shape="round"
+            className={isClassicSmartMode ? 'max-w-full' : undefined}
+          >
+            <Space size="small" className={isClassicSmartMode ? 'min-w-0' : undefined}>
+              {collapsedTitle}
+              <Tag>
+                <Space size={2}>
+                  <Plus size={8} />
+                  {countDescendants(nodes, nodeId) + 1}
+                </Space>
+              </Tag>
+            </Space>
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   const showCompactFilterRow = headerIsCompact && node.type === 'FILTER' && filters.length > 0;
   const showCompactFilterInline = headerIsCompact && node.type === 'FILTER' && filters.length === 0;
