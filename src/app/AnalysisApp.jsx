@@ -444,11 +444,17 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           setDataModel(model);
           setDataModelSorts({});
           setRawDataName(fileNames.length === 1 ? fileNames[0] : `${fileNames.length} files`);
+          setPendingFiles([]);
 
           // If SOURCE node has no table selected, set default silently.
           const defaultTable = model.order[0] || null;
-          if (defaultTable) {
-            updateNode('node-start', { ...nodes.find(n => n.id === 'node-start').params, table: defaultTable }, false, true);
+          const sourceNode = nodes.find(n => n.id === 'node-start');
+          if (sourceNode) {
+            const nextParams = { ...sourceNode.params, __files: [] };
+            if (defaultTable) {
+              nextParams.table = defaultTable;
+            }
+            updateNode('node-start', nextParams, false, true);
           }
         }
       } catch (err) {
@@ -661,23 +667,29 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     updateNode(id, params, isMeta);
   };
 
-  const ingestPendingFiles = () => {
-    if (!pendingFiles || pendingFiles.length === 0) {
+  const ingestPendingFiles = (filesOverride) => {
+    const filesToIngest = Array.isArray(filesOverride) && filesOverride.length > 0
+      ? filesOverride
+      : pendingFiles;
+    if (!filesToIngest || filesToIngest.length === 0) {
       setLoadError('Please select one or more files to ingest.');
       return;
     }
-    const oversizeFile = findOversizeFile(pendingFiles);
+    const oversizeFile = findOversizeFile(filesToIngest);
     if (oversizeFile) {
       setLoadError(`${oversizeFile.name || 'A file'} exceeds the ${MAX_UPLOAD_MB} MB per-file limit.`);
       return;
     }
-    const totalBytes = getTotalFileBytes(pendingFiles);
+    const totalBytes = getTotalFileBytes(filesToIngest);
     if (totalBytes > MAX_UPLOAD_BYTES) {
       setLoadError(`Total upload size exceeds ${MAX_UPLOAD_MB} MB limit.`);
       return;
     }
     setLoadError(null);
-    setSelectedFiles([...pendingFiles]);
+    if (Array.isArray(filesOverride) && filesOverride.length > 0) {
+      setPendingFiles(filesToIngest);
+    }
+    setSelectedFiles([...filesToIngest]);
   };
 
   const clearIngestedData = () => {
