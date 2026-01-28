@@ -78,6 +78,40 @@
   line-height: 1.2;
 }
 
+/* Exploration cards: full-width titles + clean inline edit */
+.exploration-card .ant-card-head {
+  overflow: visible;
+}
+
+.exploration-card .ant-card-head-title {
+  min-width: 0;
+  overflow: visible;
+}
+
+.exploration-card-title {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.exploration-card-title-text {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.exploration-card-title .ant-typography-edit-content {
+  margin: 0;
+  width: 100%;
+}
+
+.exploration-card-title .ant-typography-edit-content > input,
+.exploration-card-title .ant-typography-edit-content > textarea {
+  width: 100%;
+  min-width: 0;
+}
+
 /* Free layout canvas + compact node header */
 .free-layout-canvas {
   cursor: default;
