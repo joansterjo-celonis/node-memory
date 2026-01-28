@@ -30,6 +30,47 @@ const countDescendants = (nodes, parentId) => {
   return count;
 };
 
+const buildLeafCountMap = (nodes, options = {}) => {
+  if (!Array.isArray(nodes) || nodes.length === 0) return new Map();
+  const { treatCollapsedAsLeaf = true } = options;
+  const childrenByParent = new Map();
+  const nodesById = new Map();
+
+  nodes.forEach((node) => {
+    if (!node || !node.id) return;
+    nodesById.set(node.id, node);
+    const list = childrenByParent.get(node.parentId) || [];
+    list.push(node);
+    childrenByParent.set(node.parentId, list);
+  });
+
+  const leafCountById = new Map();
+  const resolveLeafCount = (nodeId) => {
+    if (leafCountById.has(nodeId)) return leafCountById.get(nodeId);
+    const node = nodesById.get(nodeId);
+    if (!node) {
+      leafCountById.set(nodeId, 1);
+      return 1;
+    }
+    if (treatCollapsedAsLeaf && node.isBranchCollapsed) {
+      leafCountById.set(nodeId, 1);
+      return 1;
+    }
+    const children = childrenByParent.get(nodeId) || [];
+    if (children.length === 0) {
+      leafCountById.set(nodeId, 1);
+      return 1;
+    }
+    const total = children.reduce((sum, child) => sum + resolveLeafCount(child.id), 0);
+    const resolved = total > 0 ? total : 1;
+    leafCountById.set(nodeId, resolved);
+    return resolved;
+  };
+
+  nodes.forEach((node) => resolveLeafCount(node.id));
+  return leafCountById;
+};
+
 const getNodeResult = (chainData, id) => chainData.find(r => r.nodeId === id);
 
 const getCalculationOrder = (nodes) => {
@@ -77,6 +118,7 @@ export {
   ComponentType,
   getChildren,
   countDescendants,
+  buildLeafCountMap,
   getNodeResult,
   getCalculationOrder,
   formatNumber,
