@@ -1630,9 +1630,9 @@ const TreeNode = ({
               {resolvedBranchLabel && (
                 <Tag
                   color="geekblue"
-                  className={`uppercase text-[9px] font-bold inline-flex items-center leading-tight ${isSmartNarrow ? 'max-w-[90px]' : ''}`}
+                  className={`uppercase text-[9px] font-bold inline-flex items-center leading-tight min-w-0 ${isSmartNarrow ? 'max-w-[90px]' : ''}`}
                 >
-                  <span className={isSmartNarrow ? 'block truncate' : ''} title={resolvedBranchLabel}>
+                  <span className="block truncate" title={resolvedBranchLabel}>
                     {resolvedBranchLabel}
                   </span>
                 </Tag>
