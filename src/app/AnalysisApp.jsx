@@ -2331,7 +2331,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                       <Card
                         key={exp.id}
                         size="small"
-                        bordered={false}
+                        variant="borderless"
                         className="exploration-card group h-full rounded-2xl border border-slate-200/70 bg-white/90 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/80"
                         styles={{ body: { padding: 16 }, header: { padding: '12px 16px' } }}
                         title={(
@@ -2366,16 +2366,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                             {updatedLabel}
                           </Text>
                           <Space size="small" wrap>
-                            <Tag color="blue" bordered={false} className="rounded-full px-2">
+                            <Tag color="blue" variant="filled" className="rounded-full px-2">
                               {tableCount} tables
                             </Tag>
-                            <Tag color="cyan" bordered={false} className="rounded-full px-2">
+                            <Tag color="cyan" variant="filled" className="rounded-full px-2">
                               {rowCount} rows
                             </Tag>
-                            <Tag color="purple" bordered={false} className="rounded-full px-2">
+                            <Tag color="purple" variant="filled" className="rounded-full px-2">
                               {nodeCount} nodes
                             </Tag>
-                            <Tag color="gold" bordered={false} className="rounded-full px-2">
+                            <Tag color="gold" variant="filled" className="rounded-full px-2">
                               {branchCount} branches
                             </Tag>
                           </Space>
