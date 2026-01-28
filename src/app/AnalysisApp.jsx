@@ -7,7 +7,7 @@ import { PropertiesPanel } from '../components/PropertiesPanel';
 import { TreeNode, FreeLayoutCanvas } from '../components/TreeNode';
 import { Layout, Database, AppsIcon, Settings, Undo, Redo, TableIcon, X, Plus, Trash2, Play, Save, ArrowLeft, Edit as EditIcon } from '../ui/icons';
 import { parseCSVFile, readFileAsArrayBuffer, parseXLSX, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
-import { getChildren, getCalculationOrder, getNodeResult } from '../utils/nodeUtils';
+import { getChildren, getCalculationOrder, getNodeResult, buildLeafCountMap } from '../utils/nodeUtils';
 import { createDataEngine } from '../utils/dataEngine';
 import { normalizeFilters } from '../utils/filterUtils';
 
@@ -273,6 +273,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const nodeIdCounterRef = useRef(0);
   const filterIdCounterRef = useRef(0);
   const isMobileMode = renderMode === 'mobile';
+  const leafCountById = useMemo(
+    () => (renderMode === 'classicSmart' ? buildLeafCountMap(nodes, { treatCollapsedAsLeaf: true }) : null),
+    [nodes, renderMode]
+  );
 
   const createNodeId = useCallback(() => `node-${Date.now()}-${nodeIdCounterRef.current++}`, []);
   const createFilterId = useCallback(() => `filter-${Date.now()}-${filterIdCounterRef.current++}`, []);
@@ -2900,6 +2904,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                   showInsertMenuForId={showInsertMenuForId}
                   setShowInsertMenuForId={setShowInsertMenuForId}
                   renderMode={renderMode}
+                  leafCountById={leafCountById}
                   branchSelectionByNodeId={branchSelectionByNodeId}
                   onSelectBranch={setBranchSelection}
                   onRenameBranch={renameBranch}

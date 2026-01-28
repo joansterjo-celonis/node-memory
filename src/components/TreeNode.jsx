@@ -29,6 +29,8 @@ import WorldMapChart from '../ui/WorldMapChart';
 
 const BRANCH_CONNECTOR_HEIGHT = 16;
 const BRANCH_CONNECTOR_STROKE = 2;
+const CLASSIC_SMART_MIN_WIDTH = 250;
+const CLASSIC_SMART_COLUMN_GAP = 32;
 const FREE_LAYOUT_MIN_SCALE = 0.4;
 const FREE_LAYOUT_MAX_SCALE = 2.2;
 const FREE_LAYOUT_ZOOM_STEP = 1.15;
@@ -547,21 +549,35 @@ const TablePreview = React.memo(({
   );
 });
 
-const MultiBranchGroup = ({ childrenNodes, renderChild, isClassicSmartMode, parentRef }) => {
+const MultiBranchGroup = ({ childrenNodes, renderChild, isClassicSmartMode, parentRef, leafCountById }) => {
   const containerRef = React.useRef(null);
   const childRefs = React.useRef([]);
   const rafRef = React.useRef(null);
   const childrenNodesRef = React.useRef(childrenNodes);
   const [layout, setLayout] = React.useState({ parentX: 0, childXs: [], pairRects: [], width: 0 });
-  const layoutKey = React.useMemo(
-    () => childrenNodes
-      .map((child) => `${child.nodeId}:${child.entangledPeerId || ''}`)
-      .join('|'),
-    [childrenNodes]
-  );
   const childrenById = React.useMemo(
     () => new Map(childrenNodes.map((child) => [child.nodeId, child])),
     [childrenNodes]
+  );
+  // Classic smart mode: weight columns by subtree leaf count to prevent overlaps.
+  const resolveLeafWeight = (nodeId) => {
+    if (!leafCountById) return 1;
+    const value = leafCountById instanceof Map ? leafCountById.get(nodeId) : leafCountById?.[nodeId];
+    if (!Number.isFinite(value) || value <= 0) return 1;
+    return value;
+  };
+  const resolveMinWidth = (leafWeight) => (
+    CLASSIC_SMART_MIN_WIDTH * leafWeight
+    + CLASSIC_SMART_COLUMN_GAP * Math.max(leafWeight - 1, 0)
+  );
+  const layoutKey = React.useMemo(
+    () => childrenNodes
+      .map((child) => {
+        const leafWeight = isClassicSmartMode ? resolveLeafWeight(child.nodeId) : 1;
+        return `${child.nodeId}:${child.entangledPeerId || ''}:${leafWeight}`;
+      })
+      .join('|'),
+    [childrenNodes, isClassicSmartMode, leafCountById]
   );
 
   React.useEffect(() => {
@@ -717,18 +733,24 @@ const MultiBranchGroup = ({ childrenNodes, renderChild, isClassicSmartMode, pare
             ))}
           </svg>
         )}
-        {childrenNodes.map((child, idx) => (
-          <div
-            key={child.renderKey || child.id || child.nodeId}
-            ref={(el) => {
-              if (el) childRefs.current[idx] = el;
-            }}
-            className={isClassicSmartMode ? 'flex flex-col items-stretch w-full' : 'flex flex-col items-center'}
-            style={isClassicSmartMode ? { flex: '1 1 0', minWidth: 250 } : undefined}
-          >
-            {renderChild(child)}
-          </div>
-        ))}
+        {childrenNodes.map((child, idx) => {
+          const leafWeight = isClassicSmartMode ? resolveLeafWeight(child.nodeId) : 1;
+          const childStyle = isClassicSmartMode
+            ? { flex: `${leafWeight} 1 0`, minWidth: resolveMinWidth(leafWeight) }
+            : undefined;
+          return (
+            <div
+              key={child.renderKey || child.id || child.nodeId}
+              ref={(el) => {
+                if (el) childRefs.current[idx] = el;
+              }}
+              className={isClassicSmartMode ? 'flex flex-col items-stretch w-full' : 'flex flex-col items-center'}
+              style={childStyle}
+            >
+              {renderChild(child)}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -759,6 +781,7 @@ const TreeNode = ({
   showInsertMenuForId,
   setShowInsertMenuForId,
   renderMode = 'classic',
+  leafCountById,
   branchSelectionByNodeId,
   onSelectBranch,
   onRenameBranch,
@@ -875,7 +898,7 @@ const TreeNode = ({
     : (isSingleStreamMode ? 1800 : (isClassicSmartMode ? '100%' : undefined));
   const nodeCardMinWidth = isMobileMode
     ? 'min(92vw, 320px)'
-    : (isSingleStreamMode ? 'min(520px, 65vw)' : (isClassicSmartMode ? 250 : 520));
+    : (isSingleStreamMode ? 'min(520px, 65vw)' : (isClassicSmartMode ? CLASSIC_SMART_MIN_WIDTH : 520));
   const nodeCardResize = isExpanded && node.params.subtype !== 'AI'
     ? (isMobileMode ? 'none' : ((isSingleStreamMode || isClassicSmartMode) ? 'vertical' : 'both'))
     : 'none';
@@ -2038,6 +2061,7 @@ const TreeNode = ({
               showInsertMenuForId={showInsertMenuForId}
               setShowInsertMenuForId={setShowInsertMenuForId}
               renderMode={renderMode}
+              leafCountById={leafCountById}
               branchSelectionByNodeId={branchSelectionByNodeId}
               onSelectBranch={onSelectBranch}
               onRenameBranch={onRenameBranch}
@@ -2049,6 +2073,7 @@ const TreeNode = ({
               childrenNodes={renderChildrenItems}
               isClassicSmartMode={isClassicSmartMode}
               parentRef={nodeCardRef}
+              leafCountById={leafCountById}
               renderChild={(child) => (
                 <TreeNode
                   nodeId={child.nodeId}
@@ -2076,6 +2101,7 @@ const TreeNode = ({
                   showInsertMenuForId={showInsertMenuForId}
                   setShowInsertMenuForId={setShowInsertMenuForId}
                   renderMode={renderMode}
+                  leafCountById={leafCountById}
                   branchSelectionByNodeId={branchSelectionByNodeId}
                   onSelectBranch={onSelectBranch}
                   onRenameBranch={onRenameBranch}
