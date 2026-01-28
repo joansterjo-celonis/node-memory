@@ -17,6 +17,7 @@ import {
   Gauge,
   LinkIcon,
   Minimize2,
+  MoreHorizontal,
   Edit as EditIcon,
   Share2,
   Layout
@@ -546,12 +547,12 @@ const TablePreview = React.memo(({
   );
 });
 
-const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
+const MultiBranchGroup = ({ childrenNodes, renderChild, isClassicSmartMode, parentRef }) => {
   const containerRef = React.useRef(null);
   const childRefs = React.useRef([]);
   const rafRef = React.useRef(null);
   const childrenNodesRef = React.useRef(childrenNodes);
-  const [layout, setLayout] = React.useState({ parentX: 0, childXs: [], pairRects: [] });
+  const [layout, setLayout] = React.useState({ parentX: 0, childXs: [], pairRects: [], width: 0 });
   const layoutKey = React.useMemo(
     () => childrenNodes
       .map((child) => `${child.nodeId}:${child.entangledPeerId || ''}`)
@@ -572,6 +573,7 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
     if (!container) return;
     const rect = container.getBoundingClientRect();
     if (!rect.width) return;
+    const parentRect = parentRef?.current?.getBoundingClientRect?.();
     const currentChildren = childrenNodesRef.current;
     const childRects = childRefs.current.map((el) => (el ? el.getBoundingClientRect() : null));
     const childXs = childRects
@@ -582,6 +584,10 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
       .filter((val) => val !== null);
 
     const indexById = new Map(currentChildren.map((child, idx) => [child.nodeId, idx]));
+    const contentWidth = Math.max(
+      rect.width,
+      ...childRects.map((childRect) => (childRect ? childRect.right - rect.left : 0))
+    );
     const pairRects = [];
     currentChildren.forEach((child, idx) => {
       if (!child.entangledPeerId) return;
@@ -606,8 +612,11 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
       });
     });
 
-    setLayout({ parentX: rect.width / 2, childXs, pairRects });
-  }, []);
+    const parentX = parentRect
+      ? (parentRect.left + parentRect.width / 2 - rect.left)
+      : rect.width / 2;
+    setLayout({ parentX, childXs, pairRects, width: contentWidth });
+  }, [parentRef]);
 
   const scheduleUpdate = React.useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -633,6 +642,7 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
       childRefs.current.forEach((el) => {
         if (el) observer.observe(el);
       });
+      if (parentRef?.current) observer.observe(parentRef.current);
     } else {
       window.addEventListener('resize', scheduleUpdate);
     }
@@ -649,10 +659,10 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
   const midY = BRANCH_CONNECTOR_HEIGHT / 2;
 
   return (
-    <div className="flex flex-col items-center">
+    <div className={`flex flex-col items-center ${isClassicSmartMode ? 'w-full' : ''}`}>
       <div
         ref={containerRef}
-        className="relative flex gap-8"
+        className={isClassicSmartMode ? 'relative flex w-full gap-8' : 'relative flex gap-8'}
         style={{ paddingTop: BRANCH_CONNECTOR_HEIGHT }}
       >
         {hasLayout && layout.pairRects.length > 0 && (
@@ -680,7 +690,8 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
 
         {hasLayout && (
           <svg
-            className="absolute top-0 left-0 w-full text-gray-300 dark:text-slate-600 pointer-events-none"
+            className="absolute top-0 left-0 text-gray-300 dark:text-slate-600 pointer-events-none"
+            style={{ width: layout.width ? `${layout.width}px` : '100%', minWidth: '100%' }}
             height={BRANCH_CONNECTOR_HEIGHT}
             aria-hidden="true"
           >
@@ -712,7 +723,8 @@ const MultiBranchGroup = ({ childrenNodes, renderChild }) => {
             ref={(el) => {
               if (el) childRefs.current[idx] = el;
             }}
-            className="flex flex-col items-center"
+            className={isClassicSmartMode ? 'flex flex-col items-stretch w-full' : 'flex flex-col items-center'}
+            style={isClassicSmartMode ? { flex: '1 1 0', minWidth: 250 } : undefined}
           >
             {renderChild(child)}
           </div>
@@ -776,6 +788,7 @@ const TreeNode = ({
   const isExpanded = node.isExpanded !== false;
   const isBranchCollapsed = node.isBranchCollapsed === true;
   const isEntangledMode = renderMode === 'entangled';
+  const isClassicSmartMode = renderMode === 'classicSmart';
   const isMobileMode = renderMode === 'mobile';
   const isSingleStreamMode = renderMode === 'singleStream' || isMobileMode;
   const peerNode = node.entangledPeerId ? nodes.find(n => n.id === node.entangledPeerId) : null;
@@ -785,10 +798,12 @@ const TreeNode = ({
   const tableDensityClass = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
   const addMenuRef = React.useRef(null);
   const insertMenuRef = React.useRef(null);
+  const nodeCardRef = React.useRef(null);
   const [editingBranchId, setEditingBranchId] = React.useState(null);
   const [branchNameDraft, setBranchNameDraft] = React.useState('');
   const branchInputRef = React.useRef(null);
   const skipBranchCommitRef = React.useRef(false);
+  const [isNarrowNodeCard, setIsNarrowNodeCard] = React.useState(false);
 
   const startBranchRename = React.useCallback((childId, label) => {
     skipBranchCommitRef.current = false;
@@ -854,14 +869,44 @@ const TreeNode = ({
 
   const nodeCardWidth = isMobileMode
     ? 'min(92vw, 560px)'
-    : (isSingleStreamMode ? '65vw' : 640);
-  const nodeCardMaxWidth = isMobileMode ? '92vw' : (isSingleStreamMode ? 1800 : undefined);
+    : (isSingleStreamMode ? '65vw' : (isClassicSmartMode ? '100%' : 640));
+  const nodeCardMaxWidth = isMobileMode
+    ? '92vw'
+    : (isSingleStreamMode ? 1800 : (isClassicSmartMode ? '100%' : undefined));
   const nodeCardMinWidth = isMobileMode
     ? 'min(92vw, 320px)'
-    : (isSingleStreamMode ? 'min(520px, 65vw)' : 520);
+    : (isSingleStreamMode ? 'min(520px, 65vw)' : (isClassicSmartMode ? 250 : 520));
   const nodeCardResize = isExpanded && node.params.subtype !== 'AI'
-    ? (isMobileMode ? 'none' : (isSingleStreamMode ? 'vertical' : 'both'))
+    ? (isMobileMode ? 'none' : ((isSingleStreamMode || isClassicSmartMode) ? 'vertical' : 'both'))
     : 'none';
+  const isSmartNarrow = isClassicSmartMode && isNarrowNodeCard;
+  const headerIsCompact = compactHeader || isSmartNarrow;
+
+  React.useEffect(() => {
+    if (!isClassicSmartMode) {
+      setIsNarrowNodeCard(false);
+      return undefined;
+    }
+    const nodeEl = nodeCardRef.current;
+    if (!nodeEl) return undefined;
+    const updateNarrowState = () => {
+      const nextIsNarrow = nodeEl.getBoundingClientRect().width < 350;
+      setIsNarrowNodeCard((prev) => (prev === nextIsNarrow ? prev : nextIsNarrow));
+    };
+    updateNarrowState();
+    const hasResizeObserver = typeof ResizeObserver !== 'undefined';
+    let observer = null;
+    if (hasResizeObserver) {
+      observer = new ResizeObserver(updateNarrowState);
+      observer.observe(nodeEl);
+    } else {
+      window.addEventListener('resize', updateNarrowState);
+    }
+    return () => {
+      if (observer) observer.disconnect();
+      window.removeEventListener('resize', updateNarrowState);
+    };
+  }, [isClassicSmartMode]);
 
   React.useEffect(() => {
     if (showAddMenuForId !== resolvedMenuId || !addMenuRef.current) return undefined;
@@ -1208,22 +1253,17 @@ const TreeNode = ({
   const renderFilterChips = (compact = false) => {
     if (!filters.length && !compact) {
       return (
-        <Space size="small">
-          <Text type="secondary" className="text-xs">
-            No filters yet
-          </Text>
-          <Popover
-            content={filterBuilderContent}
-            trigger="click"
-            open={isFilterBuilderOpen && filterBuilderTargetIndex === -1}
-            onOpenChange={(open) => {
-              if (!open) closeFilterBuilder();
-            }}
-            placement="bottomLeft"
-          >
-            {filterAddTrigger}
-          </Popover>
-        </Space>
+        <Popover
+          content={filterBuilderContent}
+          trigger="click"
+          open={isFilterBuilderOpen && filterBuilderTargetIndex === -1}
+          onOpenChange={(open) => {
+            if (!open) closeFilterBuilder();
+          }}
+          placement="bottomLeft"
+        >
+          {filterAddTrigger}
+        </Popover>
       );
     }
 
@@ -1459,8 +1499,39 @@ const TreeNode = ({
     );
   }
 
+  const actionMenuItems = React.useMemo(() => {
+    const items = [
+      { key: 'fork', label: 'Fork branch', icon: <GitBranch size={14} /> }
+    ];
+    if (node.parentId) {
+      items.push({ key: 'minimize', label: 'Minimize node', icon: <Minimize2 size={14} /> });
+    }
+    if (node.type !== 'SOURCE') {
+      items.push({ key: 'delete', label: 'Delete node', icon: <Trash2 size={14} />, danger: true });
+    }
+    return items;
+  }, [node.parentId, node.type]);
+
+  const handleActionMenuClick = React.useCallback(({ key, domEvent }) => {
+    domEvent?.stopPropagation?.();
+    if (key === 'fork') {
+      onAdd('FILTER', nodeId);
+      return;
+    }
+    if (key === 'minimize') {
+      onToggleBranch(nodeId);
+      return;
+    }
+    if (key === 'delete') {
+      onRemove(nodeId);
+    }
+  }, [nodeId, onAdd, onToggleBranch, onRemove]);
+
+  const showCompactFilterRow = headerIsCompact && node.type === 'FILTER' && filters.length > 0;
+  const showCompactFilterInline = headerIsCompact && node.type === 'FILTER' && filters.length === 0;
+
   const nodeCard = (
-    <div className="relative group z-10">
+    <div className={`relative group z-10 ${isClassicSmartMode ? 'w-full' : ''}`}>
       <div
         onClick={(e) => {
           e.stopPropagation();
@@ -1469,7 +1540,7 @@ const TreeNode = ({
         }}
         className={`
           node-card bg-white dark:bg-slate-900 rounded-xl border-2 transition-all cursor-pointer overflow-hidden relative flex flex-col
-          ${compactHeader ? 'node-card--compact' : ''}
+          ${headerIsCompact ? 'node-card--compact' : ''}
           ${isActive
             ? 'border-blue-500 shadow-xl shadow-blue-500/10 ring-1 ring-blue-500 z-20 dark:shadow-blue-500/20'
             : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md dark:border-slate-700 dark:hover:border-slate-600 dark:shadow-black/40'}
@@ -1483,10 +1554,11 @@ const TreeNode = ({
           resize: nodeCardResize
         }}
         data-node-resize="true"
+        ref={nodeCardRef}
       >
         {/* Header */}
         <div
-          className={`node-card-header p-4 flex items-center gap-3 ${compactHeader ? 'node-card-header--compact' : ''} ${headerDragProps ? 'node-drag-handle' : ''}`}
+          className={`node-card-header p-4 flex items-center gap-3 ${headerIsCompact ? 'node-card-header--compact' : ''} ${headerDragProps ? 'node-drag-handle' : ''}`}
           {...headerDragProps}
         >
           <Button
@@ -1499,14 +1571,24 @@ const TreeNode = ({
             <Icon size={20} />
           </div>
           <div className="flex-1 min-w-0">
-            <Space size="small" align="center">
-              <Text strong className="truncate node-card-title">{node.title}</Text>
+            <div className="flex items-center gap-2 min-w-0">
+              <Text
+                strong
+                className={`truncate node-card-title leading-tight ${isSmartNarrow ? 'max-w-[160px]' : ''}`}
+              >
+                {node.title}
+              </Text>
               {resolvedBranchLabel && (
-                <Tag color="geekblue" className="uppercase text-[9px] font-bold">
-                  {resolvedBranchLabel}
+                <Tag
+                  color="geekblue"
+                  className={`uppercase text-[9px] font-bold inline-flex items-center leading-tight ${isSmartNarrow ? 'max-w-[90px]' : ''}`}
+                >
+                  <span className={isSmartNarrow ? 'block truncate' : ''} title={resolvedBranchLabel}>
+                    {resolvedBranchLabel}
+                  </span>
                 </Tag>
               )}
-              {compactHeader && node.type === 'FILTER' && renderFilterChips(true)}
+              {showCompactFilterInline && renderFilterChips(true)}
               {node.entangledPeerId && (
                 <EntangledIndicator
                   color={node.entangledColor}
@@ -1515,10 +1597,15 @@ const TreeNode = ({
                   className="entangled-node-indicator"
                 />
               )}
-            </Space>
+            </div>
+            {showCompactFilterRow && (
+              <div className="mt-1">
+                {renderFilterChips(true)}
+              </div>
+            )}
             <div className="mt-0.5 node-card-subtitle">
               {node.type === 'FILTER' ? (
-                compactHeader ? null : renderFilterChips(false)
+                headerIsCompact ? null : renderFilterChips(false)
               ) : (
                 <Text type="secondary" className="text-xs truncate block">
                   {node.type === 'AGGREGATE' ? `Group by ${node.params.groupBy}` :
@@ -1529,34 +1616,51 @@ const TreeNode = ({
               )}
             </div>
           </div>
-          <Space size="small">
-            <Tooltip title="Fork Branch">
+          {isSmartNarrow ? (
+            <Dropdown
+              menu={{ items: actionMenuItems, onClick: handleActionMenuClick }}
+              trigger={['click']}
+              placement="bottomRight"
+            >
               <Button
                 type="text"
-                icon={<GitBranch size={16} />}
-                onClick={(e) => { e.stopPropagation(); onAdd('FILTER', nodeId); }}
+                size="small"
+                icon={<MoreHorizontal size={16} />}
+                onClick={(e) => e.stopPropagation()}
+                aria-label="Node actions"
+                className="shrink-0"
               />
-            </Tooltip>
-
-            {node.parentId && (
-              <Tooltip title="Minimize Node">
+            </Dropdown>
+          ) : (
+            <Space size="small">
+              <Tooltip title="Fork Branch">
                 <Button
                   type="text"
-                  icon={<Minimize2 size={16} />}
-                  onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
+                  icon={<GitBranch size={16} />}
+                  onClick={(e) => { e.stopPropagation(); onAdd('FILTER', nodeId); }}
                 />
               </Tooltip>
-            )}
 
-            {node.type !== 'SOURCE' && (
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 size={16} />}
-                onClick={(e) => { e.stopPropagation(); onRemove(nodeId); }}
-              />
-            )}
-          </Space>
+              {node.parentId && (
+                <Tooltip title="Minimize Node">
+                  <Button
+                    type="text"
+                    icon={<Minimize2 size={16} />}
+                    onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
+                  />
+                </Tooltip>
+              )}
+
+              {node.type !== 'SOURCE' && (
+                <Button
+                  type="text"
+                  danger
+                  icon={<Trash2 size={16} />}
+                  onClick={(e) => { e.stopPropagation(); onRemove(nodeId); }}
+                />
+              )}
+            </Space>
+          )}
         </div>
 
         {showBranchTabs && (
@@ -1875,7 +1979,7 @@ const TreeNode = ({
   );
 
   return (
-    <div className="flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
+    <div className={`flex flex-col animate-in fade-in zoom-in-95 duration-300 ${isClassicSmartMode ? 'w-full items-stretch' : 'items-center'}`}>
       {/* NODE CARD */}
       {isEntangledMode ? (
         <Dropdown menu={entangleMenu} trigger={['contextMenu']}>
@@ -1885,7 +1989,7 @@ const TreeNode = ({
 
       {/* CONNECTORS & CHILDREN */}
       {renderChildren && renderChildrenItems.length > 0 && (
-        <div className="flex flex-col items-center">
+        <div className={`flex flex-col items-center ${isClassicSmartMode ? 'w-full' : ''}`}>
           <div className="w-0.5 h-8 bg-gray-300 dark:bg-slate-600 rounded-full relative group/line">
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity z-30">
               <div ref={insertMenuRef}>
@@ -1943,6 +2047,8 @@ const TreeNode = ({
           ) : (
             <MultiBranchGroup
               childrenNodes={renderChildrenItems}
+              isClassicSmartMode={isClassicSmartMode}
+              parentRef={nodeCardRef}
               renderChild={(child) => (
                 <TreeNode
                   nodeId={child.nodeId}

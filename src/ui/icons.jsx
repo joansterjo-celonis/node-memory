@@ -28,6 +28,7 @@ import {
   Link as FluentLink,
   MathSymbols,
   NumberSymbol,
+  MoreHorizontal as FluentMoreHorizontal,
   Play as FluentPlay,
   Save as FluentSave,
   Settings as FluentSettings,
@@ -69,3 +70,4 @@ export const Gauge = FluentGauge;
 export const LinkIcon = FluentLink;
 export const CheckSquare = CheckmarkSquare;
 export const Minimize2 = ArrowMinimize;
+export const MoreHorizontal = FluentMoreHorizontal;

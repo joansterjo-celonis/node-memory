@@ -509,11 +509,7 @@ const PropertiesPanel = ({
         {/* FILTER CONFIG */}
         {node.type === 'FILTER' && (
           <div className="space-y-4">
-            {filters.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-                No filters yet. Add one to refine the data in this node.
-              </div>
-            ) : (
+            {filters.length > 0 && (
               <div className="space-y-3">
                 {filters.map((filter, idx) => {
                   const isActive = activeFilterIndex === idx;
