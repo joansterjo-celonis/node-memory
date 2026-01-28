@@ -26,6 +26,9 @@ import { normalizeFilters } from '../utils/filterUtils';
 
 const { Title, Text } = Typography;
 
+const SAMPLE_FILE_NAME = 'Sneakers_multi.xlsx';
+const SAMPLE_FILE_URL = new URL('../utils/Sneakers_multi.xlsx', import.meta.url);
+
 const KPI_FUNCTIONS = [
   { value: 'count', label: 'Count' },
   { value: 'count_distinct', label: 'Distinct Count' },
@@ -77,6 +80,7 @@ const PropertiesPanel = ({
   const [localParams, setLocalParams] = useState({});
   const [llmSettings, setLlmSettings] = useState(readStoredLlmSettings);
   const [uploadError, setUploadError] = useState('');
+  const [isSampleLoading, setIsSampleLoading] = useState(false);
 
   useEffect(() => {
     if (node) setLocalParams(node.params || {});
@@ -176,6 +180,8 @@ const PropertiesPanel = ({
   const getTotalBytes = (files = []) => files.reduce((sum, file) => sum + (file?.size || 0), 0);
   const totalPendingBytes = getTotalBytes(currentFiles);
   const totalPendingMb = (totalPendingBytes / (1024 * 1024)).toFixed(1);
+  const hasLoadedData = (dataModel?.order || []).length > 0;
+  const showSampleButton = currentFiles.length === 0 && !hasLoadedData;
   const addPendingFiles = (incoming) => {
     setUploadError('');
     const merged = [...currentFiles];
@@ -212,6 +218,29 @@ const PropertiesPanel = ({
   const clearPendingFiles = () => {
     setUploadError('');
     handleChange('__files', []);
+  };
+
+  const handleLoadSample = async () => {
+    if (isSampleLoading) return;
+    setUploadError('');
+    setIsSampleLoading(true);
+    try {
+      const response = await fetch(SAMPLE_FILE_URL);
+      if (!response.ok) {
+        throw new Error('Failed to load the sample file.');
+      }
+      const blob = await response.blob();
+      const file = new File([blob], SAMPLE_FILE_NAME, {
+        type: blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        lastModified: Date.now()
+      });
+      addPendingFiles([file]);
+      if (onIngest) onIngest([file]);
+    } catch (err) {
+      setUploadError(err?.message || 'Failed to load the sample file.');
+    } finally {
+      setIsSampleLoading(false);
+    }
   };
 
   const kpiMetrics = (node.type === 'COMPONENT' && node.params.subtype === 'KPI')
@@ -330,18 +359,31 @@ const PropertiesPanel = ({
             {/* File ingestion controls */}
             <Form.Item label="Upload data (CSV or Excel)">
               <Space orientation="vertical" size="small" style={{ width: '100%' }}>
-                <Upload
-                  multiple
-                  accept=".csv,.xlsx,.xls"
-                  beforeUpload={() => false}
-                  showUploadList={false}
-                  onChange={({ fileList }) => {
-                    const files = fileList.map((file) => file.originFileObj).filter(Boolean);
-                    if (files.length) addPendingFiles(files);
-                  }}
-                >
-                  <Button icon={<Plus size={14} />}>Select files</Button>
-                </Upload>
+                <Space size="small" wrap>
+                  <Upload
+                    multiple
+                    accept=".csv,.xlsx,.xls"
+                    beforeUpload={() => false}
+                    showUploadList={false}
+                    onChange={({ fileList }) => {
+                      const files = fileList.map((file) => file.originFileObj).filter(Boolean);
+                      if (files.length) addPendingFiles(files);
+                    }}
+                  >
+                    <Button icon={<Plus size={14} />}>Select files</Button>
+                  </Upload>
+                  {showSampleButton && (
+                    <Button
+                      type="default"
+                      icon={<Database size={14} />}
+                      onClick={handleLoadSample}
+                      loading={isSampleLoading}
+                      disabled={isSampleLoading || sourceStatus?.loading}
+                    >
+                      Load sample
+                    </Button>
+                  )}
+                </Space>
                 <Text type="secondary" className="text-xs">
                   Tip: uploading files replaces the data model feeding the chain.
                 </Text>
