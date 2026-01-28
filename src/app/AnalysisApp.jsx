@@ -2655,8 +2655,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                         key={exp.id}
                         size="small"
                         variant="borderless"
-                        className="exploration-card group h-full rounded-2xl border border-slate-200/70 bg-white/90 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/80"
-                        styles={{ body: { padding: 16 }, header: { padding: '12px 16px' } }}
+                        className="exploration-card group h-full rounded-2xl border border-slate-200/70 bg-white/90 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/80 flex flex-col"
+                        styles={{
+                          body: {
+                            padding: 16,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            flex: 1,
+                          },
+                          header: { padding: '12px 16px' },
+                        }}
                         title={(
                           <div className="exploration-card-title">
                             <div className="flex flex-col gap-1 w-full min-w-0">
@@ -2781,25 +2789,27 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                           </Button>
                         }
                       >
-                        <div className="flex w-full flex-col gap-2">
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            {updatedLabel}
-                          </Text>
-                          <Space size="small" wrap>
-                            <Tag color="blue" variant="filled" className="rounded-full px-2">
-                              {tableCount} tables
-                            </Tag>
-                            <Tag color="cyan" variant="filled" className="rounded-full px-2">
-                              {rowCount} rows
-                            </Tag>
-                            <Tag color="purple" variant="filled" className="rounded-full px-2">
-                              {nodeCount} nodes
-                            </Tag>
-                            <Tag color="gold" variant="filled" className="rounded-full px-2">
-                              {branchCount} branches
-                            </Tag>
-                          </Space>
-                          <div className="w-full">
+                        <div className="flex w-full flex-1 flex-col">
+                          <div className="flex flex-col gap-2">
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              {updatedLabel}
+                            </Text>
+                            <Space size="small" wrap>
+                              <Tag color="blue" variant="filled" className="rounded-full px-2">
+                                {tableCount} tables
+                              </Tag>
+                              <Tag color="cyan" variant="filled" className="rounded-full px-2">
+                                {rowCount} rows
+                              </Tag>
+                              <Tag color="purple" variant="filled" className="rounded-full px-2">
+                                {nodeCount} nodes
+                              </Tag>
+                              <Tag color="gold" variant="filled" className="rounded-full px-2">
+                                {branchCount} branches
+                              </Tag>
+                            </Space>
+                          </div>
+                          <div className="mt-auto w-full pt-2">
                             <Button
                               type="default"
                               block
