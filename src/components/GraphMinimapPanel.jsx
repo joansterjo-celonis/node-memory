@@ -358,7 +358,7 @@ const GraphMinimapPanel = ({
 
   const handleNodeSelect = React.useCallback((event, nodeId) => {
     event.stopPropagation();
-    onSelect?.(nodeId);
+    onSelect?.(nodeId, { center: true });
   }, [onSelect]);
 
   const buildEntangledGroupStyle = React.useCallback((color) => {
