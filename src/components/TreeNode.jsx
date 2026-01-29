@@ -1963,7 +1963,10 @@ const TreeNode = ({
     );
 
     return (
-      <div className="flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
+      <div
+        className="flex flex-col items-center animate-in fade-in zoom-in-95 duration-300"
+        data-node-id={nodeId}
+      >
         <div className="relative z-10">
           <Button
             onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
@@ -2012,6 +2015,7 @@ const TreeNode = ({
           minHeight: isExpanded ? (node.params.subtype === 'AI' ? 0 : 180) : 0,
           resize: nodeCardResize
         }}
+        data-node-id={nodeId}
         data-node-resize="true"
         ref={nodeCardRef}
       >

@@ -306,6 +306,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const skipActiveDescriptionCommitRef = useRef(false);
   const nodeIdCounterRef = useRef(0);
   const filterIdCounterRef = useRef(0);
+  const canvasScrollRef = useRef(null);
+  const pendingCenterNodeRef = useRef(null);
   const isMobileMode = renderMode === 'mobile';
   const isSmartMode = renderMode === 'classicSmart' || renderMode === 'entangledSmart';
   const isMinimapMode = (
@@ -515,6 +517,18 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       ids.add(currentId);
       const children = getChildren(nodesList, currentId);
       children.forEach(child => stack.push(child.id));
+    }
+    return ids;
+  };
+
+  const collectAncestorIds = (nodeId, nodesList = nodes) => {
+    const ids = new Set();
+    let current = findNodeById(nodeId, nodesList);
+    while (current?.parentId) {
+      const parent = findNodeById(current.parentId, nodesList);
+      if (!parent || ids.has(parent.id)) break;
+      ids.add(parent.id);
+      current = parent;
     }
     return ids;
   };
@@ -1164,15 +1178,64 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setHistory(newHistory);
   };
 
+  const centerNodeInView = useCallback((nodeId) => {
+    const container = canvasScrollRef.current;
+    if (!container || !nodeId) return;
+    const attemptCenter = (attempts) => {
+      const nodeEl = container.querySelector(`[data-node-id="${nodeId}"]`);
+      if (!nodeEl) {
+        if (attempts < 3) {
+          requestAnimationFrame(() => attemptCenter(attempts + 1));
+        }
+        return;
+      }
+      const containerRect = container.getBoundingClientRect();
+      const nodeRect = nodeEl.getBoundingClientRect();
+      const offsetLeft = nodeRect.left - containerRect.left + container.scrollLeft;
+      const offsetTop = nodeRect.top - containerRect.top + container.scrollTop;
+      const targetLeft = offsetLeft + nodeRect.width / 2 - containerRect.width / 2;
+      const targetTop = offsetTop + nodeRect.height / 2 - containerRect.height / 2;
+      const maxLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+      const maxTop = Math.max(0, container.scrollHeight - container.clientHeight);
+      const nextLeft = Math.min(maxLeft, Math.max(0, targetLeft));
+      const nextTop = Math.min(maxTop, Math.max(0, targetTop));
+      container.scrollTo({ left: nextLeft, top: nextTop, behavior: 'smooth' });
+    };
+    attemptCenter(0);
+  }, []);
+
   const handleSelect = (id, options = {}) => {
-    const { expand = true } = options || {};
+    const { expand = true, center = false } = options || {};
+    if (center) {
+      pendingCenterNodeRef.current = id;
+    }
     setSelectedNodeId(id);
-    if (!expand) return;
-    const newNodes = nodes.map(n => n.id === id ? { ...n, isExpanded: true } : n);
+    if (!expand && !center) return;
+    const ancestorIds = center ? collectAncestorIds(id) : null;
+    const newNodes = nodes.map((node) => {
+      if (node.id === id) {
+        const nextNode = { ...node };
+        if (expand) nextNode.isExpanded = true;
+        if (center) nextNode.isBranchCollapsed = false;
+        return nextNode;
+      }
+      if (center && ancestorIds?.has(node.id) && node.isBranchCollapsed) {
+        return { ...node, isBranchCollapsed: false };
+      }
+      return node;
+    });
     const newHistory = [...history];
     newHistory[historyIndex] = newNodes;
     setHistory(newHistory);
   };
+
+  useEffect(() => {
+    if (!pendingCenterNodeRef.current) return;
+    const targetId = pendingCenterNodeRef.current;
+    pendingCenterNodeRef.current = null;
+    const frame = requestAnimationFrame(() => centerNodeInView(targetId));
+    return () => cancelAnimationFrame(frame);
+  }, [selectedNodeId, nodes, centerNodeInView]);
 
   const toggleEntangledBranch = useCallback((id) => {
     const target = findNodeById(id);
@@ -2903,6 +2966,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           </div>
         ) : (
           <div
+            ref={canvasScrollRef}
             className={renderMode === 'freeLayout'
               ? 'flex-1 overflow-hidden bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-slate-50 dark:bg-slate-950 dark:bg-none'
               : 'flex-1 overflow-auto bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-slate-50 dark:bg-slate-950 dark:bg-none cursor-grab active:cursor-grabbing'}
