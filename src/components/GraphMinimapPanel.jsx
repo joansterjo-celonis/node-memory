@@ -6,12 +6,18 @@ import { Layout, Minimize2 } from '../ui/icons';
 
 const PANEL_WIDTH = 240;
 const PANEL_HEIGHT = 160;
+const MIN_PANEL_WIDTH = 180;
+const MIN_PANEL_HEIGHT = 120;
+const MAX_PANEL_WIDTH = 480;
+const MAX_PANEL_HEIGHT = 360;
 const NODE_WIDTH = 110;
 const NODE_HEIGHT = 32;
 const NODE_PADDING_X = 6;
 const TITLE_CHAR_LIMIT = 18;
 const MIN_SCALE = 0.2;
 const MAX_SCALE = 4;
+const FIT_MIN_SCALE = 0.05;
+const FIT_MAX_SCALE = 12;
 const FIT_PADDING = 12;
 
 const truncateText = (value, maxChars) => {
@@ -102,6 +108,7 @@ const getBounds = (nodes) => {
 };
 
 const clampScale = (value) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
+const clampFitScale = (value) => Math.min(FIT_MAX_SCALE, Math.max(FIT_MIN_SCALE, value));
 
 const GraphMinimapPanel = ({
   nodes = [],
@@ -113,12 +120,17 @@ const GraphMinimapPanel = ({
   const [isOpen, setIsOpen] = React.useState(false);
   const [transform, setTransform] = React.useState({ x: 0, y: 0, scale: 1 });
   const [panelRect, setPanelRect] = React.useState({ width: 0, height: 0 });
+  const [panelSize, setPanelSize] = React.useState({ width: PANEL_WIDTH, height: PANEL_HEIGHT });
   const [isPanning, setIsPanning] = React.useState(false);
+  const [isResizing, setIsResizing] = React.useState(false);
   const containerRef = React.useRef(null);
   const transformRef = React.useRef(transform);
   const panOriginRef = React.useRef({ x: 0, y: 0 });
   const panStartRef = React.useRef({ x: 0, y: 0 });
   const isPanningRef = React.useRef(false);
+  const resizeOriginRef = React.useRef({ x: 0, y: 0 });
+  const resizeStartSizeRef = React.useRef({ width: PANEL_WIDTH, height: PANEL_HEIGHT });
+  const isResizingRef = React.useRef(false);
   const userAdjustedRef = React.useRef(false);
 
   React.useEffect(() => {
@@ -136,6 +148,10 @@ const GraphMinimapPanel = ({
     observer.observe(el);
     return () => observer.disconnect();
   }, [isOpen]);
+
+  React.useEffect(() => {
+    setPanelRect({ width: panelSize.width, height: panelSize.height });
+  }, [panelSize]);
 
   const resultsById = React.useMemo(() => {
     const map = new Map();
@@ -204,23 +220,25 @@ const GraphMinimapPanel = ({
 
   const fitTransform = React.useMemo(() => {
     if (!bounds) return null;
-    if (panelRect.width === 0 || panelRect.height === 0) return null;
-    const availableWidth = Math.max(1, panelRect.width - FIT_PADDING * 2);
-    const availableHeight = Math.max(1, panelRect.height - FIT_PADDING * 2);
-    const scale = clampScale(Math.min(
+    const width = panelSize.width || panelRect.width;
+    const height = panelSize.height || panelRect.height;
+    if (width === 0 || height === 0) return null;
+    const availableWidth = Math.max(1, width - FIT_PADDING * 2);
+    const availableHeight = Math.max(1, height - FIT_PADDING * 2);
+    const scale = clampFitScale(Math.min(
       availableWidth / bounds.width,
       availableHeight / bounds.height
     ));
-    const x = FIT_PADDING + (panelRect.width - bounds.width * scale) / 2 - bounds.minX * scale;
-    const y = FIT_PADDING + (panelRect.height - bounds.height * scale) / 2 - bounds.minY * scale;
+    const x = FIT_PADDING + (width - bounds.width * scale) / 2 - bounds.minX * scale;
+    const y = FIT_PADDING + (height - bounds.height * scale) / 2 - bounds.minY * scale;
     return { x, y, scale };
-  }, [bounds, panelRect]);
+  }, [bounds, panelRect, panelSize]);
 
   React.useEffect(() => {
     if (!isOpen || !fitTransform) return;
-    if (userAdjustedRef.current) return;
+    if (userAdjustedRef.current && !isResizingRef.current) return;
     setTransform(fitTransform);
-  }, [isOpen, fitTransform]);
+  }, [isOpen, fitTransform, panelSize]);
 
   const handleToggle = React.useCallback(() => {
     setIsOpen((prev) => {
@@ -299,6 +317,45 @@ const GraphMinimapPanel = ({
     setTransform(fitTransform);
   }, [fitTransform]);
 
+  const startResize = React.useCallback((event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    isResizingRef.current = true;
+    setIsResizing(true);
+    userAdjustedRef.current = false;
+    resizeOriginRef.current = { x: event.clientX, y: event.clientY };
+    resizeStartSizeRef.current = { ...panelSize };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }, [panelSize]);
+
+  const handleResizeMove = React.useCallback((event) => {
+    if (!isResizingRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const dx = event.clientX - resizeOriginRef.current.x;
+    const dy = event.clientY - resizeOriginRef.current.y;
+    const nextWidth = Math.min(MAX_PANEL_WIDTH, Math.max(MIN_PANEL_WIDTH, resizeStartSizeRef.current.width + dx));
+    const nextHeight = Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, resizeStartSizeRef.current.height + dy));
+    setPanelSize({ width: nextWidth, height: nextHeight });
+  }, []);
+
+  const stopResize = React.useCallback((event) => {
+    if (!isResizingRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    isResizingRef.current = false;
+    setIsResizing(false);
+    userAdjustedRef.current = false;
+    if (fitTransform) {
+      setTransform(fitTransform);
+    }
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch (err) {
+      // Ignore release errors.
+    }
+  }, [fitTransform]);
+
   const handleNodeSelect = React.useCallback((event, nodeId) => {
     event.stopPropagation();
     onSelect?.(nodeId);
@@ -342,9 +399,9 @@ const GraphMinimapPanel = ({
           <div
             ref={containerRef}
             className={`relative overflow-hidden rounded-md border border-gray-200/70 bg-white/70 dark:border-slate-700/70 dark:bg-slate-950/70 ${
-              isPanning ? 'cursor-grabbing' : 'cursor-grab'
+              isResizing ? 'cursor-se-resize' : (isPanning ? 'cursor-grabbing' : 'cursor-grab')
             }`}
-            style={{ width: PANEL_WIDTH, height: PANEL_HEIGHT }}
+            style={{ width: panelSize.width, height: panelSize.height }}
             onWheel={handleWheel}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -357,7 +414,13 @@ const GraphMinimapPanel = ({
                 No nodes yet
               </div>
             ) : (
-              <svg className="absolute inset-0" aria-hidden="true">
+              <svg
+                className="absolute inset-0"
+                width="100%"
+                height="100%"
+                style={{ width: '100%', height: '100%' }}
+                aria-hidden="true"
+              >
                 <g transform={`translate(${transform.x} ${transform.y}) scale(${transform.scale})`}>
                   {entangledGroups.map((group) => {
                     const padding = 6;
@@ -473,6 +536,16 @@ const GraphMinimapPanel = ({
                 </g>
               </svg>
             )}
+            <div
+              className="absolute bottom-1 right-1 h-3 w-3 rounded-sm border border-gray-300 bg-white/80 shadow-sm dark:border-slate-600 dark:bg-slate-800/80"
+              style={{ touchAction: 'none' }}
+              onPointerDown={startResize}
+              onPointerMove={handleResizeMove}
+              onPointerUp={stopResize}
+              onPointerLeave={stopResize}
+              role="presentation"
+              aria-label="Resize minimap"
+            />
           </div>
         </div>
       ) : (
