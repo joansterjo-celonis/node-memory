@@ -810,15 +810,34 @@ const TreeNode = ({
   if (!node) return null;
 
   const result = getNodeResult(chainData, nodeId);
+  const parentResult = node.parentId ? getNodeResult(chainData, node.parentId) : null;
+  const filterSourceResult = node.type === 'FILTER' && parentResult ? parentResult : result;
   const filters = React.useMemo(
     () => (node.type === 'FILTER' ? normalizeFilters(node.params) : []),
     [node.type, node.params]
   );
   const [isFilterBuilderOpen, setIsFilterBuilderOpen] = React.useState(false);
   const [filterBuilderTargetIndex, setFilterBuilderTargetIndex] = React.useState(null);
+  const [filterBuilderAnchor, setFilterBuilderAnchor] = React.useState(null);
+  const [isFilterOverflowMenuOpen, setIsFilterOverflowMenuOpen] = React.useState(false);
+  const [visibleFilterCount, setVisibleFilterCount] = React.useState(null);
+  const [filterChipsContainerEl, setFilterChipsContainerEl] = React.useState(null);
+  const [filterChipLabelMaxWidth, setFilterChipLabelMaxWidth] = React.useState(null);
   const [filterBuilderMode, setFilterBuilderMode] = React.useState('operator');
   const [operatorDraft, setOperatorDraft] = React.useState({ field: '', operator: 'equals', value: '' });
   const [attributeDraft, setAttributeDraft] = React.useState({ field: '', values: [] });
+  const filterChipsContainerRef = React.useRef(null);
+  const filterChipMeasureRefs = React.useRef([]);
+  const filterChipLabelMeasureRefs = React.useRef([]);
+  const filterAddButtonRef = React.useRef(null);
+  const filterOverflowMeasureRef = React.useRef(null);
+  const filterChipGapRef = React.useRef(6);
+  const filterChipBaseLabelMaxRef = React.useRef(180);
+  const filterChipMinLabelMeasureRef = React.useRef(null);
+  const setFilterChipsContainerNode = React.useCallback((node) => {
+    filterChipsContainerRef.current = node;
+    setFilterChipsContainerEl(node);
+  }, []);
   const rawChildren = getChildren(nodes, nodeId);
   const isActive = selectedNodeId === nodeId;
   const isExpanded = node.isExpanded !== false;
@@ -1014,6 +1033,7 @@ const TreeNode = ({
   const closeFilterBuilder = React.useCallback(() => {
     setIsFilterBuilderOpen(false);
     setFilterBuilderTargetIndex(null);
+    setFilterBuilderAnchor(null);
   }, []);
 
   const resolveAttributeValues = React.useCallback((filter) => {
@@ -1035,13 +1055,17 @@ const TreeNode = ({
     resetFilterDrafts();
     setFilterBuilderMode(mode);
     setFilterBuilderTargetIndex(-1);
+    setFilterBuilderAnchor('add');
+    setIsFilterOverflowMenuOpen(false);
     setIsFilterBuilderOpen(true);
   }, [resetFilterDrafts]);
 
-  const openFilterBuilderForFilter = React.useCallback((filter, index) => {
+  const openFilterBuilderForFilter = React.useCallback((filter, index, anchor = 'chip') => {
     const mode = resolveFilterMode(filter);
     setFilterBuilderMode(mode);
     setFilterBuilderTargetIndex(index);
+    setFilterBuilderAnchor(anchor);
+    setIsFilterOverflowMenuOpen(false);
     if (mode === 'attribute') {
       setAttributeDraft({ field: filter.field || '', values: resolveAttributeValues(filter) });
       setOperatorDraft({ field: '', operator: 'equals', value: '' });
@@ -1055,6 +1079,102 @@ const TreeNode = ({
     }
     setIsFilterBuilderOpen(true);
   }, [resolveAttributeValues]);
+
+  const measureOverflowChipWidth = React.useCallback(() => (
+    filterOverflowMeasureRef.current?.offsetWidth || 0
+  ), []);
+
+  const updateVisibleFilterCount = React.useCallback(() => {
+    const container = filterChipsContainerRef.current;
+    const total = filters.length;
+    if (!container) return;
+    if (total === 0) {
+      setVisibleFilterCount(0);
+      return;
+    }
+    const containerWidth = container.offsetWidth || 0;
+    if (!containerWidth) {
+      setVisibleFilterCount(total);
+      return;
+    }
+    const addWidth = filterAddButtonRef.current?.offsetWidth || 0;
+    const gap = filterChipGapRef.current || 0;
+    const chipWidths = filters.map((_, index) => filterChipMeasureRefs.current[index]?.offsetWidth || 0);
+    const labelWidths = filters.map((_, index) => filterChipLabelMeasureRefs.current[index]?.offsetWidth || 0);
+    if (chipWidths.every((width) => width === 0)) {
+      setVisibleFilterCount(total);
+      return;
+    }
+
+    const baseLabelMaxWidth = filterChipBaseLabelMaxRef.current || 180;
+    const minLabelWidthPx = filterChipMinLabelMeasureRef.current?.offsetWidth || 0;
+    const overheadValues = chipWidths
+      .map((width, index) => Math.max(0, width - (labelWidths[index] || 0)))
+      .filter((value) => value > 0);
+    const avgOverhead = overheadValues.length > 0
+      ? overheadValues.reduce((sum, value) => sum + value, 0) / overheadValues.length
+      : 0;
+    const gapsForAll = total * gap;
+    const availableForLabels = containerWidth - addWidth - gapsForAll - (avgOverhead * total);
+    const maxLabelWidthForAll = total > 0 ? Math.floor(availableForLabels / total) : baseLabelMaxWidth;
+    let nextLabelMaxWidth = Math.min(
+      baseLabelMaxWidth,
+      Number.isFinite(maxLabelWidthForAll) ? maxLabelWidthForAll : baseLabelMaxWidth
+    );
+    if (nextLabelMaxWidth <= 0) {
+      nextLabelMaxWidth = baseLabelMaxWidth;
+    }
+    if (minLabelWidthPx > 0) {
+      nextLabelMaxWidth = Math.max(minLabelWidthPx, nextLabelMaxWidth);
+    }
+    const resolvedLabelMaxWidth = filterChipLabelMaxWidth ?? baseLabelMaxWidth;
+    if (Math.abs(nextLabelMaxWidth - resolvedLabelMaxWidth) >= 1) {
+      setFilterChipLabelMaxWidth(nextLabelMaxWidth);
+      return;
+    }
+
+    const totalChipWidth = (count) => (
+      chipWidths.slice(0, count).reduce((sum, width) => sum + width, 0)
+    );
+
+    const overflowWidth = measureOverflowChipWidth();
+    const totalWidthForCount = (count) => {
+      const hasOverflow = count < total;
+      const children = count + (hasOverflow ? 1 : 0) + 1;
+      const gaps = Math.max(0, children - 1) * gap;
+      return totalChipWidth(count) + addWidth + (hasOverflow ? overflowWidth : 0) + gaps;
+    };
+
+    if (totalWidthForCount(total) <= containerWidth) {
+      setVisibleFilterCount(total);
+      return;
+    }
+
+    let nextVisible = 0;
+    for (let count = total; count >= 0; count -= 1) {
+      if (totalWidthForCount(count) <= containerWidth) {
+        nextVisible = count;
+        break;
+      }
+    }
+    setVisibleFilterCount(nextVisible);
+  }, [filters, filterChipLabelMaxWidth, measureOverflowChipWidth]);
+
+  React.useLayoutEffect(() => {
+    updateVisibleFilterCount();
+  });
+
+  React.useEffect(() => {
+    if (!filterChipsContainerEl) return undefined;
+    updateVisibleFilterCount();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateVisibleFilterCount);
+      return () => window.removeEventListener('resize', updateVisibleFilterCount);
+    }
+    const observer = new ResizeObserver(() => updateVisibleFilterCount());
+    observer.observe(filterChipsContainerEl);
+    return () => observer.disconnect();
+  }, [filterChipsContainerEl, updateVisibleFilterCount]);
 
   const handleApplyOperatorFilter = () => {
     if (!operatorDraft.field) return;
@@ -1141,11 +1261,11 @@ const TreeNode = ({
     ? node.params.columns
     : result ? result.schema : [];
 
-  const filterFieldOptions = result?.schema || [];
+  const filterFieldOptions = filterSourceResult?.schema || result?.schema || [];
   const attributeValueOptions = React.useMemo(() => {
-    if (!result || !attributeDraft.field) return [];
-    if (result.getColumnStats) {
-      const stats = result.getColumnStats(attributeDraft.field, 32);
+    if (!filterSourceResult || !attributeDraft.field) return [];
+    if (filterSourceResult.getColumnStats) {
+      const stats = filterSourceResult.getColumnStats(attributeDraft.field, 32);
       if (stats?.topValues?.length) {
         return stats.topValues.map((item) => ({
           label: `${item.value} (${item.count})`,
@@ -1153,7 +1273,7 @@ const TreeNode = ({
         }));
       }
     }
-    const fallbackRows = result.sampleRows || result.data || [];
+    const fallbackRows = filterSourceResult.sampleRows || filterSourceResult.data || [];
     const seen = new Set();
     const options = [];
     fallbackRows.forEach((row) => {
@@ -1166,7 +1286,7 @@ const TreeNode = ({
       options.push({ label: display, value: display });
     });
     return options;
-  }, [result, attributeDraft.field]);
+  }, [filterSourceResult, attributeDraft.field]);
 
   const isEditingFilter = filterBuilderTargetIndex != null && filterBuilderTargetIndex >= 0;
   const filterBuilderContent = (
@@ -1287,26 +1407,95 @@ const TreeNode = ({
   );
 
   const renderFilterChips = (compact = false) => {
-    if (!filters.length && !compact) {
-      return (
-        <Popover
-          content={filterBuilderContent}
-          trigger="click"
-          open={isFilterBuilderOpen && filterBuilderTargetIndex === -1}
-          onOpenChange={(open) => {
-            if (!open) closeFilterBuilder();
-          }}
-          placement="bottomLeft"
-        >
-          {filterAddTrigger}
-        </Popover>
-      );
-    }
+    const chipGap = compact ? 4 : 6;
+    filterChipGapRef.current = chipGap;
+    filterChipMeasureRefs.current = [];
+    filterChipLabelMeasureRefs.current = [];
+    const baseLabelMaxWidth = compact ? 90 : 180;
+    filterChipBaseLabelMaxRef.current = baseLabelMaxWidth;
+    const resolvedLabelMaxWidth = filterChipLabelMaxWidth ?? baseLabelMaxWidth;
+    const chipTagClassName = compact
+      ? 'cursor-pointer select-none text-[9px] px-1 min-w-0'
+      : 'cursor-pointer select-none min-w-0';
+    const chipLabelClassName = compact ? 'block truncate' : 'block truncate';
+    const deleteOverlayClassName =
+      'absolute -top-2 -right-1 z-20 flex items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover/filter-chip:opacity-100 group-hover/filter-chip:pointer-events-auto';
+    const deleteButtonClassName =
+      'inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-red-600 shadow-sm hover:text-red-700 dark:border-slate-600 dark:bg-slate-800 dark:text-red-300';
+    const dropdownChipTagClassName = `${chipTagClassName} max-w-[200px]`;
+    const dropdownChipLabelClassName = 'block truncate max-w-full';
+    const getLabelStyle = (label) => ({
+      maxWidth: resolvedLabelMaxWidth,
+      minWidth: label && label.length >= 8 ? '8ch' : undefined
+    });
+    const resolvedVisibleCount = Math.min(filters.length, Math.max(0, visibleFilterCount ?? filters.length));
+    const visibleFilters = filters.slice(0, resolvedVisibleCount);
+    const hiddenFilters = filters.slice(resolvedVisibleCount).map((filter, offset) => ({
+      filter,
+      index: offset + resolvedVisibleCount
+    }));
+    const hiddenCount = hiddenFilters.length;
+
+    const overflowList = (
+      <div
+        className="inline-flex max-h-60 overflow-y-auto overflow-x-hidden pr-2 pt-2"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex flex-col gap-2">
+          {hiddenFilters.map(({ filter, index }) => {
+            const label = formatFilterLabel(filter);
+            return (
+              <span key={filter.id || `filter-overflow-${index}`} className="relative inline-flex group/filter-chip">
+                <span
+                  className="inline-flex"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openFilterBuilderForFilter(filter, index, 'overflow');
+                    setIsFilterOverflowMenuOpen(false);
+                  }}
+                >
+                  <Tag color="orange" className={dropdownChipTagClassName}>
+                    <span className={dropdownChipLabelClassName} title={label}>
+                      {label}
+                    </span>
+                  </Tag>
+                </span>
+                <div className={deleteOverlayClassName}>
+                  <button
+                    type="button"
+                    className={deleteButtonClassName}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveFilter?.(nodeId, index);
+                      if (isFilterBuilderOpen && filterBuilderTargetIndex === index) {
+                        closeFilterBuilder();
+                      }
+                    }}
+                    aria-label="Remove filter"
+                  >
+                    <Trash2 size={10} />
+                  </button>
+                </div>
+              </span>
+            );
+          })}
+        </div>
+      </div>
+    );
+
+    const overflowPopoverOpen = isFilterOverflowMenuOpen || (isFilterBuilderOpen && filterBuilderAnchor === 'overflow');
+    const overflowPopoverContent =
+      isFilterBuilderOpen && filterBuilderAnchor === 'overflow' ? filterBuilderContent : overflowList;
 
     return (
-      <Space size={[compact ? 4 : 6, 4]} wrap>
-        {filters.map((filter, index) => {
-          const isOpen = isFilterBuilderOpen && filterBuilderTargetIndex === index;
+      <div
+        ref={setFilterChipsContainerNode}
+        className="relative flex min-w-0 items-center"
+        style={{ gap: chipGap }}
+      >
+        {visibleFilters.map((filter, index) => {
+          const isOpen = isFilterBuilderOpen && filterBuilderTargetIndex === index && filterBuilderAnchor === 'chip';
+          const label = formatFilterLabel(filter);
           return (
             <Popover
               key={filter.id || `filter-${index}`}
@@ -1319,47 +1508,125 @@ const TreeNode = ({
               }}
             >
               <span
-                className="group inline-flex"
+                className="relative inline-flex group/filter-chip"
                 onClick={(e) => {
                   e.stopPropagation();
-                  openFilterBuilderForFilter(filter, index);
+                  openFilterBuilderForFilter(filter, index, 'chip');
                 }}
               >
-                <Tag color="orange" className={compact ? 'cursor-pointer select-none text-[9px] px-1' : 'cursor-pointer select-none'}>
-                  <span className="inline-flex items-center gap-1">
-                    {formatFilterLabel(filter)}
-                    <button
-                      type="button"
-                      className="ml-0.5 inline-flex h-3 w-3 items-center justify-center rounded-full text-orange-700 opacity-0 transition-opacity group-hover:opacity-100 hover:text-orange-900"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveFilter?.(nodeId, index);
-                        if (isFilterBuilderOpen && filterBuilderTargetIndex === index) {
-                          closeFilterBuilder();
-                        }
-                      }}
-                      aria-label="Remove filter"
-                    >
-                      <Trash2 size={10} />
-                    </button>
+                <Tag color="orange" className={chipTagClassName}>
+                  <span className={chipLabelClassName} title={label} style={getLabelStyle(label)}>
+                    {label}
                   </span>
                 </Tag>
+                <div className={deleteOverlayClassName}>
+                  <button
+                    type="button"
+                    className={deleteButtonClassName}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveFilter?.(nodeId, index);
+                      if (isFilterBuilderOpen && filterBuilderTargetIndex === index) {
+                        closeFilterBuilder();
+                      }
+                    }}
+                    aria-label="Remove filter"
+                  >
+                    <Trash2 size={10} />
+                  </button>
+                </div>
               </span>
             </Popover>
           );
         })}
+
+        {hiddenCount > 0 && (
+          <Popover
+            content={overflowPopoverContent}
+            trigger="click"
+            placement="bottomLeft"
+            open={overflowPopoverOpen}
+            onOpenChange={(open) => {
+              if (!open) {
+                setIsFilterOverflowMenuOpen(false);
+                if (filterBuilderAnchor === 'overflow') closeFilterBuilder();
+                return;
+              }
+              if (filterBuilderAnchor && filterBuilderAnchor !== 'overflow') {
+                closeFilterBuilder();
+              }
+              if (!isFilterBuilderOpen) setIsFilterOverflowMenuOpen(true);
+            }}
+          >
+            <span
+              className="relative inline-flex group/filter-chip shrink-0"
+              onClick={(e) => e.stopPropagation()}
+              aria-label="Show all filters"
+            >
+              <Tag color="orange" className={chipTagClassName}>
+                <span className={chipLabelClassName}>{`+${hiddenCount}`}</span>
+              </Tag>
+            </span>
+          </Popover>
+        )}
+
         <Popover
           content={filterBuilderContent}
           trigger="click"
-          open={isFilterBuilderOpen && filterBuilderTargetIndex === -1}
+          open={isFilterBuilderOpen && filterBuilderTargetIndex === -1 && filterBuilderAnchor === 'add'}
           onOpenChange={(open) => {
             if (!open) closeFilterBuilder();
           }}
           placement="bottomLeft"
         >
-          {compact ? filterAddTriggerCompact : filterAddTrigger}
+          <span ref={filterAddButtonRef} className="inline-flex shrink-0">
+            {compact ? filterAddTriggerCompact : filterAddTrigger}
+          </span>
         </Popover>
-      </Space>
+
+        {filters.length > 0 && (
+          <div
+            className="absolute -left-[9999px] -top-[9999px] flex items-center opacity-0 pointer-events-none"
+            style={{ gap: chipGap }}
+            aria-hidden="true"
+          >
+            {filters.map((filter, index) => {
+              const label = formatFilterLabel(filter);
+              return (
+                <span
+                  key={filter.id || `filter-measure-${index}`}
+                  ref={(el) => { filterChipMeasureRefs.current[index] = el; }}
+                  className="inline-flex"
+                >
+                  <Tag color="orange" className={chipTagClassName}>
+                    <span
+                      className={chipLabelClassName}
+                      ref={(el) => { filterChipLabelMeasureRefs.current[index] = el; }}
+                      style={getLabelStyle(label)}
+                    >
+                      {label}
+                    </span>
+                  </Tag>
+                </span>
+              );
+            })}
+            <span ref={filterOverflowMeasureRef} className="inline-flex">
+              <Tag color="orange" className={chipTagClassName}>
+                <span className={chipLabelClassName}>{`+${filters.length}`}</span>
+              </Tag>
+            </span>
+            <Tag color="orange" className={chipTagClassName}>
+              <span
+                ref={filterChipMinLabelMeasureRef}
+                className={chipLabelClassName}
+                style={{ width: '8ch' }}
+              >
+                MMMMMMMM
+              </span>
+            </Tag>
+          </div>
+        )}
+      </div>
     );
   };
 
