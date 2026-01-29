@@ -37,6 +37,7 @@ import {
   MoreHorizontal as FluentMoreHorizontal,
   Phone,
   Play as FluentPlay,
+  QuestionCircle as FluentQuestionCircle,
   Save as FluentSave,
   Settings as FluentSettings,
   Share,
@@ -76,6 +77,7 @@ export const ArrowLeft = FluentArrowLeft;
 export const Share2 = Share;
 export const FileJson = Code;
 export const X = Dismiss;
+export const QuestionCircle = FluentQuestionCircle;
 export const GitBranch = Branch;
 export const Hash = NumberSymbol;
 export const TrendingUp = ArrowTrending;
