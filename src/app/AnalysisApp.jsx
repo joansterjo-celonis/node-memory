@@ -5,6 +5,7 @@ import { Button, Card, Drawer, Dropdown, Empty, Modal, Space, Tag, Typography } 
 import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
 import HelpModal from '../components/HelpModal';
+import { GraphMinimapPanel } from '../components/GraphMinimapPanel';
 import { TreeNode, FreeLayoutCanvas } from '../components/TreeNode';
 import {
   Layout,
@@ -307,6 +308,12 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const filterIdCounterRef = useRef(0);
   const isMobileMode = renderMode === 'mobile';
   const isSmartMode = renderMode === 'classicSmart' || renderMode === 'entangledSmart';
+  const isMinimapMode = (
+    renderMode === 'classic'
+    || renderMode === 'classicSmart'
+    || renderMode === 'entangled'
+    || renderMode === 'entangledSmart'
+  );
   const leafCountById = useMemo(
     () => (isSmartMode ? buildLeafCountMap(nodes, { treatCollapsedAsLeaf: true }) : null),
     [nodes, isSmartMode]
@@ -2973,6 +2980,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
               </div>
             )}
           </div>
+        )}
+
+        {viewMode === 'canvas' && isMinimapMode && !isMobileMode && (
+          <GraphMinimapPanel
+            nodes={nodes}
+            chainData={chainData}
+            selectedNodeId={selectedNodeId}
+            onSelect={handleSelect}
+            className="absolute left-4 top-20 z-40"
+          />
         )}
 
         {viewMode === 'canvas' && !isMobileMode && (isStatsCollapsed || isPropertiesCollapsed) && (
