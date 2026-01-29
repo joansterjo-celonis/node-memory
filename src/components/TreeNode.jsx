@@ -810,6 +810,8 @@ const TreeNode = ({
   if (!node) return null;
 
   const result = getNodeResult(chainData, nodeId);
+  const parentResult = node.parentId ? getNodeResult(chainData, node.parentId) : null;
+  const filterSourceResult = node.type === 'FILTER' && parentResult ? parentResult : result;
   const filters = React.useMemo(
     () => (node.type === 'FILTER' ? normalizeFilters(node.params) : []),
     [node.type, node.params]
@@ -1141,11 +1143,11 @@ const TreeNode = ({
     ? node.params.columns
     : result ? result.schema : [];
 
-  const filterFieldOptions = result?.schema || [];
+  const filterFieldOptions = filterSourceResult?.schema || result?.schema || [];
   const attributeValueOptions = React.useMemo(() => {
-    if (!result || !attributeDraft.field) return [];
-    if (result.getColumnStats) {
-      const stats = result.getColumnStats(attributeDraft.field, 32);
+    if (!filterSourceResult || !attributeDraft.field) return [];
+    if (filterSourceResult.getColumnStats) {
+      const stats = filterSourceResult.getColumnStats(attributeDraft.field, 32);
       if (stats?.topValues?.length) {
         return stats.topValues.map((item) => ({
           label: `${item.value} (${item.count})`,
@@ -1153,7 +1155,7 @@ const TreeNode = ({
         }));
       }
     }
-    const fallbackRows = result.sampleRows || result.data || [];
+    const fallbackRows = filterSourceResult.sampleRows || filterSourceResult.data || [];
     const seen = new Set();
     const options = [];
     fallbackRows.forEach((row) => {
@@ -1166,7 +1168,7 @@ const TreeNode = ({
       options.push({ label: display, value: display });
     });
     return options;
-  }, [result, attributeDraft.field]);
+  }, [filterSourceResult, attributeDraft.field]);
 
   const isEditingFilter = filterBuilderTargetIndex != null && filterBuilderTargetIndex >= 0;
   const filterBuilderContent = (
