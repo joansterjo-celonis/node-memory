@@ -78,6 +78,20 @@
   line-height: 1.2;
 }
 
+.table-stats-header-cell {
+  padding: 4px 8px !important;
+  vertical-align: top;
+}
+
+.table-stats-header-cell .table-stats-content {
+  line-height: 1.15;
+  min-height: 64px;
+}
+
+.table-stats-header-cell .table-stats-bars {
+  height: 18px;
+}
+
 /* Exploration cards: full-width titles + clean inline edit */
 .exploration-card .ant-card-head {
   overflow: visible;

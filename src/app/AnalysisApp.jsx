@@ -936,6 +936,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     chartCurve: 'linear',
     tableSortBy: '',
     tableSortDirection: '',
+    tableShowStats: false,
     target: 100,
     joinType: 'LEFT',
     metrics: [],
