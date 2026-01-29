@@ -693,6 +693,12 @@ const PropertiesPanel = ({
                   </Button>
                 </Space>
               </Form.Item>
+              <Form.Item label="Table stats">
+                <Switch
+                  checked={!!node.params.tableShowStats}
+                  onChange={(checked) => handleChange('tableShowStats', checked)}
+                />
+              </Form.Item>
               <Divider />
               <Form.Item label="Default Sort">
                 <Space size="small" style={{ width: '100%' }}>

@@ -312,6 +312,15 @@ const AssistantPanel = React.memo(({ node, schema, onRun }) => {
   );
 });
 
+const TABLE_STATS_TOP_VALUES = 5;
+const formatPercent = (value) => `${Math.round(value)}%`;
+const formatNumeric = (value) => {
+  if (value === null || value === undefined || Number.isNaN(value)) return 'n/a';
+  const abs = Math.abs(value);
+  if (abs >= 1000) return formatNumber(value);
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value);
+};
+
 const TablePreview = React.memo(({
   rowCount = 0,
   columns = [],
@@ -324,7 +333,9 @@ const TablePreview = React.memo(({
   nodeId,
   sortBy,
   sortDirection,
-  tableDensity = 'comfortable'
+  tableDensity = 'comfortable',
+  showTableStats = false,
+  getColumnStats
 }) => {
   const containerRef = React.useRef(null);
   const rowCacheRef = React.useRef(new Map());
@@ -333,6 +344,110 @@ const TablePreview = React.memo(({
   const [cellAction, setCellAction] = React.useState(null);
   const normalizedSortDirection = sortDirection === 'asc' || sortDirection === 'desc' ? sortDirection : '';
   const densityClassName = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
+  const isCompactHeader = tableDensity === 'dense';
+  const statsTextClassName = isCompactHeader ? 'text-[9px]' : 'text-[10px]';
+  const statsMutedTextClassName = isCompactHeader
+    ? 'text-[9px] text-gray-400 dark:text-slate-500'
+    : 'text-[10px] text-gray-400 dark:text-slate-500';
+  const hasTableStats = showTableStats && typeof getColumnStats === 'function';
+  const statsByColumn = React.useMemo(() => {
+    if (!hasTableStats) return new Map();
+    const next = new Map();
+    columns.forEach((col) => {
+      const stats = getColumnStats?.(col);
+      if (!stats) return;
+      const topValues = Array.isArray(stats.topValues)
+        ? stats.topValues.slice(0, TABLE_STATS_TOP_VALUES)
+        : [];
+      const maxCount = topValues.reduce((acc, item) => Math.max(acc, item.count || 0), 0);
+      next.set(col, { ...stats, topValues, maxCount });
+    });
+    return next;
+  }, [columns, getColumnStats, hasTableStats, rowCount]);
+
+  const renderStatsCell = (stats) => {
+    if (!stats) {
+      return <span className="text-[10px] text-gray-400 dark:text-slate-500">No stats</span>;
+    }
+
+    const totalRows = stats.totalRows ?? rowCount ?? 0;
+    const nullCount = stats.nullCount ?? 0;
+    const nullPercent = totalRows ? formatPercent((nullCount / totalRows) * 100) : '0%';
+    const topValues = stats.topValues || [];
+    const topItem = topValues[0];
+    const topValueCount = topItem?.count ?? 0;
+    const showNullAsTop = nullCount > topValueCount;
+    const topValueLabel = showNullAsTop
+      ? '[null]'
+      : (topItem ? String(topItem.value) : '—');
+    const topValueCountResolved = showNullAsTop ? nullCount : topValueCount;
+    const topPercent = totalRows ? formatPercent((topValueCountResolved / totalRows) * 100) : '0%';
+    const topTitle = (topItem || showNullAsTop)
+      ? `${topValueLabel} (${formatNumber(topValueCountResolved)} / ${formatNumber(totalRows)} • ${topPercent})`
+      : 'No values';
+    const hasTopValue = Boolean(topItem) || showNullAsTop;
+    const hasNumericSummary = [stats.min, stats.avg, stats.max].some((value) => Number.isFinite(value));
+    const nullSummary = `Nulls ${formatNumber(nullCount)} (${nullPercent})`;
+    const minLabel = `Min ${formatNumeric(stats.min)}`;
+    const avgLabel = `Avg ${formatNumeric(stats.avg)}`;
+    const maxLabel = `Max ${formatNumeric(stats.max)}`;
+
+    return (
+      <div className="table-stats-content flex h-full flex-col gap-0.5">
+        <div className={`flex items-center gap-1 min-w-0 ${statsTextClassName} text-gray-500 dark:text-slate-400`}>
+          <Tooltip title={topTitle}>
+            <span className="truncate min-w-0">
+              {hasTopValue ? `Top ${topValueLabel}` : 'Top —'}
+            </span>
+          </Tooltip>
+          {hasTopValue && (
+            <span className="shrink-0">
+              {topPercent}
+            </span>
+          )}
+          <span className="shrink-0 text-gray-300 dark:text-slate-600">·</span>
+          <Tooltip title={nullSummary}>
+            <span className="shrink-0">
+              {nullSummary}
+            </span>
+          </Tooltip>
+        </div>
+        {hasNumericSummary && (
+          <div className={`flex items-center gap-2 min-w-0 ${statsTextClassName} text-gray-500 dark:text-slate-400`}>
+            <Tooltip title={minLabel}>
+              <span className="truncate">{minLabel}</span>
+            </Tooltip>
+            <Tooltip title={avgLabel}>
+              <span className="truncate">{avgLabel}</span>
+            </Tooltip>
+            <Tooltip title={maxLabel}>
+              <span className="truncate">{maxLabel}</span>
+            </Tooltip>
+          </div>
+        )}
+        <div className="table-stats-bars mt-auto flex items-end gap-0.5">
+          {topValues.length === 0 ? (
+            <span className={statsMutedTextClassName}>No values</span>
+          ) : (
+            topValues.map((item, index) => {
+              const heightPercent = stats.maxCount
+                ? Math.max(20, (item.count / stats.maxCount) * 100)
+                : 0;
+              const barTitle = `${item.value} (${formatNumber(item.count)})`;
+              return (
+                <Tooltip key={`${item.value}-${index}`} title={barTitle}>
+                  <div
+                    className="w-2 rounded-sm bg-blue-500/70 dark:bg-blue-400/70"
+                    style={{ height: `${heightPercent}%` }}
+                  />
+                </Tooltip>
+              );
+            })
+          )}
+        </div>
+      </div>
+    );
+  };
 
   React.useEffect(() => {
     const el = containerRef.current;
@@ -475,13 +590,13 @@ const TablePreview = React.memo(({
   const tableColumns = columns.map((col) => {
     const isSorted = sortBy === col && normalizedSortDirection;
     const sortIndicator = isSorted ? (normalizedSortDirection === 'asc' ? '^' : 'v') : '';
-    return {
-      title: (
-        <span className="inline-flex items-center gap-1">
-          {col}
-          {sortIndicator && <span className="text-[10px] text-gray-400 dark:text-slate-500">{sortIndicator}</span>}
-        </span>
-      ),
+    const headerTitle = (
+      <span className="inline-flex items-center gap-1">
+        {col}
+        {sortIndicator && <span className="text-[10px] text-gray-400 dark:text-slate-500">{sortIndicator}</span>}
+      </span>
+    );
+    const baseColumn = {
       dataIndex: col,
       key: col,
       width: estimatedColumnWidths[col] || 120,
@@ -506,13 +621,6 @@ const TablePreview = React.memo(({
           </Popover>
         );
       },
-      onHeaderCell: () => ({
-        onClick: (e) => {
-          e.stopPropagation();
-          handleHeaderSort(col);
-        },
-        className: 'cursor-pointer select-none hover:text-blue-600'
-      }),
       onCell: (recordIndex) => ({
         onClick: (e) => {
           e.stopPropagation();
@@ -530,6 +638,41 @@ const TablePreview = React.memo(({
         },
         className: 'cursor-pointer hover:bg-blue-50 hover:text-blue-700 transition-colors'
       })
+    };
+    const buildSortHeaderCell = () => ({
+      onClick: (e) => {
+        e.stopPropagation();
+        handleHeaderSort(col);
+      },
+      className: 'cursor-pointer select-none hover:text-blue-600'
+    });
+
+    if (!hasTableStats) {
+      return {
+        title: headerTitle,
+        ...baseColumn,
+        onHeaderCell: buildSortHeaderCell
+      };
+    }
+
+    const stats = statsByColumn.get(col);
+    return {
+      title: headerTitle,
+      key: `${col}-group`,
+      width: baseColumn.width,
+      onHeaderCell: buildSortHeaderCell,
+      children: [
+        {
+          ...baseColumn,
+          title: renderStatsCell(stats),
+          onHeaderCell: () => ({
+            className: 'table-stats-header-cell',
+            onClick: (e) => {
+              e.stopPropagation();
+            }
+          })
+        }
+      ]
     };
   });
 
@@ -2091,6 +2234,7 @@ const TreeNode = ({
             const isPivotPreview = node.params.subtype === 'PIVOT';
             const isAssistantPreview = node.params.subtype === 'AI';
             const isChartPreview = node.params.subtype === 'CHART';
+            const showTableStats = node.params.subtype === 'TABLE' && !!node.params.tableShowStats;
             const hasTableLikePreview = isTablePreview || isPivotPreview || isAssistantPreview;
             const contentPaddingClass = hasTableLikePreview ? 'p-0' : (isChartPreview ? 'p-1' : 'p-4');
             return (
@@ -2116,6 +2260,8 @@ const TreeNode = ({
                       sortBy={node.params.tableSortBy}
                       sortDirection={node.params.tableSortDirection}
                       tableDensity={tableDensity}
+                      showTableStats={showTableStats}
+                      getColumnStats={showTableStats ? result.getColumnStats : null}
                     />
                   </div>
                 </div>
