@@ -4,6 +4,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Button, Card, Drawer, Dropdown, Empty, Modal, Space, Tag, Typography } from 'antd';
 import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
+import HelpModal from '../components/HelpModal';
 import { TreeNode, FreeLayoutCanvas } from '../components/TreeNode';
 import {
   Layout,
@@ -26,7 +27,8 @@ import {
   Play,
   Save,
   ArrowLeft,
-  Edit as EditIcon
+  Edit as EditIcon,
+  QuestionCircle
 } from '../ui/icons';
 import { parseCSVFile, readFileAsArrayBuffer, parseXLSX, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
 import { getChildren, getCalculationOrder, getNodeResult, buildLeafCountMap } from '../utils/nodeUtils';
@@ -262,6 +264,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [showAddMenuForId, setShowAddMenuForId] = useState(null);
   const [showInsertMenuForId, setShowInsertMenuForId] = useState(null);
   const [showDataModel, setShowDataModel] = useState(initialSession?.showDataModel ?? false);
+  const [showHelp, setShowHelp] = useState(false);
   const [viewMode, setViewMode] = useState(initialSession?.viewMode ?? 'canvas');
   const shouldAutoMobile = useMemo(() => isMobileUserAgent(), []);
   const [renderMode, setRenderMode] = useState(() => (
@@ -2622,6 +2625,13 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     </Button>
                   </Space>
                 )}
+                <Button
+                  size={isMobileMode ? 'small' : 'middle'}
+                  icon={<QuestionCircle size={16} />}
+                  onClick={() => setShowHelp(true)}
+                  aria-label="Help"
+                  title="Help"
+                />
                 <Space.Compact size={isMobileMode ? 'small' : 'middle'}>
                   <Button
                     size={isMobileMode ? 'small' : 'middle'}
@@ -3091,6 +3101,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           />
         </div>
       )}
+
+      <HelpModal open={showHelp} onClose={() => setShowHelp(false)} isMobile={isMobileMode} />
 
       {/* 5. DATA MODEL MODAL */}
       <Modal
