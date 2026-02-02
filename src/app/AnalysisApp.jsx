@@ -6,6 +6,7 @@ import { ColumnStatsPanel } from '../components/ColumnStatsPanel';
 import { PropertiesPanel } from '../components/PropertiesPanel';
 import HelpModal from '../components/HelpModal';
 import { GraphMinimapPanel } from '../components/GraphMinimapPanel';
+import WorkbenchDependencyGraph from '../components/WorkbenchDependencyGraph';
 import { TreeNode, FreeLayoutCanvas } from '../components/TreeNode';
 import {
   Layout,
@@ -33,7 +34,7 @@ import {
 } from '../ui/icons';
 import { parseCSVFile, readFileAsArrayBuffer, parseXLSX, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
 import { getChildren, getCalculationOrder, getNodeResult, buildLeafCountMap } from '../utils/nodeUtils';
-import { createDataEngine } from '../utils/dataEngine';
+import { createDataEngine, SQL_INCOMING_TABLE } from '../utils/dataEngine';
 import { normalizeFilters } from '../utils/filterUtils';
 
 const { Title, Text } = Typography;
@@ -47,13 +48,20 @@ const createInitialNodes = () => ([
     description: 'Upload dataset',
     branchName: 'Main',
     isExpanded: true,
-    params: { table: null, __files: [] }
+    params: {
+      table: null,
+      __files: [],
+      ingestionMode: DEFAULT_INGESTION_MODE,
+      inheritedTable: ''
+    }
   }
 ]);
 
 const TABLE_DENSITY_STORAGE_KEY = 'nma-table-density';
 const DEFAULT_TABLE_DENSITY = 'comfortable';
 const DEFAULT_ENTANGLED_COLOR = '#facc15';
+const DEFAULT_INGESTION_MODE = 'manual';
+const DEFAULT_SQL_MODE = 'visual';
 const SESSION_STORAGE_KEY = 'nma-session-v1';
 const SESSION_VERSION = 1;
 const VALID_VIEW_MODES = new Set(['canvas', 'landing']);
@@ -100,6 +108,43 @@ const sanitizeHistoryForStorage = (historyToSave = []) => {
     .filter((entry) => Array.isArray(entry))
     .map((entry) => sanitizeNodesForStorage(entry));
 };
+
+const slugifySqlName = (value) => {
+  const raw = typeof value === 'string' ? value : String(value || '');
+  const cleaned = raw
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+  return cleaned || 'table';
+};
+
+const ensureUniqueSqlName = (base, used) => {
+  let next = base;
+  let suffix = 1;
+  while (used.has(next) || next === SQL_INCOMING_TABLE) {
+    suffix += 1;
+    next = `${base}_${suffix}`;
+  }
+  used.add(next);
+  return next;
+};
+
+const escapeRegExp = (value) => String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const buildStableExternalTableName = (explorationId, nodeId) => (
+  slugifySqlName(`exp_${explorationId}_${nodeId}`)
+);
+
+const buildLegacyExternalTableName = (explorationName, branchLabel, usedNames) => {
+  const base = slugifySqlName(`exp_${explorationName}_${branchLabel}`);
+  if (!usedNames) return base;
+  return ensureUniqueSqlName(base, usedNames);
+};
+
+const getLeafNodes = (nodesList = []) => nodesList.filter(
+  (node) => getChildren(nodesList, node.id).length === 0
+);
 
 const getDefaultStatsPanelRect = () => {
   const fallback = { x: 64, y: 96, width: 320, height: 520 };
@@ -267,6 +312,9 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [showDataModel, setShowDataModel] = useState(initialSession?.showDataModel ?? false);
   const [showHelp, setShowHelp] = useState(false);
   const [viewMode, setViewMode] = useState(initialSession?.viewMode ?? 'canvas');
+  const [landingViewMode, setLandingViewMode] = useState('cards');
+  const [flattenModalEntry, setFlattenModalEntry] = useState(null);
+  const [isFlattenModalOpen, setIsFlattenModalOpen] = useState(false);
   const shouldAutoMobile = useMemo(() => isMobileUserAgent(), []);
   const [renderMode, setRenderMode] = useState(() => (
     shouldAutoMobile ? 'mobile' : (initialSession?.renderMode ?? 'classic')
@@ -663,6 +711,30 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     replaceCurrentNodes(nextNodes);
   }, [renderMode, nodes, buildDefaultFreeLayout, replaceCurrentNodes]);
 
+  const buildNodeSpec = useCallback((node, parentKey, model) => {
+    if (node.params?.isDataset && node.params?.isFlattened && Array.isArray(node.params?.datasetSnapshot?.rows)) {
+      return { type: 'DATASET', params: { snapshot: node.params.datasetSnapshot } };
+    }
+    if (node.type === 'SOURCE') {
+      const ingestionMode = node.params?.ingestionMode || DEFAULT_INGESTION_MODE;
+      const inheritedTable = node.params?.inheritedTable || '';
+      const table = ingestionMode === 'inherited'
+        ? inheritedTable
+        : (node.params?.table || model?.order?.[0]);
+      return { type: 'SOURCE', table };
+    }
+    if (node.type === 'FILTER') {
+      return { type: 'FILTER', parentId: node.parentId, parentKey, params: node.params };
+    }
+    if (node.type === 'AGGREGATE') {
+      return { type: 'AGGREGATE', parentId: node.parentId, parentKey, params: node.params };
+    }
+    if (node.type === 'JOIN') {
+      return { type: 'JOIN', parentId: node.parentId, parentKey, params: node.params };
+    }
+    return { type: 'FILTER', parentId: node.parentId, parentKey, params: {} };
+  }, []);
+
   // -------------------------------------------------------------------
   // Node updates (params + metadata)
   // -------------------------------------------------------------------
@@ -882,7 +954,169 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   // -------------------------------------------------------------------
   // Tree engine (process the graph of nodes)
   // -------------------------------------------------------------------
-  const dataEngine = useMemo(() => createDataEngine(dataModel), [dataModel]);
+  const externalTableRegistry = useMemo(() => {
+    const allByName = {};
+    const allList = [];
+    const datasets = [];
+    const legacyUsedNames = new Set();
+    (explorations || []).forEach((exp) => {
+      if (!exp) return;
+      const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+      if (nodesList.length === 0) return;
+      const model = exp.dataModel || { tables: {}, order: [] };
+      const engine = createDataEngine(model);
+      const order = getCalculationOrder(nodesList);
+      order.forEach((node) => {
+        const parentKey = node.parentId ? engine.getQueryKey(node.parentId) : '';
+        const spec = buildNodeSpec(node, parentKey, model);
+        engine.ensureQuery(node.id, spec);
+      });
+      const leafNodes = getLeafNodes(nodesList);
+      const displayExpName = exp.name || exp.rawDataName || 'Exploration';
+      const legacyExpName = exp.name || exp.rawDataName || 'Workbench';
+      leafNodes.forEach((leaf, index) => {
+        const branchLabel = leaf.branchName || leaf.title || `Branch ${index + 1}`;
+        const nodeTitle = leaf.title || branchLabel || 'Dataset';
+        const displayName = `${displayExpName} / ${nodeTitle}`;
+        const stableName = buildStableExternalTableName(exp.id, leaf.id);
+        const legacyName = buildLegacyExternalTableName(legacyExpName, branchLabel, legacyUsedNames);
+        const snapshot = leaf.params?.datasetSnapshot;
+        const isDataset = !!leaf.params?.isDataset;
+        const isFlattened = isDataset && !!leaf.params?.isFlattened && Array.isArray(snapshot?.rows);
+        const resolvedRows = isFlattened
+          ? snapshot.rows
+          : engine.getRows(leaf.id, { start: 0, size: engine.getRowCount(leaf.id) });
+        const resolvedSchema = isFlattened
+          ? (Array.isArray(snapshot?.schema) && snapshot.schema.length > 0
+            ? snapshot.schema
+            : (Array.isArray(snapshot?.rows) && snapshot.rows.length > 0
+              ? Object.keys(snapshot.rows[0] || {})
+              : []))
+          : engine.getSchema(leaf.id);
+        const resolvedRowCount = isFlattened
+          ? (Number.isFinite(snapshot?.rowCount) ? snapshot.rowCount : resolvedRows.length)
+          : engine.getRowCount(leaf.id);
+        const entry = {
+          name: stableName,
+          legacyName,
+          label: displayName,
+          rows: resolvedRows,
+          schema: resolvedSchema,
+          rowCount: resolvedRowCount,
+          explorationId: exp.id,
+          explorationName: displayExpName,
+          explorationDescription: exp.description || '',
+          explorationUpdatedAt: exp.updatedAt,
+          nodeId: leaf.id,
+          nodeTitle,
+          branchName: leaf.branchName || '',
+          isDataset,
+          isFlattened,
+          datasetName: nodeTitle
+        };
+        allByName[stableName] = entry;
+        if (legacyName && !allByName[legacyName]) {
+          allByName[legacyName] = entry;
+        }
+        allList.push(entry);
+        if (entry.isDataset) datasets.push(entry);
+      });
+    });
+    const entryByKey = new Map();
+    allList.forEach((entry) => {
+      if (entry?.explorationId && entry?.nodeId) {
+        entryByKey.set(`${entry.explorationId}:${entry.nodeId}`, entry);
+      }
+    });
+
+    const externalNameEntries = Object.entries(allByName).map(([name, entry]) => ({
+      name,
+      entry
+    }));
+
+    (explorations || []).forEach((exp) => {
+      if (!exp?.id) return;
+      const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+      if (nodesList.length === 0) return;
+      const nodesById = new Map(nodesList.map((node) => [node.id, node]));
+      const leafNodes = getLeafNodes(nodesList);
+      const sqlMatchers = externalNameEntries
+        .filter(({ entry }) => entry?.explorationId && entry.explorationId !== exp.id)
+        .map(({ name, entry }) => ({
+          entry,
+          regex: new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i')
+        }));
+
+      leafNodes.forEach((leaf) => {
+        if (!leaf?.params?.isDataset) return;
+        const key = `${exp.id}:${leaf.id}`;
+        const entry = entryByKey.get(key);
+        if (!entry) return;
+        if (entry.isFlattened) {
+          entry.dependencies = [];
+          return;
+        }
+        const depsByKey = new Map();
+        let current = leaf;
+        while (current) {
+          if (current.type === 'SOURCE' && current.params?.ingestionMode === 'inherited') {
+            const tableName = current.params?.inheritedTable || '';
+            const depEntry = tableName ? allByName[tableName] : null;
+            if (depEntry && depEntry.explorationId !== exp.id) {
+              depsByKey.set(`${depEntry.explorationId}:${depEntry.nodeId}`, depEntry);
+            }
+          }
+          if (current.type === 'JOIN') {
+            const sqlMode = current.params?.sqlMode || 'visual';
+            if (sqlMode === 'custom') {
+              const sqlText = String(current.params?.sqlText || '');
+              if (sqlText) {
+                sqlMatchers.forEach(({ entry: depEntry, regex }) => {
+                  if (regex.test(sqlText)) {
+                    depsByKey.set(`${depEntry.explorationId}:${depEntry.nodeId}`, depEntry);
+                  }
+                });
+              }
+            } else {
+              const tableName = current.params?.rightTable || '';
+              const depEntry = tableName ? allByName[tableName] : null;
+              if (depEntry && depEntry.explorationId !== exp.id) {
+                depsByKey.set(`${depEntry.explorationId}:${depEntry.nodeId}`, depEntry);
+              }
+            }
+          }
+          current = current.parentId ? nodesById.get(current.parentId) : null;
+        }
+        entry.dependencies = Array.from(depsByKey.values()).map((depEntry) => ({
+          name: depEntry.name,
+          label: depEntry.nodeTitle || depEntry.label,
+          explorationName: depEntry.explorationName,
+          explorationId: depEntry.explorationId,
+          nodeId: depEntry.nodeId,
+          nodeTitle: depEntry.nodeTitle,
+          isDataset: depEntry.isDataset
+        }));
+      });
+    });
+
+    const externalList = allList.filter((entry) => entry.explorationId !== activeExplorationId);
+    const externalByName = externalList.reduce((acc, entry) => {
+      acc[entry.name] = entry;
+      if (entry.legacyName && !acc[entry.legacyName]) {
+        acc[entry.legacyName] = entry;
+      }
+      return acc;
+    }, {});
+    allList.sort((a, b) => a.label.localeCompare(b.label));
+    externalList.sort((a, b) => a.label.localeCompare(b.label));
+    datasets.sort((a, b) => (b.explorationUpdatedAt || '').localeCompare(a.explorationUpdatedAt || ''));
+    return { byName: externalByName, list: externalList, datasets, allList, allByName };
+  }, [explorations, activeExplorationId, buildNodeSpec]);
+
+  const dataEngine = useMemo(
+    () => createDataEngine(dataModel, { externalTables: externalTableRegistry.byName }),
+    [dataModel, externalTableRegistry.byName]
+  );
 
   const chainData = useMemo(() => {
     const order = getCalculationOrder(nodes);
@@ -893,18 +1127,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       const parentKey = node.parentId ? dataEngine.getQueryKey(node.parentId) : '';
       let spec = null;
 
-      if (node.type === 'SOURCE') {
-        const table = node.params.table || dataModel.order[0];
-        spec = { type: 'SOURCE', table };
-      } else if (node.type === 'FILTER') {
-        spec = { type: 'FILTER', parentId: node.parentId, parentKey, params: node.params };
-      } else if (node.type === 'AGGREGATE') {
-        spec = { type: 'AGGREGATE', parentId: node.parentId, parentKey, params: node.params };
-      } else if (node.type === 'JOIN') {
-        spec = { type: 'JOIN', parentId: node.parentId, parentKey, params: node.params };
-      } else {
-        spec = { type: 'FILTER', parentId: node.parentId, parentKey, params: {} };
-      }
+      spec = buildNodeSpec(node, parentKey, dataModel);
 
       const query = dataEngine.ensureQuery(node.id, spec);
       const sampleRows = dataEngine.getSampleRows(node.id, dataEngine.DEFAULT_SAMPLE_SIZE);
@@ -914,6 +1137,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         queryId: node.id,
         schema: query.schema || [],
         rowCount: query.rowCount || 0,
+        error: query.error || '',
         data: sampleRows,
         sampleRows,
         getRowAt: (index, sortBy, sortDirection) => dataEngine.getRowAt(node.id, index, sortBy, sortDirection),
@@ -953,6 +1177,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     tableShowStats: false,
     target: 100,
     joinType: 'LEFT',
+    sqlMode: DEFAULT_SQL_MODE,
+    sqlText: '',
     metrics: [],
     pivotRow: '',
     pivotColumn: '',
@@ -964,7 +1190,13 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     assistantSummary: '',
     assistantError: '',
     assistantLlmError: '',
-    assistantPlan: []
+    assistantPlan: [],
+    ingestionMode: DEFAULT_INGESTION_MODE,
+    inheritedTable: '',
+    isDataset: false,
+    datasetName: '',
+    isFlattened: false,
+    datasetSnapshot: null
   });
 
   const COMPONENT_TITLE_BY_SUBTYPE = {
@@ -985,7 +1217,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const DEFAULT_NODE_TITLE_BY_TYPE = {
     FILTER: 'Filter Data',
     AGGREGATE: 'Aggregate',
-    JOIN: 'SQL Join'
+    JOIN: 'SQL'
   };
 
   const getDefaultNodeTitle = (type, subtype) => {
@@ -1309,6 +1541,123 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     updateNodes(nextNodes);
   }, [nodes, findNodeById, updateNodes]);
 
+  const toggleDatasetForNode = useCallback((nodeId) => {
+    if (!nodeId) return;
+    const target = findNodeById(nodeId);
+    if (!target) return;
+    const nextIsDataset = !target.params?.isDataset;
+    const idsToUpdate = new Set([nodeId]);
+    if (target.entangledPeerId) idsToUpdate.add(target.entangledPeerId);
+    const nextNodes = nodes.map((node) => {
+      if (!idsToUpdate.has(node.id)) return node;
+      const nextParams = {
+        ...node.params,
+        isDataset: nextIsDataset,
+        isFlattened: nextIsDataset ? node.params?.isFlattened === true : false,
+        datasetSnapshot: nextIsDataset ? node.params?.datasetSnapshot || null : null
+      };
+      return { ...node, params: nextParams };
+    });
+    updateNodes(nextNodes);
+  }, [nodes, findNodeById, updateNodes]);
+
+  const flattenDatasetEntry = useCallback((entry) => {
+    if (!entry?.explorationId || !entry?.nodeId) return;
+    const exp = explorations.find((item) => item.id === entry.explorationId);
+    if (!exp) return;
+    const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+    if (nodesList.length === 0) return;
+    const nodesById = new Map(nodesList.map((node) => [node.id, node]));
+    const model = exp.dataModel || { tables: {}, order: [] };
+    const externalTables = Object.entries(externalTableRegistry.allByName || {}).reduce((acc, [name, extEntry]) => {
+      if (extEntry?.explorationId && extEntry.explorationId !== exp.id) {
+        acc[name] = extEntry;
+      }
+      return acc;
+    }, {});
+    const engine = createDataEngine(model, { externalTables });
+    const order = getCalculationOrder(nodesList);
+    order.forEach((node) => {
+      const parentKey = node.parentId ? engine.getQueryKey(node.parentId) : '';
+      const spec = buildNodeSpec(node, parentKey, model);
+      engine.ensureQuery(node.id, spec);
+    });
+    const rowCount = engine.getRowCount(entry.nodeId);
+    const rows = engine.getRows(entry.nodeId, { start: 0, size: rowCount });
+    const schema = engine.getSchema(entry.nodeId);
+    const snapshot = {
+      rows,
+      schema,
+      rowCount,
+      createdAt: new Date().toISOString()
+    };
+    const datasetName = entry.datasetName || entry.nodeTitle || 'Dataset';
+    const lineageIds = new Set();
+    let currentId = entry.nodeId;
+    while (currentId && nodesById.has(currentId)) {
+      lineageIds.add(currentId);
+      const current = nodesById.get(currentId);
+      currentId = current?.parentId;
+    }
+    const lineageNodes = nodesList
+      .filter((node) => lineageIds.has(node.id))
+      .map((node) => {
+        if (node.id !== entry.nodeId) return node;
+        return {
+          ...node,
+          title: datasetName,
+          params: {
+            ...node.params,
+            isDataset: true,
+            isFlattened: true,
+            datasetName,
+            datasetSnapshot: snapshot
+          }
+        };
+      });
+    const now = new Date().toISOString();
+    const nextExplorations = explorations.map((item) => {
+      if (item.id !== exp.id) return item;
+      return {
+        ...item,
+        name: datasetName,
+        description: '',
+        rawDataName: datasetName,
+        isFlattenedDataset: true,
+        nodes: lineageNodes,
+        updatedAt: now
+      };
+    });
+    try {
+      persistExplorations(nextExplorations);
+    } catch (err) {
+      // Ignore storage errors on flatten.
+    }
+    setExplorations(nextExplorations);
+    if (activeExplorationId === exp.id) {
+      updateNodes(lineageNodes);
+      setRawDataName(datasetName);
+    }
+  }, [explorations, externalTableRegistry.allByName, activeExplorationId, buildNodeSpec, updateNodes]);
+
+  const openFlattenModal = useCallback((entry) => {
+    if (!entry || entry.isFlattened) return;
+    setFlattenModalEntry(entry);
+    setIsFlattenModalOpen(true);
+  }, []);
+
+  const closeFlattenModal = useCallback(() => {
+    setIsFlattenModalOpen(false);
+    setFlattenModalEntry(null);
+  }, []);
+
+  const confirmFlattenModal = useCallback(() => {
+    if (flattenModalEntry) {
+      flattenDatasetEntry(flattenModalEntry);
+    }
+    closeFlattenModal();
+  }, [flattenDatasetEntry, flattenModalEntry, closeFlattenModal]);
+
   const applyNodePositions = useCallback((positions, options = {}) => {
     if (!positions) return;
     let hasChanges = false;
@@ -1514,6 +1863,52 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     typeof value === 'string' ? value.trim() : ''
   );
 
+  const buildLegacyToStableMap = useCallback((explorationList = []) => {
+    const legacyUsedNames = new Set();
+    const map = {};
+    (explorationList || []).forEach((exp) => {
+      if (!exp?.id) return;
+      const legacyExpName = exp.name || exp.rawDataName || 'Workbench';
+      const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+      const leafNodes = getLeafNodes(nodesList);
+      leafNodes.forEach((leaf, index) => {
+        const branchLabel = leaf.branchName || leaf.title || `Branch ${index + 1}`;
+        const legacyName = buildLegacyExternalTableName(legacyExpName, branchLabel, legacyUsedNames);
+        const stableName = buildStableExternalTableName(exp.id, leaf.id);
+        map[legacyName] = stableName;
+      });
+    });
+    return map;
+  }, []);
+
+  const normalizeExternalTableRefs = useCallback((nodesList = [], legacyToStable = {}) => {
+    if (!Array.isArray(nodesList) || nodesList.length === 0) {
+      return { nodes: nodesList, changed: false };
+    }
+    let changed = false;
+    const nextNodes = nodesList.map((node) => {
+      if (!node?.params) return node;
+      if (node.type === 'SOURCE' && node.params.ingestionMode === 'inherited') {
+        const current = node.params.inheritedTable || '';
+        const mapped = legacyToStable[current];
+        if (mapped && mapped !== current) {
+          changed = true;
+          return { ...node, params: { ...node.params, inheritedTable: mapped } };
+        }
+      }
+      if (node.type === 'JOIN') {
+        const current = node.params.rightTable || '';
+        const mapped = legacyToStable[current];
+        if (mapped && mapped !== current) {
+          changed = true;
+          return { ...node, params: { ...node.params, rightTable: mapped } };
+        }
+      }
+      return node;
+    });
+    return { nodes: nextNodes, changed };
+  }, []);
+
   const getExplorationStats = (model) => {
     const order = model?.order || [];
     const rowCount = order.reduce((sum, name) => sum + ((model.tables?.[name] || []).length), 0);
@@ -1564,9 +1959,25 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         return prev;
       }
       const now = new Date().toISOString();
-      const next = prev.map(exp => (
-        exp.id === id ? { ...exp, name: safeName, updatedAt: now } : exp
-      ));
+      const legacyToStable = buildLegacyToStableMap(prev);
+      const next = prev.map((exp) => {
+        const normalized = normalizeExternalTableRefs(exp.nodes || [], legacyToStable);
+        const updates = exp.id === id ? { name: safeName, updatedAt: now } : {};
+        if (!normalized.changed && Object.keys(updates).length === 0) {
+          return exp;
+        }
+        return {
+          ...exp,
+          ...updates,
+          nodes: normalized.changed ? normalized.nodes : exp.nodes
+        };
+      });
+      if (activeExplorationId) {
+        const normalizedActive = normalizeExternalTableRefs(nodes, legacyToStable);
+        if (normalizedActive.changed) {
+          replaceCurrentNodes(normalizedActive.nodes);
+        }
+      }
       try {
         persistExplorations(next);
       } catch (err) {
@@ -1683,12 +2094,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setViewMode('landing');
   };
 
-  const openExploration = (exploration) => {
+  const openExploration = (exploration, options = {}) => {
     if (!exploration) return;
     const nextNodes = exploration.nodes || createInitialNodes();
+    const focusNodeId = options.focusNodeId;
+    const hasFocusNode = focusNodeId && nextNodes.some((node) => node.id === focusNodeId);
+    const nextSelectedId = hasFocusNode ? focusNodeId : (nextNodes[0]?.id || 'node-start');
     setHistory([nextNodes]);
     setHistoryIndex(0);
-    setSelectedNodeId(nextNodes[0]?.id || 'node-start');
+    setSelectedNodeId(nextSelectedId);
     setDataModel(exploration.dataModel || { tables: {}, order: [] });
     setRawDataName(exploration.rawDataName || exploration.name || null);
     setLoadError(null);
@@ -1750,7 +2164,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   // -------------------------------------------------------------------
   // AI assistant helper (rule-based planner)
   // -------------------------------------------------------------------
-  const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const escapeRegExpForAi = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const normalizeText = (value) => value.toLowerCase();
   const getStoredLlmSettings = () => {
     if (typeof window === 'undefined' || !window.localStorage) {
@@ -1803,7 +2217,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const parseFiltersFromQuestion = (question, schema) => {
     const filters = [];
     for (const field of schema) {
-      const escaped = escapeRegExp(field);
+      const escaped = escapeRegExpForAi(field);
       const pattern = new RegExp(`${escaped}\\s*(=|equals|is|>=|<=|>|<|at least|at most|above|below|greater than|less than)\\s*([\\w\\-\\.]+)`, 'i');
       const trailingPattern = new RegExp(`${escaped}[^0-9]{0,10}([0-9]+(?:\\.[0-9]+)?)\\s*(and\\s+above|or\\s+more|and\\s+below|or\\s+less)?`, 'i');
       const containsPattern = new RegExp(`${escaped}\\s*(contains|includes)\\s*([\\w\\-\\.]+)`, 'i');
@@ -2351,6 +2765,17 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   // Derived status for SOURCE panel
   // -------------------------------------------------------------------
   const sourceStatus = (() => {
+    const sourceNode = nodes.find((node) => node.id === 'node-start');
+    const ingestionMode = sourceNode?.params?.ingestionMode || DEFAULT_INGESTION_MODE;
+    const inheritedTable = sourceNode?.params?.inheritedTable || '';
+    if (ingestionMode === 'inherited') {
+      if (!inheritedTable) {
+        return { title: 'No inherited table', detail: 'Pick a saved end node from another exploration.' };
+      }
+      const inheritedEntry = externalTableRegistry.allByName?.[inheritedTable];
+      const label = inheritedEntry?.label || inheritedTable;
+      return { title: 'Inherited table', detail: `Using ${label} from another exploration.` };
+    }
     if (isLoadingFile) return { title: 'Loading…', detail: 'Parsing files and building tables…', loading: true };
     if (loadError) return { title: 'Error', detail: loadError };
     const tableCount = dataModel.order.length;
@@ -2361,6 +2786,176 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     }
     return { title: 'Connected', detail: `${label} loaded with ${tableCount} tables and ${totalRows} rows.` };
   })();
+
+  const availableTables = useMemo(() => {
+    const local = (dataModel.order || []).map((name) => ({
+      name,
+      label: name,
+      source: 'local',
+      sqlName: slugifySqlName(name)
+    }));
+    const externalEntries = [...(externalTableRegistry.datasets || [])]
+      .sort((a, b) => a.label.localeCompare(b.label));
+    const external = externalEntries.map((entry) => ({
+      name: entry.name,
+      label: entry.label,
+      source: 'external',
+      explorationName: entry.explorationName,
+      nodeTitle: entry.nodeTitle,
+      isDataset: entry.isDataset,
+      schema: entry.schema,
+      rowCount: entry.rowCount,
+      legacyName: entry.legacyName,
+      isFlattened: entry.isFlattened
+    }));
+    return {
+      incoming: SQL_INCOMING_TABLE,
+      local,
+      external
+    };
+  }, [dataModel.order, externalTableRegistry.datasets]);
+
+  const datasetEntries = externalTableRegistry.datasets || [];
+
+  const workbenchDependencyGraph = useMemo(() => {
+    const explorationNodes = [];
+    const edges = [];
+    const datasetEntryByKey = new Map();
+    const datasetNodeIdByKey = new Map();
+    const explorationNodeIdById = new Map();
+    const datasetEntriesList = externalTableRegistry.datasets || [];
+
+    (externalTableRegistry.allList || []).forEach((entry) => {
+      if (!entry?.explorationId || !entry?.nodeId) return;
+      datasetEntryByKey.set(`${entry.explorationId}:${entry.nodeId}`, entry);
+    });
+
+    explorations.forEach((exp) => {
+      if (!exp?.id) return;
+      const graphId = `exp:${exp.id}`;
+      explorationNodeIdById.set(exp.id, graphId);
+      const order = exp.dataModel?.order || [];
+      const tableCount = exp.tableCount ?? order.length;
+      const rowCount = exp.rowCount ?? order.reduce(
+        (sum, name) => sum + ((exp.dataModel?.tables?.[name] || []).length),
+        0
+      );
+      const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+      const nodeCount = nodesList.length;
+      const branchCount = nodesList.reduce((sum, node) => (
+        getChildren(nodesList, node.id).length === 0 ? sum + 1 : sum
+      ), 0);
+      explorationNodes.push({
+        id: graphId,
+        type: 'exploration',
+        explorationId: exp.id,
+        title: exp.name || 'Exploration',
+        subtitle: exp.description || '',
+        updatedAt: exp.updatedAt || exp.createdAt,
+        tableCount,
+        rowCount,
+        nodeCount,
+        branchCount,
+        internalNodes: nodesList
+      });
+    });
+
+    const datasetNodes = datasetEntriesList
+      .map((entry) => {
+        if (!entry) return null;
+        const key = `${entry.explorationId}:${entry.nodeId}`;
+        const nodeId = datasetNodeIdByKey.get(key) || `dataset:${key}`;
+        datasetNodeIdByKey.set(key, nodeId);
+        return {
+          id: nodeId,
+          type: 'dataset',
+          datasetEntry: entry,
+          title: entry.datasetName || entry.nodeTitle || 'Dataset',
+          subtitle: `From ${entry.explorationName || 'Exploration'}`,
+          updatedAt: entry.explorationUpdatedAt,
+          rowCount: entry.rowCount || 0,
+          columnCount: entry.schema?.length || 0,
+          internalNodes: [{
+            id: entry.nodeId,
+            parentId: null,
+            title: entry.nodeTitle || entry.datasetName || 'Dataset'
+          }]
+        };
+      })
+      .filter(Boolean);
+
+    const addEdge = (exp, node, entry, kind) => {
+      if (!entry || !entry.isDataset || !exp?.id || !node?.id) return;
+      if (entry.explorationId === exp.id) return;
+      const explorationNodeId = explorationNodeIdById.get(exp.id);
+      if (!explorationNodeId) return;
+      const key = `${entry.explorationId}:${entry.nodeId}`;
+      const datasetNodeId = datasetNodeIdByKey.get(key) || `dataset:${key}`;
+      datasetNodeIdByKey.set(key, datasetNodeId);
+      edges.push({
+        id: `edge:${exp.id}:${node.id}:${entry.name || entry.nodeId}:${kind}`,
+        from: datasetNodeId,
+        to: explorationNodeId,
+        sourceAnchorId: entry.nodeId,
+        targetAnchorId: node.id,
+        kind
+      });
+    };
+
+    explorations.forEach((exp) => {
+      const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+      nodesList.forEach((node) => {
+        if (node.type === 'SOURCE' && node.params?.ingestionMode === 'inherited') {
+          const tableName = node.params?.inheritedTable || '';
+          if (!tableName) return;
+          const entry = externalTableRegistry.allByName?.[tableName];
+          addEdge(exp, node, entry, 'inherited');
+        }
+        if (node.type === 'JOIN') {
+          const tableName = node.params?.rightTable || '';
+          if (!tableName) return;
+          const entry = externalTableRegistry.allByName?.[tableName];
+          addEdge(exp, node, entry, 'join');
+        }
+      });
+    });
+
+    const anchorMap = new Map();
+    const registerAnchor = (graphNodeId, internalNodeId, direction) => {
+      if (!graphNodeId || !internalNodeId) return;
+      const current = anchorMap.get(graphNodeId) || new Map();
+      const next = current.get(internalNodeId) || { incoming: 0, outgoing: 0 };
+      if (direction === 'incoming') {
+        next.incoming += 1;
+      } else if (direction === 'outgoing') {
+        next.outgoing += 1;
+      }
+      current.set(internalNodeId, next);
+      anchorMap.set(graphNodeId, current);
+    };
+    edges.forEach((edge) => {
+      if (edge.from && edge.sourceAnchorId) {
+        registerAnchor(edge.from, edge.sourceAnchorId, 'outgoing');
+      }
+      if (edge.to && edge.targetAnchorId) {
+        registerAnchor(edge.to, edge.targetAnchorId, 'incoming');
+      }
+    });
+    const anchorsByNodeId = {};
+    anchorMap.forEach((value, key) => {
+      const entries = {};
+      value.forEach((meta, nodeId) => {
+        entries[nodeId] = meta;
+      });
+      anchorsByNodeId[key] = entries;
+    });
+
+    return {
+      nodes: [...explorationNodes, ...datasetNodes],
+      edges,
+      anchorsByNodeId
+    };
+  }, [explorations, externalTableRegistry.allByName, externalTableRegistry.allList, externalTableRegistry.datasets]);
 
   const selectedResult = getNodeResult(chainData, selectedNodeId);
   const selectedSchema = selectedResult?.schema || [];
@@ -2425,6 +3020,378 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     onClick: ({ key }) => setRenderMode(key)
   }), [renderMode]);
 
+  const renderExplorationEmpty = () => (
+    <div className={`bg-white border border-gray-200 rounded-2xl text-center shadow-sm dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'p-6' : 'p-10'}`}>
+      <Empty
+        description={
+          <div className="space-y-1">
+            <div className="text-base font-semibold text-gray-900 dark:text-slate-100">No explorations yet</div>
+            <Text type="secondary">Upload data, build a workflow, then Save & Exit to see it here.</Text>
+          </div>
+        }
+      >
+        <Button type="primary" icon={<Plus size={14} />} onClick={startNewExploration} block={isMobileMode}>
+          Create new exploration
+        </Button>
+      </Empty>
+    </div>
+  );
+
+  const renderExplorationCards = () => (
+    explorations.length === 0 ? renderExplorationEmpty() : (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {explorations.map((exp) => {
+          const order = exp.dataModel?.order || [];
+          const tableCount = exp.tableCount ?? order.length;
+          const rowCount = exp.rowCount ?? order.reduce((sum, name) => sum + ((exp.dataModel?.tables?.[name] || []).length), 0);
+          const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+          const nodeCount = nodesList.length;
+          const branchCount = nodesList.reduce((sum, node) => (
+            getChildren(nodesList, node.id).length === 0 ? sum + 1 : sum
+          ), 0);
+          const displayName = exp.name || 'Exploration';
+          const description = exp.description || '';
+          const descriptionLabel = description;
+          const descriptionTone = description
+            ? 'text-slate-700 dark:text-slate-200'
+            : 'text-slate-500 dark:text-slate-400 italic';
+          const updated = exp.updatedAt ? new Date(exp.updatedAt).toLocaleString() : '';
+          const updatedLabel = updated ? `Updated ${updated}` : 'Updated just now';
+          const isEditingName = editingExplorationId === exp.id;
+          const isEditingDescription = editingExplorationDescriptionId === exp.id;
+          return (
+            <Card
+              key={exp.id}
+              size="small"
+              variant="borderless"
+              className="exploration-card group h-full rounded-2xl border border-slate-200/70 bg-white/90 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/80 flex flex-col"
+              styles={{
+                body: {
+                  padding: 16,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  flex: 1,
+                },
+                header: { padding: '12px 16px' },
+              }}
+              title={(
+                <div className="exploration-card-title">
+                  <div className="flex flex-col gap-1 w-full min-w-0">
+                    <div className={`relative flex-1 min-w-0 group/exp-card-title ${cardTitleHeightClass}`}>
+                      <div className={isEditingName ? 'opacity-0' : ''}>
+                        <div
+                          className={`exploration-card-title-text truncate text-slate-900 dark:text-slate-100 ${cardTitleTextClass} ${editableFieldPadding}`}
+                          title={displayName}
+                        >
+                          {displayName}
+                        </div>
+                      </div>
+                      {isEditingName && (
+                        <input
+                          ref={explorationNameInputRef}
+                          className={`absolute inset-0 h-full w-full rounded-md border border-blue-400 bg-white/95 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-slate-900 dark:text-slate-100 ${cardTitleTextClass} ${editableFieldPadding}`}
+                          value={editingExplorationNameDraft}
+                          onChange={(e) => setEditingExplorationNameDraft(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              skipExplorationNameCommitRef.current = true;
+                              e.preventDefault();
+                              commitEditingExplorationName(exp.id);
+                            }
+                            if (e.key === 'Escape') {
+                              skipExplorationNameCommitRef.current = true;
+                              e.preventDefault();
+                              cancelEditingExplorationName();
+                            }
+                          }}
+                          onBlur={() => {
+                            if (skipExplorationNameCommitRef.current) {
+                              skipExplorationNameCommitRef.current = false;
+                              return;
+                            }
+                            commitEditingExplorationName(exp.id);
+                          }}
+                          aria-label="Rename exploration"
+                        />
+                      )}
+                      {!isEditingName && (
+                        <button
+                          type="button"
+                          className={`absolute right-0 top-1/2 -translate-y-1/2 z-10 opacity-0 transition-opacity pointer-events-none group-hover/exp-card-title:opacity-100 group-hover/exp-card-title:pointer-events-auto ${editButtonClass}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditingExplorationName(exp.id, displayName);
+                          }}
+                          aria-label="Rename exploration"
+                        >
+                          <EditIcon size={editIconSize} />
+                        </button>
+                      )}
+                    </div>
+                    <div className={`relative group/exp-card-desc w-full min-w-0 ${descriptionHeightClass}`}>
+                      <div className={isEditingDescription ? 'opacity-0' : ''}>
+                        <div
+                          className={`truncate ${descriptionTextClass} ${descriptionTone} ${editableFieldPadding}`}
+                          title={descriptionLabel}
+                        >
+                          {descriptionLabel}
+                        </div>
+                      </div>
+                      {isEditingDescription && (
+                        <input
+                          ref={explorationDescriptionInputRef}
+                          className={`absolute inset-0 h-full w-full rounded-md border border-blue-400 bg-white/95 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-slate-900 dark:text-slate-100 ${descriptionTextClass} ${editableFieldPadding}`}
+                          value={editingExplorationDescriptionDraft}
+                          onChange={(e) => setEditingExplorationDescriptionDraft(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              skipExplorationDescriptionCommitRef.current = true;
+                              e.preventDefault();
+                              commitEditingExplorationDescription(exp.id);
+                            }
+                            if (e.key === 'Escape') {
+                              skipExplorationDescriptionCommitRef.current = true;
+                              e.preventDefault();
+                              cancelEditingExplorationDescription();
+                            }
+                          }}
+                          onBlur={() => {
+                            if (skipExplorationDescriptionCommitRef.current) {
+                              skipExplorationDescriptionCommitRef.current = false;
+                              return;
+                            }
+                            commitEditingExplorationDescription(exp.id);
+                          }}
+                          aria-label="Edit exploration description"
+                        />
+                      )}
+                      {!isEditingDescription && (
+                        <button
+                          type="button"
+                          className={`absolute right-0 top-1/2 -translate-y-1/2 z-10 opacity-0 transition-opacity pointer-events-none group-hover/exp-card-desc:opacity-100 group-hover/exp-card-desc:pointer-events-auto ${editButtonClass}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditingExplorationDescription(exp.id, description);
+                          }}
+                          aria-label="Edit exploration description"
+                        >
+                          <EditIcon size={editIconSize} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+              extra={
+                <Button
+                  type="text"
+                  size="small"
+                  danger
+                  icon={<Trash2 size={14} />}
+                  onClick={() => deleteExploration(exp.id)}
+                >
+                  Delete
+                </Button>
+              }
+            >
+              <div className="flex w-full flex-1 flex-col">
+                <div className="flex flex-col gap-2">
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {updatedLabel}
+                  </Text>
+                  <Space size="small" wrap>
+                    <Tag color="blue" variant="filled" className="rounded-full px-2">
+                      {tableCount} tables
+                    </Tag>
+                    <Tag color="cyan" variant="filled" className="rounded-full px-2">
+                      {rowCount} rows
+                    </Tag>
+                    <Tag color="purple" variant="filled" className="rounded-full px-2">
+                      {nodeCount} nodes
+                    </Tag>
+                    <Tag color="gold" variant="filled" className="rounded-full px-2">
+                      {branchCount} branches
+                    </Tag>
+                  </Space>
+                </div>
+                <div className="mt-auto w-full pt-2">
+                  <Button
+                    type="default"
+                    block
+                    className="w-full"
+                    icon={<Play size={14} />}
+                    onClick={() => openExploration(exp)}
+                  >
+                    Open Exploration
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    )
+  );
+
+  const renderExplorationGraph = () => (
+    explorations.length === 0 ? renderExplorationEmpty() : (
+      <WorkbenchDependencyGraph
+        nodes={workbenchDependencyGraph.nodes}
+        edges={workbenchDependencyGraph.edges}
+        anchorsByNodeId={workbenchDependencyGraph.anchorsByNodeId}
+        onOpenExploration={(explorationId) => {
+          const exp = explorations.find((item) => item.id === explorationId);
+          if (exp) openExploration(exp);
+        }}
+        onOpenDataset={(entry) => {
+          if (!entry) return;
+          const exp = explorations.find((item) => item.id === entry.explorationId);
+          if (exp) openExploration(exp, { focusNodeId: entry.nodeId });
+        }}
+        className={isLandingGraph ? 'flex-1 min-h-0' : ''}
+      />
+    )
+  );
+
+  const renderDatasetCards = () => (
+    <div className="pt-4">
+      {datasetEntries.length === 0 ? (
+        <div className={`mt-4 bg-white border border-gray-200 rounded-2xl text-center shadow-sm dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'p-6' : 'p-8'}`}>
+          <Empty
+            description={
+              <div className="space-y-1">
+                <div className="text-base font-semibold text-gray-900 dark:text-slate-100">No data sets yet</div>
+                <Text type="secondary">Save an end node as a data set to surface it here.</Text>
+              </div>
+            }
+          />
+        </div>
+      ) : (
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {datasetEntries.map((dataset) => {
+            const datasetTitle = dataset.nodeTitle || 'Dataset';
+            const updated = dataset.explorationUpdatedAt ? new Date(dataset.explorationUpdatedAt).toLocaleString() : '';
+            const updatedLabel = updated ? `Updated ${updated}` : 'Updated just now';
+            const columnCount = dataset.schema?.length || 0;
+            const rowCount = dataset.rowCount || 0;
+            const dependencies = Array.isArray(dataset.dependencies) ? dataset.dependencies : [];
+            const descriptionLabel = dataset.explorationDescription || 'No description';
+            return (
+              <Card
+                key={`${dataset.explorationId}-${dataset.nodeId}`}
+                size="small"
+                variant="borderless"
+                className="dataset-card group h-full rounded-2xl border border-emerald-200/70 bg-white/95 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-emerald-700/60 dark:bg-slate-900/90 flex flex-col"
+                styles={{
+                  body: {
+                    padding: 16,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    flex: 1,
+                  }
+                }}
+                title={(
+                  <div className="flex items-center justify-between gap-2 w-full">
+                    <div className="truncate text-slate-900 dark:text-slate-100 font-semibold">
+                      {datasetTitle}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {dataset.isFlattened && (
+                        <Tag color="gold" variant="filled" className="rounded-full px-2">
+                          Flattened
+                        </Tag>
+                      )}
+                      <Tag color="green" variant="filled" className="rounded-full px-2">
+                        Dataset
+                      </Tag>
+                    </div>
+                  </div>
+                )}
+              >
+                <div className="flex w-full flex-1 flex-col gap-3">
+                  <div className="flex flex-col gap-2">
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {updatedLabel}
+                    </Text>
+                    <Text type="secondary" className="text-xs">
+                      From {dataset.explorationName || 'Exploration'}
+                    </Text>
+                    <Text type="secondary" className="text-xs">
+                      {descriptionLabel}
+                    </Text>
+                    <Space size="small" wrap>
+                      <Tag color="cyan" variant="filled" className="rounded-full px-2">
+                        {rowCount} rows
+                      </Tag>
+                      <Tag color="purple" variant="filled" className="rounded-full px-2">
+                        {columnCount} columns
+                      </Tag>
+                    </Space>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <Text type="secondary" className="text-[11px] uppercase tracking-wider">
+                      Dependencies
+                    </Text>
+                    {dependencies.length === 0 ? (
+                      <Text type="secondary" className="text-xs">
+                        No external dependencies.
+                      </Text>
+                    ) : (
+                      <Space size="small" wrap>
+                        {dependencies.map((dep) => (
+                          <Tag
+                            key={`${dep.explorationId}:${dep.nodeId}`}
+                            color={dep.isDataset ? 'green' : 'purple'}
+                            className="rounded-full px-2"
+                            title={dep.explorationName ? `From ${dep.explorationName}` : undefined}
+                          >
+                            {dep.label || 'Dependency'}
+                          </Tag>
+                        ))}
+                      </Space>
+                    )}
+                  </div>
+
+                  <div className="mt-auto w-full pt-1">
+                    <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                      <Button
+                        type="default"
+                        block
+                        className="w-full"
+                        icon={<Play size={14} />}
+                        onClick={() => {
+                          const exp = explorations.find((item) => item.id === dataset.explorationId);
+                          if (exp) {
+                            openExploration(exp, { focusNodeId: dataset.nodeId });
+                          }
+                        }}
+                      >
+                        Open Exploration
+                      </Button>
+                      <Button
+                        type="default"
+                        block
+                        disabled={dataset.isFlattened}
+                        onClick={() => openFlattenModal(dataset)}
+                      >
+                        {dataset.isFlattened ? 'Flattened' : 'Flatten dataset'}
+                      </Button>
+                    </Space>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
   const settingsMenu = useMemo(() => ({
     items: [
       {
@@ -2476,6 +3443,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const explorationDescriptionTone = explorationDescription
     ? 'text-gray-400 dark:text-slate-400'
     : 'text-gray-400 dark:text-slate-500 italic';
+  const isFlattenedDataset = activeExploration?.isFlattenedDataset === true
+    || nodes.some((node) => node.params?.isFlattened && node.params?.datasetSnapshot);
   const editButtonClass = 'inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-slate-600 shadow-sm transition hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200';
   const editIconSize = 12;
   const editableFieldPadding = 'pl-1 pr-8 py-0.5';
@@ -2490,6 +3459,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const dataModelHeaderTextSize = tableDensity === 'dense' ? 'text-[11px]' : 'text-xs';
   const activeRenderModeLabel = renderModeLabels[renderMode] || 'Classic';
   const ActiveRenderModeIcon = renderModeIcons[renderMode] || LayoutClassic;
+  const isLandingGraph = landingViewMode === 'graph';
 
   // -------------------------------------------------------------------
   // Render
@@ -2595,7 +3565,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     )}
                   </div>
                 ) : (
-                  <div className={`font-bold text-gray-900 dark:text-slate-100 ${isMobileMode ? 'text-base' : 'text-lg'}`}>Node Memory Analytics</div>
+                  <div className={`font-bold text-gray-900 dark:text-slate-100 ${isMobileMode ? 'text-base' : 'text-lg'}`}>Workbench</div>
                 )}
                 {!isMobileMode && (
                   viewMode === 'canvas' ? (
@@ -2653,7 +3623,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                       )}
                     </div>
                   ) : (
-                    <div className="text-xs text-gray-400 dark:text-slate-400">Exploration workspace</div>
+                    <div className="text-xs text-gray-400 dark:text-slate-400">Workbench</div>
                   )
                 )}
               </div>
@@ -2734,23 +3704,49 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 )}
               </Space>
             )}
+            {viewMode === 'landing' && (
+              <Space size="middle" align="center" wrap={isMobileMode} className={isMobileMode ? 'w-full' : ''}>
+                <Space.Compact size={isMobileMode ? 'small' : 'middle'} className={isMobileMode ? 'w-full' : ''}>
+                  <Button
+                    type={landingViewMode === 'cards' ? 'primary' : 'default'}
+                    onClick={() => setLandingViewMode('cards')}
+                    block={isMobileMode}
+                  >
+                    Cards
+                  </Button>
+                  <Button
+                    type={landingViewMode === 'graph' ? 'primary' : 'default'}
+                    onClick={() => setLandingViewMode('graph')}
+                    block={isMobileMode}
+                  >
+                    Dependency graph
+                  </Button>
+                </Space.Compact>
+                <Button
+                  type="primary"
+                  icon={<Plus size={14} />}
+                  onClick={startNewExploration}
+                  block={isMobileMode}
+                >
+                  New Exploration
+                </Button>
+              </Space>
+            )}
           </div>
         </header>
 
         {viewMode === 'landing' ? (
-          <div className="flex-1 overflow-auto bg-slate-50 dark:bg-slate-950">
-            <div className={`space-y-8 ${isMobileMode ? 'max-w-none px-4 py-6' : 'max-w-6xl mx-auto px-10 py-12'}`}>
-              <div className={`flex ${isMobileMode ? 'flex-col items-start gap-4' : 'items-center justify-between'}`}>
-                <div>
-                  <Title level={2} style={{ margin: 0 }}>Explorations</Title>
-                  <Text type="secondary">Pick up where you left off or start something new.</Text>
-                </div>
-                <Button type="primary" icon={<Plus size={14} />} onClick={startNewExploration} block={isMobileMode}>
-                  New Exploration
-                </Button>
-              </div>
-
-              {explorations.length === 0 ? (
+          <div className={`flex-1 ${isLandingGraph ? 'overflow-hidden' : 'overflow-auto'} bg-slate-50 dark:bg-slate-950`}>
+            <div className={isLandingGraph
+              ? 'flex h-full min-h-0 flex-col'
+              : `space-y-8 ${isMobileMode ? 'max-w-none px-4 py-6' : 'max-w-6xl mx-auto px-10 py-12'}`}
+            >
+              {landingViewMode === 'cards' ? renderExplorationCards() : renderExplorationGraph()}
+              {!isLandingGraph && renderDatasetCards()}
+              {/*
+              {landingTab === 'explorations' ? (
+                landingViewMode === 'cards' ? (
+                explorations.length === 0 ? (
                 <div className={`bg-white border border-gray-200 rounded-2xl text-center shadow-sm dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'p-6' : 'p-10'}`}>
                   <Empty
                     description={
@@ -2761,11 +3757,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     }
                   >
                     <Button type="primary" icon={<Plus size={14} />} onClick={startNewExploration} block={isMobileMode}>
-                      Create your first exploration
+                      Create new exploration
                     </Button>
                   </Empty>
                 </div>
-              ) : (
+                ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {explorations.map((exp) => {
                     const order = exp.dataModel?.order || [];
@@ -2778,7 +3774,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     ), 0);
                     const displayName = exp.name || 'Exploration';
                     const description = exp.description || '';
-                    const descriptionLabel = description || 'Add a description';
+                    const descriptionLabel = description;
                     const descriptionTone = description
                       ? 'text-slate-700 dark:text-slate-200'
                       : 'text-slate-500 dark:text-slate-400 italic';
@@ -2961,7 +3957,175 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     );
                   })}
                 </div>
+                )
+              ) : (
+                explorations.length === 0 ? (
+                  <div className={`bg-white border border-gray-200 rounded-2xl text-center shadow-sm dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'p-6' : 'p-10'}`}>
+                    <Empty
+                      description={
+                        <div className="space-y-1">
+                          <div className="text-base font-semibold text-gray-900 dark:text-slate-100">No explorations yet</div>
+                          <Text type="secondary">Upload data, build a workflow, then Save & Exit to see it here.</Text>
+                        </div>
+                      }
+                    >
+                      <Button type="primary" icon={<Plus size={14} />} onClick={startNewExploration} block={isMobileMode}>
+                        Create new exploration
+                      </Button>
+                    </Empty>
+                  </div>
+                ) : (
+                  <WorkbenchDependencyGraph
+                    nodes={workbenchDependencyGraph.nodes}
+                    edges={workbenchDependencyGraph.edges}
+                    anchorsByNodeId={workbenchDependencyGraph.anchorsByNodeId}
+                    onOpenExploration={(explorationId) => {
+                      const exp = explorations.find((item) => item.id === explorationId);
+                      if (exp) openExploration(exp);
+                    }}
+                    onOpenDataset={(entry) => {
+                      if (!entry) return;
+                      const exp = explorations.find((item) => item.id === entry.explorationId);
+                      if (exp) openExploration(exp, { focusNodeId: entry.nodeId });
+                    }}
+                    className={isLandingGraph ? 'flex-1 min-h-0' : ''}
+                  />
+                )
+              ) : (
+                <div className="pt-4">
+                  {datasetEntries.length === 0 ? (
+                    <div className={`mt-4 bg-white border border-gray-200 rounded-2xl text-center shadow-sm dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'p-6' : 'p-8'}`}>
+                      <Empty
+                        description={
+                          <div className="space-y-1">
+                            <div className="text-base font-semibold text-gray-900 dark:text-slate-100">No data sets yet</div>
+                            <Text type="secondary">Save an end node as a data set to surface it here.</Text>
+                          </div>
+                        }
+                      />
+                    </div>
+                  ) : (
+                    <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {datasetEntries.map((dataset) => {
+                        const datasetTitle = dataset.nodeTitle || 'Dataset';
+                        const updated = dataset.explorationUpdatedAt ? new Date(dataset.explorationUpdatedAt).toLocaleString() : '';
+                        const updatedLabel = updated ? `Updated ${updated}` : 'Updated just now';
+                        const columnCount = dataset.schema?.length || 0;
+                        const rowCount = dataset.rowCount || 0;
+                        const dependencies = Array.isArray(dataset.dependencies) ? dataset.dependencies : [];
+                        const descriptionLabel = dataset.explorationDescription || 'No description';
+                        return (
+                          <Card
+                            key={`${dataset.explorationId}-${dataset.nodeId}`}
+                            size="small"
+                            variant="borderless"
+                            className="dataset-card group h-full rounded-2xl border border-emerald-200/70 bg-white/95 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-emerald-700/60 dark:bg-slate-900/90 flex flex-col"
+                            styles={{
+                              body: {
+                                padding: 16,
+                                display: 'flex',
+                                flexDirection: 'column',
+                                flex: 1,
+                              }
+                            }}
+                            title={(
+                              <div className="flex items-center justify-between gap-2 w-full">
+                                <div className="truncate text-slate-900 dark:text-slate-100 font-semibold">
+                                  {datasetTitle}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {dataset.isFlattened && (
+                                    <Tag color="gold" variant="filled" className="rounded-full px-2">
+                                      Flattened
+                                    </Tag>
+                                  )}
+                                  <Tag color="green" variant="filled" className="rounded-full px-2">
+                                    Dataset
+                                  </Tag>
+                                </div>
+                              </div>
+                            )}
+                          >
+                            <div className="flex w-full flex-1 flex-col gap-3">
+                              <div className="flex flex-col gap-2">
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                  {updatedLabel}
+                                </Text>
+                                <Text type="secondary" className="text-xs">
+                                  From {dataset.explorationName || 'Exploration'}
+                                </Text>
+                                <Text type="secondary" className="text-xs">
+                                  {descriptionLabel}
+                                </Text>
+                                <Space size="small" wrap>
+                                  <Tag color="cyan" variant="filled" className="rounded-full px-2">
+                                    {rowCount} rows
+                                  </Tag>
+                                  <Tag color="purple" variant="filled" className="rounded-full px-2">
+                                    {columnCount} columns
+                                  </Tag>
+                                </Space>
+                              </div>
+
+                              <div className="flex flex-col gap-2">
+                                <Text type="secondary" className="text-[11px] uppercase tracking-wider">
+                                  Dependencies
+                                </Text>
+                                {dependencies.length === 0 ? (
+                                  <Text type="secondary" className="text-xs">
+                                    No external dependencies.
+                                  </Text>
+                                ) : (
+                                  <Space size="small" wrap>
+                                    {dependencies.map((dep) => (
+                                      <Tag
+                                        key={`${dep.explorationId}:${dep.nodeId}`}
+                                        color={dep.isDataset ? 'green' : 'purple'}
+                                        className="rounded-full px-2"
+                                        title={dep.explorationName ? `From ${dep.explorationName}` : undefined}
+                                      >
+                                        {dep.label || 'Dependency'}
+                                      </Tag>
+                                    ))}
+                                  </Space>
+                                )}
+                              </div>
+
+                              <div className="mt-auto w-full pt-1">
+                                <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                                  <Button
+                                    type="default"
+                                    block
+                                    className="w-full"
+                                    icon={<Play size={14} />}
+                                    onClick={() => {
+                                      const exp = explorations.find((item) => item.id === dataset.explorationId);
+                                      if (exp) {
+                                        openExploration(exp, { focusNodeId: dataset.nodeId });
+                                      }
+                                    }}
+                                  >
+                                    Open Dataset
+                                  </Button>
+                                  <Button
+                                    type="default"
+                                    block
+                                    disabled={dataset.isFlattened}
+                                    onClick={() => openFlattenModal(dataset)}
+                                  >
+                                    {dataset.isFlattened ? 'Flattened' : 'Flatten dataset'}
+                                  </Button>
+                                </Space>
+                              </div>
+                            </div>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               )}
+              */}
             </div>
           </div>
         ) : (
@@ -2987,6 +4151,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 onRemove={removeNode}
                 onToggleExpand={toggleNodeExpansion}
                 onToggleBranch={toggleBranchCollapse}
+                onToggleDataset={toggleDatasetForNode}
                 onDrillDown={handleChartDrillDown}
                 onTableCellClick={handleTableCellClick}
                 onTableSortChange={handleTableSortChange}
@@ -3022,6 +4187,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                   onRemove={removeNode}
                   onToggleExpand={toggleNodeExpansion}
                   onToggleBranch={toggleBranchCollapse}
+                  onToggleDataset={toggleDatasetForNode}
                   onDrillDown={handleChartDrillDown}
                   onTableCellClick={handleTableCellClick}
                   onTableSortChange={handleTableSortChange}
@@ -3119,12 +4285,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           schema={selectedSchema}
           data={selectedData}
           dataModel={dataModel}
+          availableTables={availableTables}
           sourceStatus={sourceStatus}
           onIngest={ingestPendingFiles}
           onClearData={clearIngestedData}
           onShowDataModel={() => setShowDataModel(true)}
+          isFlattenedDataset={isFlattenedDataset}
           onCollapse={collapsePropertiesPanel}
           activeFilterIndex={activeFilterTarget?.nodeId === selectedNodeId ? activeFilterTarget.index : null}
+          nodeResult={selectedResult}
           isMobile={false}
         />
       )}
@@ -3145,12 +4314,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
             schema={selectedSchema}
             data={selectedData}
             dataModel={dataModel}
+            availableTables={availableTables}
             sourceStatus={sourceStatus}
             onIngest={ingestPendingFiles}
             onClearData={clearIngestedData}
             onShowDataModel={() => setShowDataModel(true)}
+            isFlattenedDataset={isFlattenedDataset}
             onCollapse={collapsePropertiesPanel}
             activeFilterIndex={activeFilterTarget?.nodeId === selectedNodeId ? activeFilterTarget.index : null}
+            nodeResult={selectedResult}
             isMobile
           />
         </Drawer>
@@ -3185,6 +4357,39 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       )}
 
       <HelpModal open={showHelp} onClose={() => setShowHelp(false)} isMobile={isMobileMode} />
+
+      <Modal
+        open={isFlattenModalOpen}
+        onCancel={closeFlattenModal}
+        onOk={confirmFlattenModal}
+        okText="Flatten dataset"
+        cancelText="Cancel"
+        centered
+        title="Flatten dataset"
+      >
+        <div className="space-y-3 text-sm text-slate-600 dark:text-slate-300">
+          <div>
+            This will keep only the lineage for{' '}
+            <span className="font-semibold text-slate-900 dark:text-slate-100">
+              {flattenModalEntry?.datasetName || flattenModalEntry?.nodeTitle || 'this dataset'}
+            </span>{' '}
+            and replace the exploration with a standalone dataset.
+          </div>
+          <div>
+            The exploration will be renamed and any other branches will be removed.
+          </div>
+          {Array.isArray(flattenModalEntry?.dependencies) && flattenModalEntry.dependencies.length > 0 ? (
+            <div className="text-xs text-slate-400">
+              External dependencies: {flattenModalEntry.dependencies.length}
+            </div>
+          ) : (
+            <div className="text-xs text-slate-400">No external dependencies.</div>
+          )}
+          <div className="text-xs text-slate-400">
+            Rows: {flattenModalEntry?.rowCount ?? 0}
+          </div>
+        </div>
+      </Modal>
 
       {/* 5. DATA MODEL MODAL */}
       <Modal

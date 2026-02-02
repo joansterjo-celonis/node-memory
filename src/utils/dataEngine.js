@@ -1,10 +1,12 @@
 // src/utils/dataEngine.js
 // Lightweight in-browser data engine for large datasets.
+import alasql from 'alasql';
 import { normalizeFilters } from './filterUtils';
 
 const DEFAULT_SAMPLE_SIZE = 200;
 const DEFAULT_CHART_SAMPLE_SIZE = 5000;
 const DEFAULT_TOP_VALUES = 6;
+const SQL_INCOMING_TABLE = 'incoming';
 
 const compareValues = (aRaw, bRaw) => {
   if (aRaw == null && bRaw == null) return 0;
@@ -29,6 +31,16 @@ const normalizeJoinValue = (value) => {
     return trimmed === '' ? null : trimmed;
   }
   return String(value);
+};
+
+const toSqlSafeName = (value) => {
+  const raw = typeof value === 'string' ? value : String(value || '');
+  const cleaned = raw
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+  return cleaned || 'table';
 };
 
 const deriveSchemaFromRows = (rows, sampleSize = 10) => {
@@ -69,12 +81,26 @@ const buildFilterPredicate = (field, operator, rawValue) => {
   };
 };
 
-const createDataEngine = (dataModel = { tables: {}, order: [] }) => {
+const createDataEngine = (dataModel = { tables: {}, order: [] }, options = {}) => {
   const tables = dataModel?.tables || {};
+  const externalTables = options?.externalTables || {};
   const queries = new Map();
 
-  const getTableRows = (tableName) => (Array.isArray(tables?.[tableName]) ? tables[tableName] : []);
-  const getTableSchema = (tableName) => deriveSchemaFromRows(getTableRows(tableName));
+  const getTableRows = (tableName) => {
+    if (!tableName) return [];
+    const localRows = tables?.[tableName];
+    if (Array.isArray(localRows)) return localRows;
+    const externalRows = externalTables?.[tableName]?.rows;
+    return Array.isArray(externalRows) ? externalRows : [];
+  };
+  const getTableSchema = (tableName) => {
+    if (!tableName) return [];
+    const localRows = tables?.[tableName];
+    if (Array.isArray(localRows)) return deriveSchemaFromRows(localRows);
+    const externalSchema = externalTables?.[tableName]?.schema;
+    if (Array.isArray(externalSchema) && externalSchema.length > 0) return externalSchema;
+    return deriveSchemaFromRows(getTableRows(tableName));
+  };
 
   const resolveRow = (query, index) => {
     if (!query || index == null || index < 0) return null;
@@ -88,6 +114,25 @@ const createDataEngine = (dataModel = { tables: {}, order: [] }) => {
       return tableRows[parentIndex] ?? null;
     }
     return resolveRow(parent, parentIndex);
+  };
+
+  const materializeQueryRows = (query) => {
+    if (!query) return [];
+    if (query.mode === 'materialized' && Array.isArray(query.rows)) return query.rows;
+    const rows = [];
+    for (let i = 0; i < query.rowCount; i += 1) {
+      const row = resolveRow(query, i);
+      if (row) rows.push(row);
+    }
+    return rows;
+  };
+
+  const executeSql = (sqlText, tableMap) => {
+    const db = new alasql.Database();
+    Object.entries(tableMap || {}).forEach(([name, rows]) => {
+      db.tables[name] = { data: Array.isArray(rows) ? rows : [] };
+    });
+    return db.exec(sqlText);
   };
 
   const getSortedIndices = (query, sortBy, sortDirection) => {
@@ -134,6 +179,19 @@ const createDataEngine = (dataModel = { tables: {}, order: [] }) => {
     const type = spec?.type || 'SOURCE';
     const parentId = spec?.parentId || null;
     const query = createQueryBase(queryId, key, type, parentId);
+
+    if (type === 'DATASET') {
+      const snapshot = spec?.params?.snapshot;
+      const rows = Array.isArray(snapshot?.rows) ? snapshot.rows : [];
+      query.mode = 'materialized';
+      query.rows = rows;
+      query.rowCount = Number.isFinite(snapshot?.rowCount) ? snapshot.rowCount : rows.length;
+      query.schema = Array.isArray(snapshot?.schema) && snapshot.schema.length > 0
+        ? snapshot.schema
+        : deriveSchemaFromRows(rows);
+      queries.set(queryId, query);
+      return query;
+    }
 
     if (type === 'SOURCE') {
       const tableName = spec?.table || dataModel?.order?.[0];
@@ -244,6 +302,59 @@ const createDataEngine = (dataModel = { tables: {}, order: [] }) => {
 
     if (type === 'JOIN') {
       const params = spec?.params || {};
+      const sqlMode = params.sqlMode || 'visual';
+      if (sqlMode === 'custom') {
+        const sqlText = String(params.sqlText || '').trim();
+        if (!sqlText) {
+          query.mode = 'rows';
+          query.rowIds = null;
+          query.rowCount = parent.rowCount;
+          query.schema = parent.schema || [];
+          queries.set(queryId, query);
+          return query;
+        }
+        const incomingRows = parent ? materializeQueryRows(parent) : [];
+        const tableMap = {
+          [SQL_INCOMING_TABLE]: incomingRows
+        };
+        Object.keys(tables || {}).forEach((name) => {
+          if (name === SQL_INCOMING_TABLE) return;
+          const rows = getTableRows(name);
+          tableMap[name] = rows;
+          const safeName = toSqlSafeName(name);
+          if (safeName !== name && safeName !== SQL_INCOMING_TABLE && !tableMap[safeName]) {
+            tableMap[safeName] = rows;
+          }
+        });
+        Object.keys(externalTables || {}).forEach((name) => {
+          if (name === SQL_INCOMING_TABLE) return;
+          if (!tableMap[name]) {
+            const rows = getTableRows(name);
+            tableMap[name] = rows;
+            const safeName = toSqlSafeName(name);
+            if (safeName !== name && safeName !== SQL_INCOMING_TABLE && !tableMap[safeName]) {
+              tableMap[safeName] = rows;
+            }
+          }
+        });
+        try {
+          const resultRows = executeSql(sqlText, tableMap);
+          query.mode = 'materialized';
+          query.rows = Array.isArray(resultRows) ? resultRows : [];
+          query.rowCount = query.rows.length;
+          query.schema = deriveSchemaFromRows(query.rows);
+          query.error = '';
+        } catch (err) {
+          query.mode = 'rows';
+          query.rowIds = null;
+          query.rowCount = parent?.rowCount || 0;
+          query.schema = parent?.schema || [];
+          query.error = err?.message || 'Unable to run SQL.';
+        }
+        queries.set(queryId, query);
+        return query;
+      }
+
       const rightTable = params.rightTable;
       if (!rightTable || !params.leftKey || !params.rightKey) {
         query.mode = 'rows';
@@ -602,4 +713,4 @@ const createDataEngine = (dataModel = { tables: {}, order: [] }) => {
   };
 };
 
-export { createDataEngine };
+export { createDataEngine, SQL_INCOMING_TABLE };
