@@ -960,21 +960,27 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const allList = [];
     const datasets = [];
     const legacyUsedNames = new Set();
+    const explorationMetaList = [];
+
     (explorations || []).forEach((exp) => {
       if (!exp) return;
       const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
       if (nodesList.length === 0) return;
       const model = exp.dataModel || { tables: {}, order: [] };
-      const engine = createDataEngine(model);
-      const order = getCalculationOrder(nodesList);
-      order.forEach((node) => {
-        const parentKey = node.parentId ? engine.getQueryKey(node.parentId) : '';
-        const spec = buildNodeSpec(node, parentKey, model);
-        engine.ensureQuery(node.id, spec);
-      });
       const leafNodes = getLeafNodes(nodesList);
+      if (leafNodes.length === 0) return;
       const displayExpName = exp.name || exp.rawDataName || 'Exploration';
       const legacyExpName = exp.name || exp.rawDataName || 'Workbench';
+
+      explorationMetaList.push({
+        exp,
+        nodesList,
+        model,
+        leafNodes,
+        displayExpName,
+        legacyExpName
+      });
+
       leafNodes.forEach((leaf, index) => {
         const branchLabel = leaf.branchName || leaf.title || `Branch ${index + 1}`;
         const nodeTitle = leaf.title || branchLabel || 'Dataset';
@@ -984,19 +990,17 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         const snapshot = leaf.params?.datasetSnapshot;
         const isDataset = !!leaf.params?.isDataset;
         const isFlattened = isDataset && !!leaf.params?.isFlattened && Array.isArray(snapshot?.rows);
-        const resolvedRows = isFlattened
-          ? snapshot.rows
-          : engine.getRows(leaf.id, { start: 0, size: engine.getRowCount(leaf.id) });
+        const resolvedRows = isFlattened ? snapshot.rows : [];
         const resolvedSchema = isFlattened
           ? (Array.isArray(snapshot?.schema) && snapshot.schema.length > 0
             ? snapshot.schema
             : (Array.isArray(snapshot?.rows) && snapshot.rows.length > 0
               ? Object.keys(snapshot.rows[0] || {})
               : []))
-          : engine.getSchema(leaf.id);
+          : [];
         const resolvedRowCount = isFlattened
           ? (Number.isFinite(snapshot?.rowCount) ? snapshot.rowCount : resolvedRows.length)
-          : engine.getRowCount(leaf.id);
+          : 0;
         const entry = {
           name: stableName,
           legacyName,
@@ -1023,6 +1027,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         if (entry.isDataset) datasets.push(entry);
       });
     });
+
     const entryByKey = new Map();
     allList.forEach((entry) => {
       if (entry?.explorationId && entry?.nodeId) {
@@ -1034,19 +1039,19 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       name,
       entry
     }));
-
-    (explorations || []).forEach((exp) => {
-      if (!exp?.id) return;
-      const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
-      if (nodesList.length === 0) return;
-      const nodesById = new Map(nodesList.map((node) => [node.id, node]));
-      const leafNodes = getLeafNodes(nodesList);
-      const sqlMatchers = externalNameEntries
-        .filter(({ entry }) => entry?.explorationId && entry.explorationId !== exp.id)
+    const buildSqlMatchers = (expId) => (
+      externalNameEntries
+        .filter(({ entry }) => entry?.explorationId && entry.explorationId !== expId)
         .map(({ name, entry }) => ({
           entry,
           regex: new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i')
-        }));
+        }))
+    );
+
+    explorationMetaList.forEach(({ exp, nodesList, leafNodes }) => {
+      if (!exp?.id) return;
+      const nodesById = new Map(nodesList.map((node) => [node.id, node]));
+      const sqlMatchers = buildSqlMatchers(exp.id);
 
       leafNodes.forEach((leaf) => {
         if (!leaf?.params?.isDataset) return;
@@ -1099,6 +1104,111 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         }));
       });
     });
+
+    const dependenciesByExpId = new Map();
+    explorationMetaList.forEach(({ exp, nodesList }) => {
+      if (!exp?.id) return;
+      const deps = new Set();
+      const sqlMatchers = buildSqlMatchers(exp.id);
+      nodesList.forEach((node) => {
+        if (node.type === 'SOURCE' && node.params?.ingestionMode === 'inherited') {
+          const tableName = node.params?.inheritedTable || '';
+          const depEntry = tableName ? allByName[tableName] : null;
+          if (depEntry && depEntry.explorationId !== exp.id) {
+            deps.add(depEntry.explorationId);
+          }
+        }
+        if (node.type === 'JOIN') {
+          const sqlMode = node.params?.sqlMode || 'visual';
+          if (sqlMode === 'custom') {
+            const sqlText = String(node.params?.sqlText || '');
+            if (sqlText) {
+              sqlMatchers.forEach(({ entry: depEntry, regex }) => {
+                if (regex.test(sqlText) && depEntry.explorationId !== exp.id) {
+                  deps.add(depEntry.explorationId);
+                }
+              });
+            }
+          } else {
+            const tableName = node.params?.rightTable || '';
+            const depEntry = tableName ? allByName[tableName] : null;
+            if (depEntry && depEntry.explorationId !== exp.id) {
+              deps.add(depEntry.explorationId);
+            }
+          }
+        }
+      });
+      dependenciesByExpId.set(exp.id, deps);
+    });
+
+    const metaById = new Map(explorationMetaList.map((meta) => [meta.exp.id, meta]));
+    const indegree = new Map();
+    const dependentsByExpId = new Map();
+    explorationMetaList.forEach(({ exp }) => {
+      if (exp?.id) indegree.set(exp.id, 0);
+    });
+    dependenciesByExpId.forEach((deps, expId) => {
+      deps.forEach((depId) => {
+        if (!indegree.has(depId) || !indegree.has(expId)) return;
+        indegree.set(expId, (indegree.get(expId) || 0) + 1);
+        const list = dependentsByExpId.get(depId) || [];
+        list.push(expId);
+        dependentsByExpId.set(depId, list);
+      });
+    });
+
+    const queue = [];
+    indegree.forEach((count, expId) => {
+      if (count === 0) queue.push(expId);
+    });
+    const orderedIds = [];
+    while (queue.length > 0) {
+      const currentId = queue.shift();
+      orderedIds.push(currentId);
+      const dependents = dependentsByExpId.get(currentId) || [];
+      dependents.forEach((depId) => {
+        const nextCount = (indegree.get(depId) || 0) - 1;
+        indegree.set(depId, nextCount);
+        if (nextCount === 0) queue.push(depId);
+      });
+    }
+    explorationMetaList.forEach(({ exp }) => {
+      if (!exp?.id) return;
+      if (!orderedIds.includes(exp.id)) {
+        orderedIds.push(exp.id);
+      }
+    });
+
+    orderedIds
+      .map((expId) => metaById.get(expId))
+      .filter(Boolean)
+      .forEach(({ exp, nodesList, model, leafNodes }) => {
+        if (!exp?.id) return;
+        const externalTables = Object.entries(allByName).reduce((acc, [name, extEntry]) => {
+          if (extEntry?.explorationId && extEntry.explorationId !== exp.id) {
+            acc[name] = extEntry;
+          }
+          return acc;
+        }, {});
+        const engine = createDataEngine(model, { externalTables });
+        const order = getCalculationOrder(nodesList);
+        order.forEach((node) => {
+          const parentKey = node.parentId ? engine.getQueryKey(node.parentId) : '';
+          const spec = buildNodeSpec(node, parentKey, model);
+          engine.ensureQuery(node.id, spec);
+        });
+        leafNodes.forEach((leaf) => {
+          const entryKey = `${exp.id}:${leaf.id}`;
+          const entry = entryByKey.get(entryKey);
+          if (!entry || entry.isFlattened) return;
+          const rowCount = engine.getRowCount(leaf.id);
+          const rows = engine.getRows(leaf.id, { start: 0, size: rowCount });
+          const schema = engine.getSchema(leaf.id);
+          entry.rows = rows;
+          entry.schema = schema;
+          entry.rowCount = rowCount;
+        });
+      });
 
     const externalList = allList.filter((entry) => entry.explorationId !== activeExplorationId);
     const externalByName = externalList.reduce((acc, entry) => {
@@ -3003,6 +3113,19 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const explorationNodeIdById = new Map();
     const explorationMetaById = new Map();
     const datasetEntriesList = externalTableRegistry.datasets || [];
+    const edgeIds = new Set();
+    const externalNameEntries = Object.entries(externalTableRegistry.allByName || {}).map(([name, entry]) => ({
+      name,
+      entry
+    }));
+    const buildSqlMatchers = (expId) => (
+      externalNameEntries
+        .filter(({ entry }) => entry?.explorationId && entry.explorationId !== expId)
+        .map(({ name, entry }) => ({
+          entry,
+          regex: new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i')
+        }))
+    );
 
     (externalTableRegistry.allList || []).forEach((entry) => {
       if (!entry?.explorationId || !entry?.nodeId) return;
@@ -3093,8 +3216,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       const key = `${entry.explorationId}:${entry.nodeId}`;
       const datasetNodeId = datasetNodeIdByKey.get(key) || `dataset:${key}`;
       datasetNodeIdByKey.set(key, datasetNodeId);
+      const edgeId = `edge:${exp.id}:${node.id}:${entry.name || entry.nodeId}:${kind}`;
+      if (edgeIds.has(edgeId)) return;
+      edgeIds.add(edgeId);
       edges.push({
-        id: `edge:${exp.id}:${node.id}:${entry.name || entry.nodeId}:${kind}`,
+        id: edgeId,
         from: datasetNodeId,
         to: explorationNodeId,
         sourceAnchorId: entry.nodeId,
@@ -3104,7 +3230,9 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     };
 
     explorations.forEach((exp) => {
+      if (!exp?.id) return;
       const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+      const sqlMatchers = buildSqlMatchers(exp.id);
       nodesList.forEach((node) => {
         if (node.type === 'SOURCE' && node.params?.ingestionMode === 'inherited') {
           const tableName = node.params?.inheritedTable || '';
@@ -3113,6 +3241,19 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           addEdge(exp, node, entry, 'inherited');
         }
         if (node.type === 'JOIN') {
+          const sqlMode = node.params?.sqlMode || 'visual';
+          if (sqlMode === 'custom') {
+            const sqlText = String(node.params?.sqlText || '');
+            if (!sqlText) return;
+            const depsByKey = new Map();
+            sqlMatchers.forEach(({ entry, regex }) => {
+              if (regex.test(sqlText)) {
+                depsByKey.set(`${entry.explorationId}:${entry.nodeId}`, entry);
+              }
+            });
+            depsByKey.forEach((entry) => addEdge(exp, node, entry, 'sql'));
+            return;
+          }
           const tableName = node.params?.rightTable || '';
           if (!tableName) return;
           const entry = externalTableRegistry.allByName?.[tableName];
@@ -3679,6 +3820,22 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const isFlattenedDataset = activeExploration?.isFlattenedDataset === true
     || nodes.some((node) => node.params?.isFlattened && node.params?.datasetSnapshot);
   const editButtonClass = 'inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-slate-600 shadow-sm transition hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200';
+  const landingSegmentBaseClass = '!font-medium !border transition-colors';
+  const landingSegmentActiveClass = [
+    '!bg-slate-700 !text-white !border-slate-700',
+    'hover:!bg-slate-600 hover:!border-slate-600',
+    'dark:!bg-slate-500/90 dark:!border-slate-400/80 dark:!text-white',
+    'dark:hover:!bg-slate-400/90 dark:hover:!border-slate-400/90'
+  ].join(' ');
+  const landingSegmentInactiveClass = [
+    '!bg-white !text-slate-700 !border-slate-200',
+    'hover:!text-slate-900 hover:!border-slate-300',
+    'dark:!bg-slate-900 dark:!text-slate-200 dark:!border-slate-700',
+    'dark:hover:!text-slate-100 dark:hover:!border-slate-500/70'
+  ].join(' ');
+  const landingSegmentButtonClass = (isActive) => (
+    `${landingSegmentBaseClass} ${isActive ? landingSegmentActiveClass : landingSegmentInactiveClass}`
+  );
   const editIconSize = 12;
   const editableFieldPadding = 'pl-1 pr-8 py-0.5';
   const titleTextClass = isMobileMode ? 'text-base leading-5' : 'text-lg leading-6';
@@ -3941,16 +4098,18 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
               <Space size="middle" align="center" wrap={isMobileMode} className={isMobileMode ? 'w-full' : ''}>
                 <Space.Compact size={isMobileMode ? 'small' : 'middle'} className={isMobileMode ? 'w-full' : ''}>
                   <Button
-                    type={landingViewMode === 'cards' ? 'primary' : 'default'}
+                    type="default"
                     onClick={() => setLandingViewMode('cards')}
                     block={isMobileMode}
+                    className={landingSegmentButtonClass(landingViewMode === 'cards')}
                   >
                     Cards
                   </Button>
                   <Button
-                    type={landingViewMode === 'graph' ? 'primary' : 'default'}
+                    type="default"
                     onClick={() => setLandingViewMode('graph')}
                     block={isMobileMode}
+                    className={landingSegmentButtonClass(landingViewMode === 'graph')}
                   >
                     Dependency graph
                   </Button>
