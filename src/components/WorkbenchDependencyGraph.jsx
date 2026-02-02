@@ -548,7 +548,7 @@ const WorkbenchDependencyGraph = ({
       const start = resolveAnchor(edge.from, edge.sourceAnchorId, sourceRect, sourceSide);
       const end = resolveAnchor(edge.to, edge.targetAnchorId, targetRect, targetSide);
       if (!start || !end) return null;
-      return { id: edge.id, path: buildConnectorPath(start, end, orientation) };
+      return { id: edge.id, path: buildConnectorPath(start, end, orientation), kind: edge.kind };
     }).filter(Boolean)
   ), [edges, getCardRect, resolveAnchor]);
 
@@ -717,7 +717,7 @@ const WorkbenchDependencyGraph = ({
   return (
     <div
       ref={containerRef}
-      className={`workbench-graph-canvas relative w-full h-full overflow-hidden bg-slate-50 dark:bg-slate-950 ${
+      className={`workbench-graph-canvas relative w-full flex-1 min-h-0 overflow-hidden bg-slate-50 dark:bg-slate-950 flex flex-col ${
         isPanning || isDragging ? 'is-panning' : ''
       } ${className}`}
       onPointerDown={handlePanStart}
@@ -727,7 +727,7 @@ const WorkbenchDependencyGraph = ({
           transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
           transformOrigin: '0 0'
         }}
-        className="relative w-full h-full"
+        className="absolute inset-0"
       >
         {nodes.map((node) => {
           const position = resolveNodePosition(node.id) || { x: GRAPH_BASE_OFFSET.x, y: GRAPH_BASE_OFFSET.y };
@@ -881,7 +881,7 @@ const WorkbenchDependencyGraph = ({
         })}
 
         <svg
-          className="absolute inset-0 pointer-events-none text-slate-300 dark:text-slate-600 z-20"
+          className="absolute inset-0 pointer-events-none text-slate-300 dark:text-slate-600 z-20 overflow-visible"
           width="100%"
           height="100%"
         >
@@ -905,6 +905,7 @@ const WorkbenchDependencyGraph = ({
               fill="none"
               stroke="currentColor"
               strokeWidth="1.6"
+              strokeDasharray={edge.kind === 'origin' ? '4 4' : undefined}
               markerEnd="url(#workbench-graph-arrow)"
             />
           ))}
