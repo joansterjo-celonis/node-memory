@@ -35,6 +35,7 @@ const GRAPH_MINIMAP_PADDING = 8;
 const GRAPH_MINIMAP_MIN_SCALE = 0.1;
 const GRAPH_MINIMAP_MAX_SCALE = 6;
 const GRAPH_MINIMAP_HEADER_HEIGHT = 20;
+const USAGE_EDGE_KINDS = new Set(['origin', 'inherited', 'sql', 'join']);
 
 const GRAPH_CARD_COLLAPSED_HEIGHT = (
   GRAPH_CARD_PADDING
@@ -338,6 +339,7 @@ const WorkbenchDependencyGraph = ({
   placementHints = {},
   onOpenExploration,
   onOpenDataset,
+  onFlattenDataset,
   onDuplicateExploration,
   onDeleteExploration,
   onDuplicateDataset,
@@ -746,12 +748,24 @@ const WorkbenchDependencyGraph = ({
           const cardToneClass = node.type === 'dataset'
             ? 'border-emerald-200/70 dark:border-emerald-700/60 bg-white/95 dark:bg-slate-900/90'
             : 'border-slate-200/70 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80';
+          const cardMenuItems = [];
+          if (node.type === 'dataset' && onFlattenDataset) {
+            cardMenuItems.push({
+              key: 'flatten',
+              label: isFlattenedDataset ? 'Flattened' : 'Flatten dataset',
+              disabled: isFlattenedDataset
+            });
+          }
+          cardMenuItems.push(
+            { key: 'duplicate', label: 'Duplicate' },
+            { key: 'delete', label: 'Delete', danger: true }
+          );
           const cardMenu = {
-            items: [
-              { key: 'duplicate', label: 'Duplicate' },
-              { key: 'delete', label: 'Delete', danger: true }
-            ],
+            items: cardMenuItems,
             onClick: ({ key }) => {
+              if (key === 'flatten') {
+                onFlattenDataset?.(node.datasetEntry);
+              }
               if (key === 'duplicate') {
                 if (node.type === 'exploration') {
                   onDuplicateExploration?.(node.explorationId, node.id);
@@ -898,17 +912,25 @@ const WorkbenchDependencyGraph = ({
               <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
             </marker>
           </defs>
-          {edgePaths.map((edge) => (
-            <path
-              key={edge.id}
-              d={edge.path}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeDasharray={edge.kind === 'origin' ? '4 4' : undefined}
-              markerEnd="url(#workbench-graph-arrow)"
-            />
-          ))}
+          {edgePaths.map((edge) => {
+            const isUsageEdge = USAGE_EDGE_KINDS.has(edge.kind);
+            const isOriginEdge = edge.kind === 'origin';
+            const strokeClass = isOriginEdge
+              ? 'text-slate-200 dark:text-slate-500'
+              : 'text-slate-300 dark:text-slate-600';
+            return (
+              <path
+                key={edge.id}
+                d={edge.path}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeDasharray={isUsageEdge ? '4 4' : undefined}
+                markerEnd="url(#workbench-graph-arrow)"
+                className={strokeClass}
+              />
+            );
+          })}
         </svg>
       </div>
 

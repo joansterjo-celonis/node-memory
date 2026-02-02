@@ -312,6 +312,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const nodes = Array.isArray(history[safeHistoryIndex]) ? history[safeHistoryIndex] : [];
 
   const [selectedNodeId, setSelectedNodeId] = useState(initialSelectedNodeId);
+  const [lineageFocusNodeId, setLineageFocusNodeId] = useState(null);
   const [showAddMenuForId, setShowAddMenuForId] = useState(null);
   const [showInsertMenuForId, setShowInsertMenuForId] = useState(null);
   const [showDataModel, setShowDataModel] = useState(initialSession?.showDataModel ?? false);
@@ -372,9 +373,25 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     || renderMode === 'entangled'
     || renderMode === 'entangledSmart'
   );
+  const lineageVisibleNodeIds = useMemo(() => {
+    if (!lineageFocusNodeId) return null;
+    const nodesById = new Map(nodes.map((node) => [node.id, node]));
+    if (!nodesById.has(lineageFocusNodeId)) return null;
+    const ids = new Set();
+    let currentId = lineageFocusNodeId;
+    while (currentId && nodesById.has(currentId)) {
+      ids.add(currentId);
+      currentId = nodesById.get(currentId)?.parentId;
+    }
+    return ids;
+  }, [nodes, lineageFocusNodeId]);
+  const renderNodes = useMemo(
+    () => (lineageVisibleNodeIds ? nodes.filter((node) => lineageVisibleNodeIds.has(node.id)) : nodes),
+    [nodes, lineageVisibleNodeIds]
+  );
   const leafCountById = useMemo(
-    () => (isSmartMode ? buildLeafCountMap(nodes, { treatCollapsedAsLeaf: true }) : null),
-    [nodes, isSmartMode]
+    () => (isSmartMode ? buildLeafCountMap(renderNodes, { treatCollapsedAsLeaf: true }) : null),
+    [renderNodes, isSmartMode]
   );
 
   const createNodeId = useCallback(() => `node-${Date.now()}-${nodeIdCounterRef.current++}`, []);
@@ -1689,6 +1706,14 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     updateNodes(nextNodes);
   }, [nodes, findNodeById, updateNodes]);
 
+  const registerGraphPlacementHint = useCallback((targetId, sourceId) => {
+    if (!targetId || !sourceId) return;
+    setGraphPlacementHints((prev) => ({
+      ...prev,
+      [targetId]: sourceId
+    }));
+  }, []);
+
   const flattenDatasetEntry = useCallback((entry) => {
     if (!entry?.explorationId || !entry?.nodeId) return;
     const exp = explorations.find((item) => item.id === entry.explorationId);
@@ -1720,40 +1745,108 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       createdAt: new Date().toISOString()
     };
     const datasetName = entry.datasetName || entry.nodeTitle || 'Dataset';
-    const lineageIds = new Set();
-    let currentId = entry.nodeId;
-    while (currentId && nodesById.has(currentId)) {
-      lineageIds.add(currentId);
-      const current = nodesById.get(currentId);
-      currentId = current?.parentId;
-    }
-    const lineageNodes = nodesList
-      .filter((node) => lineageIds.has(node.id))
-      .map((node) => {
-        let nextNode = node;
-        if (node.id === entry.nodeId) {
-          nextNode = {
-            ...node,
-            title: datasetName,
-            params: {
-              ...node.params,
-              isDataset: true,
-              isFlattened: true,
-              datasetName,
-              datasetSnapshot: snapshot
-            }
-          };
+    const datasetCount = getLeafNodes(nodesList).filter((leaf) => leaf.params?.isDataset).length;
+    const buildLineageNodes = () => {
+      const lineageIds = new Set();
+      let currentId = entry.nodeId;
+      while (currentId && nodesById.has(currentId)) {
+        lineageIds.add(currentId);
+        const current = nodesById.get(currentId);
+        currentId = current?.parentId;
+      }
+      return nodesList
+        .filter((node) => lineageIds.has(node.id))
+        .map((node) => {
+          let nextNode = node;
+          if (node.id === entry.nodeId) {
+            nextNode = {
+              ...node,
+              title: datasetName,
+              params: {
+                ...node.params,
+                isDataset: true,
+                isFlattened: true,
+                datasetName,
+                datasetSnapshot: snapshot
+              }
+            };
+          }
+          if (nextNode.entangledPeerId && !lineageIds.has(nextNode.entangledPeerId)) {
+            nextNode = {
+              ...nextNode,
+              entangledPeerId: undefined,
+              entangledRootId: undefined,
+              entangledColor: undefined
+            };
+          }
+          return nextNode;
+        });
+    };
+    if (datasetCount > 1) {
+      const lineageNodes = buildLineageNodes();
+      const now = new Date().toISOString();
+      const stats = getExplorationStats(exp.dataModel || { tables: {}, order: [] });
+      const newExplorationId = `exp-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const oldGraphId = `dataset:${entry.explorationId}:${entry.nodeId}`;
+      const newGraphId = `dataset:${newExplorationId}:${entry.nodeId}`;
+      const nextEntry = {
+        id: newExplorationId,
+        name: datasetName,
+        description: '',
+        createdAt: now,
+        updatedAt: now,
+        nodes: sanitizeNodesForStorage(lineageNodes),
+        dataModel: exp.dataModel || { tables: {}, order: [] },
+        rawDataName: datasetName,
+        tableCount: stats.tableCount,
+        rowCount: stats.rowCount,
+        isFlattenedDataset: true
+      };
+      setExplorations((prev) => {
+        const targetIndex = prev.findIndex(item => item.id === entry.explorationId);
+        if (targetIndex === -1) {
+          const nextExplorations = [nextEntry, ...prev];
+          try {
+            persistExplorations(nextExplorations);
+          } catch (err) {
+            // Ignore storage errors on flatten.
+          }
+          return nextExplorations;
         }
-        if (nextNode.entangledPeerId && !lineageIds.has(nextNode.entangledPeerId)) {
-          nextNode = {
-            ...nextNode,
-            entangledPeerId: undefined,
-            entangledRootId: undefined,
-            entangledColor: undefined
+        const target = prev[targetIndex];
+        const targetNodes = Array.isArray(target.nodes) ? target.nodes : [];
+        let changed = false;
+        const nextNodes = targetNodes.map((node) => {
+          if (node.id !== entry.nodeId) return node;
+          changed = true;
+          const nextParams = {
+            ...node.params,
+            isDataset: false,
+            isFlattened: false,
+            datasetSnapshot: null
           };
+          return { ...node, params: nextParams };
+        });
+        const nextTarget = changed
+          ? { ...target, nodes: nextNodes, updatedAt: now }
+          : target;
+        const next = [...prev];
+        next[targetIndex] = nextTarget;
+        const nextExplorations = [nextEntry, ...next];
+        try {
+          persistExplorations(nextExplorations);
+        } catch (err) {
+          // Ignore storage errors on flatten.
         }
-        return nextNode;
+        if (changed && activeExplorationId === target.id) {
+          replaceCurrentNodes(nextNodes);
+        }
+        return nextExplorations;
       });
+      registerGraphPlacementHint(newGraphId, oldGraphId);
+      return;
+    }
+    const lineageNodes = buildLineageNodes();
     const now = new Date().toISOString();
     const nextExplorations = explorations.map((item) => {
       if (item.id !== exp.id) return item;
@@ -1777,7 +1870,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       updateNodes(lineageNodes);
       setRawDataName(datasetName);
     }
-  }, [explorations, externalTableRegistry.allByName, activeExplorationId, buildNodeSpec, updateNodes]);
+  }, [
+    explorations,
+    externalTableRegistry.allByName,
+    activeExplorationId,
+    buildNodeSpec,
+    registerGraphPlacementHint,
+    replaceCurrentNodes,
+    updateNodes
+  ]);
 
   const openFlattenModal = useCallback((entry) => {
     if (!entry || entry.isFlattened) return;
@@ -2005,14 +2106,6 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const trimmed = typeof value === 'string' ? value.trim() : '';
     return `${trimmed || fallback} copy`;
   };
-  const registerGraphPlacementHint = useCallback((targetId, sourceId) => {
-    if (!targetId || !sourceId) return;
-    setGraphPlacementHints((prev) => ({
-      ...prev,
-      [targetId]: sourceId
-    }));
-  }, []);
-
   const buildLegacyToStableMap = useCallback((explorationList = []) => {
     const legacyUsedNames = new Set();
     const map = {};
@@ -2250,6 +2343,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const focusNodeId = options.focusNodeId;
     const hasFocusNode = focusNodeId && nextNodes.some((node) => node.id === focusNodeId);
     const nextSelectedId = hasFocusNode ? focusNodeId : (nextNodes[0]?.id || 'node-start');
+    setLineageFocusNodeId(hasFocusNode ? focusNodeId : null);
     setHistory([nextNodes]);
     setHistoryIndex(0);
     setSelectedNodeId(nextSelectedId);
@@ -2631,6 +2725,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setHistory([nextNodes]);
     setHistoryIndex(0);
     setSelectedNodeId(nextNodes[0]?.id || 'node-start');
+    setLineageFocusNodeId(null);
     setDataModel({ tables: {}, order: [] });
     setRawDataName(null);
     setLoadError(null);
@@ -3306,6 +3401,9 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   }, [dataModel.order, externalTableRegistry.datasets]);
 
   const datasetEntries = externalTableRegistry.datasets || [];
+  const visibleExplorations = useMemo(() => (
+    (explorations || []).filter((exp) => exp && exp.isFlattenedDataset !== true)
+  ), [explorations]);
 
   const workbenchDependencyGraph = useMemo(() => {
     const explorationNodes = [];
@@ -3336,6 +3434,13 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
     explorations.forEach((exp) => {
       if (!exp?.id) return;
+      const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+      const nodesById = new Map(nodesList.map((node) => [node.id, node]));
+      explorationMetaById.set(exp.id, { nodesList, nodesById });
+    });
+
+    visibleExplorations.forEach((exp) => {
+      if (!exp?.id) return;
       const graphId = `exp:${exp.id}`;
       explorationNodeIdById.set(exp.id, graphId);
       const order = exp.dataModel?.order || [];
@@ -3344,9 +3449,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         (sum, name) => sum + ((exp.dataModel?.tables?.[name] || []).length),
         0
       );
-      const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
-      const nodesById = new Map(nodesList.map((node) => [node.id, node]));
-      explorationMetaById.set(exp.id, { nodesList, nodesById });
+      const meta = explorationMetaById.get(exp.id);
+      const nodesList = meta?.nodesList || [];
       const nodeCount = nodesList.length;
       const branchCount = nodesList.reduce((sum, node) => (
         getChildren(nodesList, node.id).length === 0 ? sum + 1 : sum
@@ -3452,7 +3556,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       });
     };
 
-    explorations.forEach((exp) => {
+    visibleExplorations.forEach((exp) => {
       if (!exp?.id) return;
       const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
       const sqlMatchers = buildSqlMatchers(exp.id);
@@ -3558,7 +3662,13 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       edges,
       anchorsByNodeId
     };
-  }, [explorations, externalTableRegistry.allByName, externalTableRegistry.allList, externalTableRegistry.datasets]);
+  }, [
+    explorations,
+    visibleExplorations,
+    externalTableRegistry.allByName,
+    externalTableRegistry.allList,
+    externalTableRegistry.datasets
+  ]);
 
   const selectedResult = getNodeResult(chainData, selectedNodeId);
   const selectedSchema = selectedResult?.schema || [];
@@ -3628,16 +3738,29 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     onClick: ({ key }) => setRenderMode(key)
   }), [renderMode]);
 
-  const buildCardMenu = (onDuplicate, onDelete) => ({
-    items: [
+  const buildCardMenu = (onDuplicate, onDelete, options = {}) => {
+    const { onFlatten, isFlattened } = options;
+    const items = [];
+    if (onFlatten) {
+      items.push({
+        key: 'flatten',
+        label: isFlattened ? 'Flattened' : 'Flatten dataset',
+        disabled: isFlattened
+      });
+    }
+    items.push(
       { key: 'duplicate', label: 'Duplicate' },
       { key: 'delete', label: 'Delete', danger: true }
-    ],
-    onClick: ({ key }) => {
-      if (key === 'duplicate') onDuplicate?.();
-      if (key === 'delete') onDelete?.();
-    }
-  });
+    );
+    return {
+      items,
+      onClick: ({ key }) => {
+        if (key === 'flatten') onFlatten?.();
+        if (key === 'duplicate') onDuplicate?.();
+        if (key === 'delete') onDelete?.();
+      }
+    };
+  };
 
   const renderExplorationEmpty = () => (
     <div className={`bg-white border border-gray-200 rounded-2xl text-center shadow-sm dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'p-6' : 'p-10'}`}>
@@ -3657,9 +3780,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   );
 
   const renderExplorationCards = () => (
-    explorations.length === 0 ? renderExplorationEmpty() : (
+    visibleExplorations.length === 0
+      ? (explorations.length === 0 ? renderExplorationEmpty() : null)
+      : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {explorations.map((exp) => {
+        {visibleExplorations.map((exp) => {
           const order = exp.dataModel?.order || [];
           const tableCount = exp.tableCount ?? order.length;
           const rowCount = exp.rowCount ?? order.reduce((sum, name) => sum + ((exp.dataModel?.tables?.[name] || []).length), 0);
@@ -3858,11 +3983,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           );
         })}
       </div>
-    )
+      )
   );
 
   const renderExplorationGraph = () => (
-    explorations.length === 0 ? renderExplorationEmpty() : (
+    workbenchDependencyGraph.nodes.length === 0 ? renderExplorationEmpty() : (
       <WorkbenchDependencyGraph
         nodes={workbenchDependencyGraph.nodes}
         edges={workbenchDependencyGraph.edges}
@@ -3877,6 +4002,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           const exp = explorations.find((item) => item.id === entry.explorationId);
           if (exp) openExploration(exp, { focusNodeId: entry.nodeId });
         }}
+        onFlattenDataset={openFlattenModal}
         onDuplicateExploration={duplicateExploration}
         onDeleteExploration={openDeleteExplorationModal}
         onDuplicateDataset={duplicateDatasetEntry}
@@ -3911,7 +4037,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
             const descriptionLabel = dataset.explorationDescription || 'No description';
             const cardMenu = buildCardMenu(
               () => duplicateDatasetEntry(dataset),
-              () => openDeleteDatasetModal(dataset)
+              () => openDeleteDatasetModal(dataset),
+              {
+                onFlatten: () => openFlattenModal(dataset),
+                isFlattened: dataset.isFlattened
+              }
             );
             return (
               <Card
@@ -4012,14 +4142,6 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                         }}
                       >
                         Open Exploration
-                      </Button>
-                      <Button
-                        type="default"
-                        block
-                        disabled={dataset.isFlattened}
-                        onClick={() => openFlattenModal(dataset)}
-                      >
-                        {dataset.isFlattened ? 'Flattened' : 'Flatten dataset'}
                       </Button>
                     </Space>
                   </div>
@@ -4795,7 +4917,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           >
             {renderMode === 'freeLayout' ? (
               <FreeLayoutCanvas
-                nodes={nodes}
+                nodes={renderNodes}
                 selectedNodeId={selectedNodeId}
                 chainData={chainData}
                 tableDensity={tableDensity}
@@ -4831,7 +4953,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                   : 'min-w-full inline-flex justify-center p-20 items-start min-h-full')}>
                 <TreeNode
                   nodeId="node-start"
-                  nodes={nodes}
+                  nodes={renderNodes}
                   selectedNodeId={selectedNodeId}
                   chainData={chainData}
                   tableDensity={tableDensity}
@@ -4869,7 +4991,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
         {viewMode === 'canvas' && isMinimapMode && !isMobileMode && (
           <GraphMinimapPanel
-            nodes={nodes}
+            nodes={renderNodes}
             chainData={chainData}
             selectedNodeId={selectedNodeId}
             onSelect={handleSelect}
