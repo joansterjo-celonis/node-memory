@@ -126,6 +126,16 @@
   min-width: 0;
 }
 
+/* Dataset cards */
+.dataset-card .ant-card-head {
+  overflow: visible;
+}
+
+.dataset-card .ant-card-head-title {
+  min-width: 0;
+  overflow: visible;
+}
+
 /* Free layout canvas + compact node header */
 .free-layout-canvas {
   cursor: default;
@@ -133,6 +143,35 @@
 
 .free-layout-canvas.is-panning {
   cursor: grabbing;
+}
+
+/* Workbench dependency graph */
+.workbench-graph-canvas {
+  cursor: default;
+}
+
+.workbench-graph-canvas.is-panning {
+  cursor: grabbing;
+}
+
+.workbench-graph-minimap {
+  display: block;
+}
+
+.workbench-graph-minimap-node {
+  fill: rgba(148, 163, 184, 0.18);
+  stroke: rgba(148, 163, 184, 0.6);
+}
+
+.workbench-graph-minimap-node.is-highlight {
+  fill: rgba(59, 130, 246, 0.18);
+  stroke: rgba(59, 130, 246, 0.8);
+}
+
+.workbench-graph-minimap-anchor {
+  fill: rgba(59, 130, 246, 0.95);
+  stroke: rgba(30, 64, 175, 0.9);
+  stroke-width: 0.5px;
 }
 
 .node-drag-handle {

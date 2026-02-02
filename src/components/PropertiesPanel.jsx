@@ -2,6 +2,7 @@
 // Right-side configuration panel for the selected node.
 import React, { useState, useEffect } from 'react';
 import {
+  Alert,
   Button,
   Card,
   Checkbox,
@@ -17,6 +18,7 @@ import {
   Slider,
   Space,
   Switch,
+  Tag,
   Typography,
   Upload
 } from 'antd';
@@ -68,12 +70,15 @@ const PropertiesPanel = ({
   schema,
   data = [],
   dataModel,
+  availableTables,
   sourceStatus,
   onIngest,
   onClearData,
   onShowDataModel,
+  isFlattenedDataset = false,
   onCollapse,
   activeFilterIndex,
+  nodeResult,
   isMobile = false
 }) => {
   // Local staging for JOIN config (so user can edit multiple fields then commit).
@@ -177,6 +182,42 @@ const PropertiesPanel = ({
   };
 
   const currentFiles = node.params?.__files || [];
+  const ingestionMode = node.params?.ingestionMode || 'manual';
+  const inheritedTable = node.params?.inheritedTable || '';
+  const sqlMode = localParams.sqlMode || 'visual';
+  const sqlError = nodeResult?.error || '';
+  const localTables = availableTables?.local || [];
+  const externalTables = availableTables?.external || [];
+  const datasetTables = externalTables.filter((table) => table.isDataset);
+  const incomingTableName = availableTables?.incoming || 'incoming';
+  const inheritedEntry = datasetTables.find((table) => (
+    table.name === inheritedTable || table.legacyName === inheritedTable
+  )) || externalTables.find((table) => (
+    table.name === inheritedTable || table.legacyName === inheritedTable
+  ));
+  const inheritedLabel = inheritedEntry?.label || inheritedTable || '';
+  const rightTableEntry = externalTables.find((table) => (
+    table.name === localParams.rightTable || table.legacyName === localParams.rightTable
+  ));
+  const rightTableLabel = rightTableEntry?.label || localParams.rightTable || '';
+  const rightTableSchema = React.useMemo(() => {
+    const rightTable = localParams.rightTable;
+    if (!rightTable) return [];
+    const localRows = dataModel?.tables?.[rightTable];
+    if (Array.isArray(localRows) && localRows.length > 0) {
+      return Object.keys(localRows[0] || {});
+    }
+    const externalEntry = externalTables.find((table) => (
+      table.name === rightTable || table.legacyName === rightTable
+    ));
+    if (Array.isArray(externalEntry?.schema) && externalEntry.schema.length > 0) {
+      return externalEntry.schema;
+    }
+    if (Array.isArray(externalEntry?.rows) && externalEntry.rows.length > 0) {
+      return Object.keys(externalEntry.rows[0] || {});
+    }
+    return [];
+  }, [localParams.rightTable, dataModel, externalTables]);
   const getTotalBytes = (files = []) => files.reduce((sum, file) => sum + (file?.size || 0), 0);
   const totalPendingBytes = getTotalBytes(currentFiles);
   const totalPendingMb = (totalPendingBytes / (1024 * 1024)).toFixed(1);
@@ -300,7 +341,9 @@ const PropertiesPanel = ({
         <div className="flex items-start justify-between gap-3">
           <Space orientation="vertical" size={6} style={{ width: '100%' }}>
             <Text type="secondary" className="uppercase tracking-wider text-[11px]">
-              {node.type === 'COMPONENT' ? node.params.subtype : node.type} Node
+              {(node.type === 'COMPONENT'
+                ? node.params.subtype
+                : (node.type === 'JOIN' ? 'SQL' : node.type))} Node
             </Text>
             <Input
               size="middle"
@@ -344,132 +387,219 @@ const PropertiesPanel = ({
         {/* SOURCE CONFIG */}
         {node.type === 'SOURCE' && (
           <div className="space-y-4">
-            {/* Table selector (only if XLSX has multiple sheets) */}
-            {dataModel.order.length > 1 && (
-              <Form.Item label="Table">
-                <Select
-                  value={node.params.table || dataModel.order[0]}
-                  onChange={(value) => handleChange('table', value)}
-                  options={dataModel.order.map((name) => ({ label: name, value: name }))}
-                  {...fullWidthSelect}
-                />
-              </Form.Item>
-            )}
-
-            {/* File ingestion controls */}
-            <Form.Item label="Upload data (CSV or Excel)">
-              <Space orientation="vertical" size="small" style={{ width: '100%' }}>
-                <Space size="small" wrap>
-                  <Upload
-                    multiple
-                    accept=".csv,.xlsx,.xls"
-                    beforeUpload={() => false}
-                    showUploadList={false}
-                    onChange={({ fileList }) => {
-                      const files = fileList.map((file) => file.originFileObj).filter(Boolean);
-                      if (files.length) addPendingFiles(files);
-                    }}
-                  >
-                    <Button icon={<Plus size={14} />}>Select files</Button>
-                  </Upload>
-                  {showSampleButton && (
-                    <Button
-                      type="default"
-                      icon={<Database size={14} />}
-                      onClick={handleLoadSample}
-                      loading={isSampleLoading}
-                      disabled={isSampleLoading || sourceStatus?.loading}
-                    >
-                      Load sample
-                    </Button>
-                  )}
-                </Space>
-                <Text type="secondary" className="text-xs">
-                  Tip: uploading files replaces the data model feeding the chain.
-                </Text>
-                <Text type="secondary" className="text-xs">
-                  Max {MAX_UPLOAD_MB} MB per file / {MAX_UPLOAD_MB} MB total. Selected: {totalPendingMb} MB.
-                </Text>
-                {uploadError && (
-                  <Text type="danger" className="text-xs">
-                    {uploadError}
-                  </Text>
+            {isFlattenedDataset ? (
+              <>
+                {dataModel.order.length > 1 && (
+                  <Form.Item label="Table">
+                    <Select
+                      value={node.params.table || dataModel.order[0]}
+                      onChange={(value) => handleChange('table', value)}
+                      options={dataModel.order.map((name) => ({ label: name, value: name }))}
+                      {...fullWidthSelect}
+                    />
+                  </Form.Item>
                 )}
-              </Space>
-            </Form.Item>
+                <Button
+                  type="default"
+                  block
+                  icon={<Database size={14} />}
+                  onClick={() => onShowDataModel && onShowDataModel()}
+                  disabled={dataModel.order.length === 0}
+                >
+                  Preview Data Model
+                </Button>
+              </>
+            ) : (
+              <>
+                <Form.Item label="Ingestion Mode">
+                  <Radio.Group
+                    value={ingestionMode}
+                    onChange={(e) => handleChange('ingestionMode', e.target.value)}
+                    style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}
+                  >
+                    <Radio.Button value="manual" style={{ width: '100%', textAlign: 'center' }}>
+                      Manual upload
+                    </Radio.Button>
+                    <Radio.Button value="inherited" style={{ width: '100%', textAlign: 'center' }}>
+                      Inherited table
+                    </Radio.Button>
+                  </Radio.Group>
+                </Form.Item>
 
-            {currentFiles.length > 0 && (
-              <Card size="small" title="Pending Files">
-                <Space orientation="vertical" size="small" style={{ width: '100%' }}>
-                  {currentFiles.map((file, idx) => (
-                    <div key={`pending-${file.name}-${idx}`} className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <Text ellipsis className="block truncate">
-                          {file.name}
+                {ingestionMode === 'manual' && (
+                  <>
+                    {/* Table selector (only if XLSX has multiple sheets) */}
+                    {dataModel.order.length > 1 && (
+                      <Form.Item label="Table">
+                        <Select
+                          value={node.params.table || dataModel.order[0]}
+                          onChange={(value) => handleChange('table', value)}
+                          options={dataModel.order.map((name) => ({ label: name, value: name }))}
+                          {...fullWidthSelect}
+                        />
+                      </Form.Item>
+                    )}
+
+                    {/* File ingestion controls */}
+                    <Form.Item label="Upload data (CSV or Excel)">
+                      <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                        <Space size="small" wrap>
+                          <Upload
+                            multiple
+                            accept=".csv,.xlsx,.xls"
+                            beforeUpload={() => false}
+                            showUploadList={false}
+                            onChange={({ fileList }) => {
+                              const files = fileList.map((file) => file.originFileObj).filter(Boolean);
+                              if (files.length) addPendingFiles(files);
+                            }}
+                          >
+                            <Button icon={<Plus size={14} />}>Select files</Button>
+                          </Upload>
+                          {showSampleButton && (
+                            <Button
+                              type="default"
+                              icon={<Database size={14} />}
+                              onClick={handleLoadSample}
+                              loading={isSampleLoading}
+                              disabled={isSampleLoading || sourceStatus?.loading}
+                            >
+                              Load sample
+                            </Button>
+                          )}
+                        </Space>
+                        <Text type="secondary" className="text-xs">
+                          Tip: uploading files replaces the data model feeding the chain.
                         </Text>
                         <Text type="secondary" className="text-xs">
-                          {Math.round(file.size / 1024)} KB
+                          Max {MAX_UPLOAD_MB} MB per file / {MAX_UPLOAD_MB} MB total. Selected: {totalPendingMb} MB.
                         </Text>
-                      </div>
-                      <Button
-                        key={`remove-${file.name}-${idx}`}
-                        type="text"
-                        danger
-                        size="small"
-                        onClick={() => removePendingFile(idx)}
-                      >
-                        Remove
+                        {uploadError && (
+                          <Text type="danger" className="text-xs">
+                            {uploadError}
+                          </Text>
+                        )}
+                      </Space>
+                    </Form.Item>
+
+                    {currentFiles.length > 0 && (
+                      <Card size="small" title="Pending Files">
+                        <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                          {currentFiles.map((file, idx) => (
+                            <div key={`pending-${file.name}-${idx}`} className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <Text ellipsis className="block truncate">
+                                  {file.name}
+                                </Text>
+                                <Text type="secondary" className="text-xs">
+                                  {Math.round(file.size / 1024)} KB
+                                </Text>
+                              </div>
+                              <Button
+                                key={`remove-${file.name}-${idx}`}
+                                type="text"
+                                danger
+                                size="small"
+                                onClick={() => removePendingFile(idx)}
+                              >
+                                Remove
+                              </Button>
+                            </div>
+                          ))}
+                        </Space>
+                        <Button type="link" size="small" onClick={clearPendingFiles}>
+                          Clear all
+                        </Button>
+                      </Card>
+                    )}
+
+                    <Button
+                      type="primary"
+                      block
+                      onClick={() => onIngest && onIngest()}
+                      disabled={currentFiles.length === 0 || sourceStatus?.loading}
+                      loading={sourceStatus?.loading}
+                    >
+                      {sourceStatus?.loading ? 'Ingesting…' : 'Ingest Data'}
+                    </Button>
+
+                    {/* Status + progress */}
+                    <Card size="small">
+                      <Space align="start">
+                        <Database size={18} className={isSourceError ? 'text-red-500' : 'text-blue-600'} />
+                        <Space orientation="vertical" size={0}>
+                          <Text strong type={isSourceError ? 'danger' : undefined}>
+                            {sourceStatus?.title || 'No dataset loaded'}
+                          </Text>
+                          <Text type="secondary" className="text-xs">
+                            {sourceStatus?.detail || 'Upload a CSV or Excel file to get started.'}
+                          </Text>
+                        </Space>
+                      </Space>
+                    </Card>
+                    {sourceStatus?.loading && <Progress percent={100} showInfo={false} status="active" />}
+
+                    {dataModel.order.length > 0 && (
+                      <Button danger block onClick={() => onClearData && onClearData()}>
+                        Clear data
                       </Button>
-                    </div>
-                  ))}
-                </Space>
-                <Button type="link" size="small" onClick={clearPendingFiles}>
-                  Clear all
-                </Button>
-              </Card>
+                    )}
+
+                    <Button
+                      type="default"
+                      block
+                      icon={<Database size={14} />}
+                      onClick={() => onShowDataModel && onShowDataModel()}
+                      disabled={dataModel.order.length === 0}
+                    >
+                      Preview Data Model
+                    </Button>
+                  </>
+                )}
+
+                {ingestionMode === 'inherited' && (
+                  <>
+                    <Form.Item label="Inherited table">
+                      <Select
+                        value={inheritedTable || ''}
+                        onChange={(value) => handleChange('inheritedTable', value)}
+                        options={[
+                          { label: 'Select table...', value: '' },
+                          ...datasetTables.map((table) => ({
+                            label: table.label,
+                            value: table.name
+                          })),
+                          ...(inheritedTable && !datasetTables.some((table) => table.name === inheritedTable)
+                            ? [{ label: inheritedLabel || inheritedTable, value: inheritedTable }]
+                            : [])
+                        ]}
+                        {...fullWidthSelect}
+                      />
+                    </Form.Item>
+                    {datasetTables.length === 0 && (
+                      <Text type="secondary" className="text-xs">
+                        No datasets from other explorations yet. Save a dataset to reuse it here.
+                      </Text>
+                    )}
+                    <Card size="small">
+                      <Space align="start">
+                        <Database size={18} className={inheritedTable ? 'text-blue-600' : 'text-slate-400'} />
+                        <Space orientation="vertical" size={0}>
+                          <Text strong>
+                            {inheritedTable ? 'Inherited table connected' : 'Select an inherited table'}
+                          </Text>
+                          <Text type="secondary" className="text-xs">
+                            {inheritedTable
+                              ? `Using ${inheritedLabel || inheritedTable} from another exploration.`
+                              : 'Pick a saved end node from another exploration to start here.'}
+                          </Text>
+                        </Space>
+                      </Space>
+                    </Card>
+                  </>
+                )}
+              </>
             )}
-
-            <Button
-              type="primary"
-              block
-              onClick={() => onIngest && onIngest()}
-              disabled={currentFiles.length === 0 || sourceStatus?.loading}
-              loading={sourceStatus?.loading}
-            >
-              {sourceStatus?.loading ? 'Ingesting…' : 'Ingest Data'}
-            </Button>
-
-            {/* Status + progress */}
-            <Card size="small">
-              <Space align="start">
-                <Database size={18} className={isSourceError ? 'text-red-500' : 'text-blue-600'} />
-                <Space orientation="vertical" size={0}>
-                  <Text strong type={isSourceError ? 'danger' : undefined}>
-                    {sourceStatus?.title || 'No dataset loaded'}
-                  </Text>
-                  <Text type="secondary" className="text-xs">
-                    {sourceStatus?.detail || 'Upload a CSV or Excel file to get started.'}
-                  </Text>
-                </Space>
-              </Space>
-            </Card>
-            {sourceStatus?.loading && <Progress percent={100} showInfo={false} status="active" />}
-
-            {dataModel.order.length > 0 && (
-              <Button danger block onClick={() => onClearData && onClearData()}>
-                Clear data
-              </Button>
-            )}
-
-            <Button
-              type="default"
-              block
-              icon={<Database size={14} />}
-              onClick={() => onShowDataModel && onShowDataModel()}
-              disabled={dataModel.order.length === 0}
-            >
-              Preview Data Model
-            </Button>
           </div>
         )}
 
@@ -478,73 +608,164 @@ const PropertiesPanel = ({
           <div className="space-y-5">
             <Card size="small">
               <div className="text-xs font-mono text-slate-300 bg-slate-900 rounded-md p-3 overflow-x-auto border border-slate-800">
-                <span className="text-pink-400">SELECT</span> * <br />
-                <span className="text-pink-400">FROM</span> [Incoming_Node] <br />
-                <span className="text-pink-400">{localParams.joinType || 'LEFT'} JOIN</span> {localParams.rightTable || '...'} <br />
-                <span className="text-pink-400">ON</span> {localParams.leftKey || '?'} = {localParams.rightKey || '?'}
+                {sqlMode === 'custom' ? (
+                  <pre className="whitespace-pre-wrap m-0">
+                    {localParams.sqlText?.trim() || `SELECT * FROM ${incomingTableName}`}
+                  </pre>
+                ) : (
+                  <>
+                    <span className="text-pink-400">SELECT</span> * <br />
+                    <span className="text-pink-400">FROM</span> {incomingTableName} <br />
+                    <span className="text-pink-400">{localParams.joinType || 'LEFT'} JOIN</span> {rightTableLabel || '...'} <br />
+                    <span className="text-pink-400">ON</span> {localParams.leftKey || '?'} = {localParams.rightKey || '?'}
+                  </>
+                )}
               </div>
             </Card>
 
-            <Form.Item label="Join With Table">
-              <Select
-                value={localParams.rightTable || ''}
-                onChange={(value) => handleLocalChange('rightTable', value)}
-                options={[
-                  { label: 'Select Table...', value: '' },
-                  ...dataModel.order.map((name) => ({ label: name, value: name }))
-                ]}
-                {...fullWidthSelect}
-              />
-            </Form.Item>
-
-            <Form.Item label="Join Type">
+            <Form.Item label="SQL Mode">
               <Radio.Group
-                value={localParams.joinType || 'LEFT'}
-                onChange={(e) => handleLocalChange('joinType', e.target.value)}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                  gap: 8
-                }}
+                value={sqlMode}
+                onChange={(e) => handleLocalChange('sqlMode', e.target.value)}
+                style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}
               >
-                {['INNER', 'LEFT', 'RIGHT', 'FULL'].map((t) => (
-                  <Radio.Button key={t} value={t} style={{ width: '100%', textAlign: 'center' }}>
-                    {t} JOIN
-                  </Radio.Button>
-                ))}
+                <Radio.Button value="visual" style={{ width: '100%', textAlign: 'center' }}>
+                  Visual join
+                </Radio.Button>
+                <Radio.Button value="custom" style={{ width: '100%', textAlign: 'center' }}>
+                  Custom SQL
+                </Radio.Button>
               </Radio.Group>
             </Form.Item>
 
-            <div className="grid grid-cols-2 gap-2">
-              <Form.Item label="Left Key" style={{ marginBottom: 0 }}>
-                <Select
-                  value={localParams.leftKey || ''}
-                  onChange={(value) => handleLocalChange('leftKey', value)}
-                  options={[
-                    { label: 'Col...', value: '' },
-                    ...schema.map((f) => ({ label: f, value: f }))
-                  ]}
-                  {...fullWidthSelect}
-                />
-              </Form.Item>
-              <Form.Item label="Right Key" style={{ marginBottom: 0 }}>
-                <Select
-                  value={localParams.rightKey || ''}
-                  onChange={(value) => handleLocalChange('rightKey', value)}
-                  options={[
-                    { label: 'Col...', value: '' },
-                    ...((localParams.rightTable && dataModel.tables[localParams.rightTable])
-                      ? Object.keys(dataModel.tables[localParams.rightTable][0] || {}).map((f) => ({ label: f, value: f }))
-                      : [])
-                  ]}
-                  {...fullWidthSelect}
-                />
-              </Form.Item>
-            </div>
+            {sqlMode === 'visual' ? (
+              <>
+                <Form.Item label="Join With Table">
+                  <Select
+                    value={localParams.rightTable || ''}
+                    onChange={(value) => handleLocalChange('rightTable', value)}
+                    options={[
+                      { label: 'Select Table...', value: '' },
+                      ...(localTables.length > 0 ? [{
+                        label: 'Local tables',
+                        options: localTables.map((table) => ({ label: table.label, value: table.name }))
+                      }] : []),
+                      ...(externalTables.length > 0 ? [{
+                        label: 'Other explorations',
+                        options: externalTables.map((table) => ({
+                          label: table.isDataset ? `${table.label} (dataset)` : table.label,
+                          value: table.name
+                        }))
+                      }] : []),
+                      ...(localParams.rightTable
+                        && !localTables.some((table) => table.name === localParams.rightTable)
+                        && !externalTables.some((table) => table.name === localParams.rightTable)
+                        ? [{
+                          label: 'Current selection',
+                          options: [{ label: rightTableLabel || localParams.rightTable, value: localParams.rightTable }]
+                        }]
+                        : [])
+                    ]}
+                    {...fullWidthSelect}
+                  />
+                </Form.Item>
 
-            <Button type="primary" block icon={<Play size={16} />} onClick={commitJoin}>
-              Run Join
-            </Button>
+                <Form.Item label="Join Type">
+                  <Radio.Group
+                    value={localParams.joinType || 'LEFT'}
+                    onChange={(e) => handleLocalChange('joinType', e.target.value)}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                      gap: 8
+                    }}
+                  >
+                    {['INNER', 'LEFT', 'RIGHT', 'FULL'].map((t) => (
+                      <Radio.Button key={t} value={t} style={{ width: '100%', textAlign: 'center' }}>
+                        {t} JOIN
+                      </Radio.Button>
+                    ))}
+                  </Radio.Group>
+                </Form.Item>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Form.Item label="Left Key" style={{ marginBottom: 0 }}>
+                    <Select
+                      value={localParams.leftKey || ''}
+                      onChange={(value) => handleLocalChange('leftKey', value)}
+                      options={[
+                        { label: 'Col...', value: '' },
+                        ...schema.map((f) => ({ label: f, value: f }))
+                      ]}
+                      {...fullWidthSelect}
+                    />
+                  </Form.Item>
+                  <Form.Item label="Right Key" style={{ marginBottom: 0 }}>
+                    <Select
+                      value={localParams.rightKey || ''}
+                      onChange={(value) => handleLocalChange('rightKey', value)}
+                      options={[
+                        { label: 'Col...', value: '' },
+                        ...rightTableSchema.map((f) => ({ label: f, value: f }))
+                      ]}
+                      {...fullWidthSelect}
+                    />
+                  </Form.Item>
+                </div>
+
+                <Button type="primary" block icon={<Play size={16} />} onClick={commitJoin}>
+                  Run Join
+                </Button>
+              </>
+            ) : (
+              <>
+                <Form.Item label="SQL Query">
+                  <Input.TextArea
+                    value={localParams.sqlText || ''}
+                    onChange={(e) => handleLocalChange('sqlText', e.target.value)}
+                    placeholder={`SELECT * FROM ${incomingTableName} WHERE ...`}
+                    autoSize={{ minRows: 6, maxRows: 12 }}
+                  />
+                </Form.Item>
+                <Card size="small">
+                  <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+                    <Text type="secondary" className="text-xs uppercase tracking-wider">Available tables</Text>
+                    <Space wrap>
+                      <Tag color="blue">{incomingTableName}</Tag>
+                      {localTables.map((table) => (
+                        <Tag
+                          key={`local-${table.name}`}
+                          color="geekblue"
+                          title={table.sqlName && table.sqlName !== table.name ? `Original: ${table.name}` : undefined}
+                        >
+                          {table.sqlName || table.name}
+                        </Tag>
+                      ))}
+                      {externalTables.map((table) => (
+                        <Tag
+                          key={`ext-${table.name}`}
+                          color={table.isDataset ? 'green' : 'purple'}
+                          title={table.label}
+                        >
+                          {table.name}
+                        </Tag>
+                      ))}
+                    </Space>
+                  </Space>
+                </Card>
+                {sqlError && (
+                  <Alert
+                    type="error"
+                    showIcon
+                    message="SQL error"
+                    description={sqlError}
+                  />
+                )}
+                <Button type="primary" block icon={<Play size={16} />} onClick={commitJoin}>
+                  Run SQL
+                </Button>
+              </>
+            )}
           </div>
         )}
 
