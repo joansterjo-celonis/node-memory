@@ -65,6 +65,7 @@ const DEFAULT_SQL_MODE = 'visual';
 const SESSION_STORAGE_KEY = 'nma-session-v1';
 const SESSION_VERSION = 1;
 const VALID_VIEW_MODES = new Set(['canvas', 'landing']);
+const VALID_LANDING_VIEW_MODES = new Set(['cards', 'graph']);
 const VALID_RENDER_MODES = new Set([
   'classic',
   'classicSmart',
@@ -189,6 +190,9 @@ const readSessionState = () => {
 
     const viewMode = VALID_VIEW_MODES.has(parsed.viewMode) ? parsed.viewMode : 'canvas';
     const renderMode = VALID_RENDER_MODES.has(parsed.renderMode) ? parsed.renderMode : 'classic';
+    const landingViewMode = VALID_LANDING_VIEW_MODES.has(parsed.landingViewMode)
+      ? parsed.landingViewMode
+      : 'cards';
     const dataModel = parsed.dataModel
       && typeof parsed.dataModel === 'object'
       && parsed.dataModel.tables
@@ -204,6 +208,7 @@ const readSessionState = () => {
       rawDataName: typeof parsed.rawDataName === 'string' ? parsed.rawDataName : null,
       viewMode,
       renderMode,
+      landingViewMode,
       dataModelSorts: parsed.dataModelSorts && typeof parsed.dataModelSorts === 'object' ? parsed.dataModelSorts : {},
       branchSelectionByNodeId: parsed.branchSelectionByNodeId && typeof parsed.branchSelectionByNodeId === 'object'
         ? parsed.branchSelectionByNodeId
@@ -312,7 +317,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [showDataModel, setShowDataModel] = useState(initialSession?.showDataModel ?? false);
   const [showHelp, setShowHelp] = useState(false);
   const [viewMode, setViewMode] = useState(initialSession?.viewMode ?? 'canvas');
-  const [landingViewMode, setLandingViewMode] = useState('cards');
+  const [landingViewMode, setLandingViewMode] = useState(initialSession?.landingViewMode ?? 'cards');
   const [flattenModalEntry, setFlattenModalEntry] = useState(null);
   const [isFlattenModalOpen, setIsFlattenModalOpen] = useState(false);
   const shouldAutoMobile = useMemo(() => isMobileUserAgent(), []);
@@ -656,6 +661,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         rawDataName,
         viewMode,
         renderMode,
+        landingViewMode,
         dataModelSorts,
         branchSelectionByNodeId,
         isStatsCollapsed,
@@ -676,6 +682,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     rawDataName,
     viewMode,
     renderMode,
+    landingViewMode,
     dataModelSorts,
     branchSelectionByNodeId,
     isStatsCollapsed,
@@ -3259,6 +3266,40 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           const entry = externalTableRegistry.allByName?.[tableName];
           addEdge(exp, node, entry, 'join');
         }
+      });
+    });
+
+    const addDatasetDependencyEdge = (sourceEntry, targetEntry) => {
+      if (!sourceEntry || !targetEntry) return;
+      if (!sourceEntry.isDataset || !targetEntry.isDataset) return;
+      const sourceKey = `${sourceEntry.explorationId}:${sourceEntry.nodeId}`;
+      const targetKey = `${targetEntry.explorationId}:${targetEntry.nodeId}`;
+      if (!sourceKey || !targetKey || sourceKey === targetKey) return;
+      const sourceNodeId = datasetNodeIdByKey.get(sourceKey);
+      const targetNodeId = datasetNodeIdByKey.get(targetKey);
+      if (!sourceNodeId || !targetNodeId) return;
+      const edgeId = `edge:dataset:${sourceKey}:${targetKey}`;
+      if (edgeIds.has(edgeId)) return;
+      edgeIds.add(edgeId);
+      edges.push({
+        id: edgeId,
+        from: sourceNodeId,
+        to: targetNodeId,
+        sourceAnchorId: sourceEntry.nodeId,
+        targetAnchorId: targetEntry.nodeId,
+        kind: 'dataset'
+      });
+    };
+
+    datasetEntriesList.forEach((entry) => {
+      if (!entry?.isDataset) return;
+      const dependencies = Array.isArray(entry.dependencies) ? entry.dependencies : [];
+      dependencies.forEach((dep) => {
+        if (!dep?.isDataset || !dep.explorationId || !dep.nodeId) return;
+        const depKey = `${dep.explorationId}:${dep.nodeId}`;
+        const depEntry = datasetEntryByKey.get(depKey);
+        if (!depEntry) return;
+        addDatasetDependencyEdge(depEntry, entry);
       });
     });
 
