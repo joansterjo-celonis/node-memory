@@ -1602,18 +1602,29 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const lineageNodes = nodesList
       .filter((node) => lineageIds.has(node.id))
       .map((node) => {
-        if (node.id !== entry.nodeId) return node;
-        return {
-          ...node,
-          title: datasetName,
-          params: {
-            ...node.params,
-            isDataset: true,
-            isFlattened: true,
-            datasetName,
-            datasetSnapshot: snapshot
-          }
-        };
+        let nextNode = node;
+        if (node.id === entry.nodeId) {
+          nextNode = {
+            ...node,
+            title: datasetName,
+            params: {
+              ...node.params,
+              isDataset: true,
+              isFlattened: true,
+              datasetName,
+              datasetSnapshot: snapshot
+            }
+          };
+        }
+        if (nextNode.entangledPeerId && !lineageIds.has(nextNode.entangledPeerId)) {
+          nextNode = {
+            ...nextNode,
+            entangledPeerId: undefined,
+            entangledRootId: undefined,
+            entangledColor: undefined
+          };
+        }
+        return nextNode;
       });
     const now = new Date().toISOString();
     const nextExplorations = explorations.map((item) => {
@@ -3051,7 +3062,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           ), 0);
           const displayName = exp.name || 'Exploration';
           const description = exp.description || '';
-          const descriptionLabel = description;
+          const descriptionLabel = description || 'Add a description';
           const descriptionTone = description
             ? 'text-slate-700 dark:text-slate-200'
             : 'text-slate-500 dark:text-slate-400 italic';

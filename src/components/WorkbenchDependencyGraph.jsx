@@ -17,7 +17,7 @@ const GRAPH_ZOOM_STEP = 1.15;
 
 const GRAPH_CARD_WIDTH = 280;
 const GRAPH_CARD_PADDING = 14;
-const GRAPH_CARD_HEADER_HEIGHT = 48;
+const GRAPH_CARD_HEADER_HEIGHT = 32;
 const GRAPH_CARD_META_HEIGHT = 28;
 const GRAPH_CARD_ACTIONS_HEIGHT = 34;
 const GRAPH_CARD_SECTION_GAP = 8;
@@ -614,9 +614,6 @@ const WorkbenchDependencyGraph = ({
                           Dataset
                         </Tag>
                       )}
-                    </div>
-                    <div className="truncate text-xs text-slate-500 dark:text-slate-400">
-                      {node.subtitle}
                     </div>
                   </div>
 
