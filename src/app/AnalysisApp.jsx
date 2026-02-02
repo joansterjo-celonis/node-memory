@@ -332,6 +332,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [activeNameDraft, setActiveNameDraft] = useState('');
   const [isEditingActiveDescription, setIsEditingActiveDescription] = useState(false);
   const [activeDescriptionDraft, setActiveDescriptionDraft] = useState('');
+  const [graphPlacementHints, setGraphPlacementHints] = useState({});
   const [saveError, setSaveError] = useState(null);
   const [tableDensity, setTableDensity] = useState(readStoredTableDensity);
   const [isStatsCollapsed, setIsStatsCollapsed] = useState(initialSession?.isStatsCollapsed ?? false);
@@ -1877,6 +1878,13 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const trimmed = typeof value === 'string' ? value.trim() : '';
     return `${trimmed || fallback} copy`;
   };
+  const registerGraphPlacementHint = useCallback((targetId, sourceId) => {
+    if (!targetId || !sourceId) return;
+    setGraphPlacementHints((prev) => ({
+      ...prev,
+      [targetId]: sourceId
+    }));
+  }, []);
 
   const buildLegacyToStableMap = useCallback((explorationList = []) => {
     const legacyUsedNames = new Set();
@@ -2151,14 +2159,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     }
   };
 
-  const duplicateExploration = (id) => {
+  const duplicateExploration = (id, originGraphNodeId) => {
     if (!id) return;
+    let createdGraphId = null;
     setExplorations((prev) => {
       const target = prev.find(exp => exp.id === id);
       if (!target) return prev;
       const now = new Date().toISOString();
       const copyName = normalizeExplorationName(buildCopyLabel(target.name || target.rawDataName, 'Exploration'));
       const copyId = `exp-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      createdGraphId = `exp:${copyId}`;
       const nextEntry = {
         ...target,
         id: copyId,
@@ -2174,6 +2184,9 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       }
       return next;
     });
+    if (originGraphNodeId && createdGraphId) {
+      registerGraphPlacementHint(createdGraphId, originGraphNodeId);
+    }
   };
 
   const deleteDatasetEntry = (entry) => {
@@ -2220,8 +2233,9 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     });
   };
 
-  const duplicateDatasetEntry = (entry) => {
+  const duplicateDatasetEntry = (entry, originGraphNodeId) => {
     if (!entry?.explorationId || !entry?.nodeId) return;
+    let createdGraphId = null;
     setExplorations((prev) => {
       const target = prev.find(exp => exp.id === entry.explorationId);
       if (!target) return prev;
@@ -2272,8 +2286,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
       const now = new Date().toISOString();
       const stats = getExplorationStats(target.dataModel || { tables: {}, order: [] });
+      const newExplorationId = `exp-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      createdGraphId = `dataset:${newExplorationId}:${entry.nodeId}`;
       const nextEntry = {
-        id: `exp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        id: newExplorationId,
         name: copyName,
         description: target.description || '',
         createdAt: now,
@@ -2293,6 +2309,9 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       }
       return next;
     });
+    if (originGraphNodeId && createdGraphId) {
+      registerGraphPlacementHint(createdGraphId, originGraphNodeId);
+    }
   };
 
   const startNewExploration = () => {
@@ -3402,16 +3421,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     {updatedLabel}
                   </Text>
                   <Space size="small" wrap>
-                    <Tag color="blue" variant="filled" className="rounded-full px-2">
+                    <Tag color="default" variant="filled" className="rounded-full px-2">
                       {tableCount} tables
                     </Tag>
-                    <Tag color="cyan" variant="filled" className="rounded-full px-2">
+                    <Tag color="default" variant="filled" className="rounded-full px-2">
                       {rowCount} rows
                     </Tag>
-                    <Tag color="purple" variant="filled" className="rounded-full px-2">
+                    <Tag color="default" variant="filled" className="rounded-full px-2">
                       {nodeCount} nodes
                     </Tag>
-                    <Tag color="gold" variant="filled" className="rounded-full px-2">
+                    <Tag color="default" variant="filled" className="rounded-full px-2">
                       {branchCount} branches
                     </Tag>
                   </Space>
@@ -3441,6 +3460,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         nodes={workbenchDependencyGraph.nodes}
         edges={workbenchDependencyGraph.edges}
         anchorsByNodeId={workbenchDependencyGraph.anchorsByNodeId}
+        placementHints={graphPlacementHints}
         onOpenExploration={(explorationId) => {
           const exp = explorations.find((item) => item.id === explorationId);
           if (exp) openExploration(exp);
@@ -3506,13 +3526,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                       {datasetTitle}
                     </div>
                     <div className="flex items-center gap-2">
-                      {dataset.isFlattened && (
-                        <Tag color="gold" variant="filled" className="rounded-full px-2">
-                          Flattened
-                        </Tag>
-                      )}
                       <Tag color="green" variant="filled" className="rounded-full px-2">
-                        Dataset
+                        {dataset.isFlattened ? 'Flattened dataset' : 'Dataset'}
                       </Tag>
                     </div>
                   </div>
@@ -3542,10 +3557,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                       {descriptionLabel}
                     </Text>
                     <Space size="small" wrap>
-                      <Tag color="cyan" variant="filled" className="rounded-full px-2">
+                      <Tag color="default" variant="filled" className="rounded-full px-2">
                         {rowCount} rows
                       </Tag>
-                      <Tag color="purple" variant="filled" className="rounded-full px-2">
+                      <Tag color="default" variant="filled" className="rounded-full px-2">
                         {columnCount} columns
                       </Tag>
                     </Space>
@@ -3564,7 +3579,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                         {dependencies.map((dep) => (
                           <Tag
                             key={`${dep.explorationId}:${dep.nodeId}`}
-                            color={dep.isDataset ? 'green' : 'purple'}
+                            color={dep.isDataset ? 'green' : 'default'}
                             className="rounded-full px-2"
                             title={dep.explorationName ? `From ${dep.explorationName}` : undefined}
                           >
@@ -4145,16 +4160,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                               {updatedLabel}
                             </Text>
                             <Space size="small" wrap>
-                              <Tag color="blue" variant="filled" className="rounded-full px-2">
+                              <Tag color="default" variant="filled" className="rounded-full px-2">
                                 {tableCount} tables
                               </Tag>
-                              <Tag color="cyan" variant="filled" className="rounded-full px-2">
+                              <Tag color="default" variant="filled" className="rounded-full px-2">
                                 {rowCount} rows
                               </Tag>
-                              <Tag color="purple" variant="filled" className="rounded-full px-2">
+                              <Tag color="default" variant="filled" className="rounded-full px-2">
                                 {nodeCount} nodes
                               </Tag>
-                              <Tag color="gold" variant="filled" className="rounded-full px-2">
+                              <Tag color="default" variant="filled" className="rounded-full px-2">
                                 {branchCount} branches
                               </Tag>
                             </Space>
@@ -4197,6 +4212,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     nodes={workbenchDependencyGraph.nodes}
                     edges={workbenchDependencyGraph.edges}
                     anchorsByNodeId={workbenchDependencyGraph.anchorsByNodeId}
+                    placementHints={graphPlacementHints}
                     onOpenExploration={(explorationId) => {
                       const exp = explorations.find((item) => item.id === explorationId);
                       if (exp) openExploration(exp);
@@ -4252,13 +4268,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                                   {datasetTitle}
                                 </div>
                                 <div className="flex items-center gap-2">
-                                  {dataset.isFlattened && (
-                                    <Tag color="gold" variant="filled" className="rounded-full px-2">
-                                      Flattened
-                                    </Tag>
-                                  )}
                                   <Tag color="green" variant="filled" className="rounded-full px-2">
-                                    Dataset
+                                    {dataset.isFlattened ? 'Flattened dataset' : 'Dataset'}
                                   </Tag>
                                 </div>
                               </div>
@@ -4276,10 +4287,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                                   {descriptionLabel}
                                 </Text>
                                 <Space size="small" wrap>
-                                  <Tag color="cyan" variant="filled" className="rounded-full px-2">
+                                  <Tag color="default" variant="filled" className="rounded-full px-2">
                                     {rowCount} rows
                                   </Tag>
-                                  <Tag color="purple" variant="filled" className="rounded-full px-2">
+                                  <Tag color="default" variant="filled" className="rounded-full px-2">
                                     {columnCount} columns
                                   </Tag>
                                 </Space>
@@ -4298,7 +4309,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                                     {dependencies.map((dep) => (
                                       <Tag
                                         key={`${dep.explorationId}:${dep.nodeId}`}
-                                        color={dep.isDataset ? 'green' : 'purple'}
+                                        color={dep.isDataset ? 'green' : 'default'}
                                         className="rounded-full px-2"
                                         title={dep.explorationName ? `From ${dep.explorationName}` : undefined}
                                       >

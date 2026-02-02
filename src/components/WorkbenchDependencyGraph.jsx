@@ -328,6 +328,7 @@ const WorkbenchDependencyGraph = ({
   nodes = [],
   edges = [],
   anchorsByNodeId = {},
+  placementHints = {},
   onOpenExploration,
   onOpenDataset,
   onDuplicateExploration,
@@ -368,15 +369,70 @@ const WorkbenchDependencyGraph = ({
   React.useEffect(() => {
     setNodePositions((prev) => {
       const defaults = buildDefaultGraphLayout(nodes, edges, expandedNodeIds);
+      const hasPlacementHints = nodes.some((node) => !prev[node.id] && placementHints?.[node.id]);
+      const isDefaultLayout = nodes.every((node) => {
+        const current = prev[node.id];
+        if (!current) return true;
+        const fallback = defaults[node.id];
+        if (!fallback) return false;
+        return Math.abs(current.x - fallback.x) < 1 && Math.abs(current.y - fallback.y) < 1;
+      });
+      if (isDefaultLayout && !hasPlacementHints) {
+        return defaults;
+      }
       let hasChanges = false;
       const next = { ...prev };
       const stored = storedPositionsRef.current || {};
+      const resolveHeight = (nodeId) => (
+        expandedNodeIds.has(nodeId) ? GRAPH_CARD_EXPANDED_HEIGHT : GRAPH_CARD_COLLAPSED_HEIGHT
+      );
+      const resolveBaseX = (node) => {
+        const fallback = defaults[node.id];
+        if (fallback && Number.isFinite(fallback.x)) return fallback.x;
+        return node.type === 'dataset'
+          ? GRAPH_BASE_OFFSET.x + GRAPH_COLUMN_GAP
+          : GRAPH_BASE_OFFSET.x;
+      };
+      const resolveNextY = (nodeType) => {
+        let maxY = GRAPH_BASE_OFFSET.y;
+        nodes.forEach((other) => {
+          if (other.type !== nodeType) return;
+          const position = next[other.id];
+          if (!position) return;
+          maxY = Math.max(maxY, position.y + resolveHeight(other.id));
+        });
+        return maxY + GRAPH_VERTICAL_GAP;
+      };
+      const resolveHintedPosition = (nodeId) => {
+        const sourceId = placementHints?.[nodeId];
+        if (!sourceId) return null;
+        const sourcePosition = next[sourceId];
+        if (!sourcePosition) return null;
+        return {
+          x: sourcePosition.x + 24,
+          y: sourcePosition.y + 18
+        };
+      };
       nodes.forEach((node) => {
         if (!next[node.id]) {
           const storedPosition = stored[node.id];
-          next[node.id] = isValidStoredPosition(storedPosition)
-            ? { x: storedPosition.x, y: storedPosition.y }
-            : (defaults[node.id] || { x: GRAPH_BASE_OFFSET.x, y: GRAPH_BASE_OFFSET.y });
+          if (isValidStoredPosition(storedPosition)) {
+            next[node.id] = { x: storedPosition.x, y: storedPosition.y };
+          } else {
+            const hinted = resolveHintedPosition(node.id);
+            if (hinted) {
+              next[node.id] = hinted;
+            } else {
+              const fallback = defaults[node.id];
+              const baseX = resolveBaseX(node);
+              const baseY = Number.isFinite(fallback?.y) ? fallback.y : GRAPH_BASE_OFFSET.y;
+              const nextY = resolveNextY(node.type);
+              next[node.id] = {
+                x: Number.isFinite(fallback?.x) ? fallback.x : baseX,
+                y: Math.max(baseY, nextY)
+              };
+            }
+          }
           hasChanges = true;
         }
       });
@@ -388,7 +444,7 @@ const WorkbenchDependencyGraph = ({
       });
       return hasChanges ? next : prev;
     });
-  }, [nodes, edges, expandedNodeIds]);
+  }, [nodes, edges, expandedNodeIds, placementHints]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || !window.localStorage) return undefined;
@@ -658,6 +714,7 @@ const WorkbenchDependencyGraph = ({
           const isExpanded = expandedNodeIds.has(node.id);
           const layout = minimapLayouts.get(node.id);
           const anchors = anchorsByNodeId[node.id] || {};
+          const isFlattenedDataset = node.type === 'dataset' && node.datasetEntry?.isFlattened === true;
           const anchorIds = Object.keys(anchors);
           const linkCount = anchorIds.reduce((sum, anchorId) => (
             sum + (anchors[anchorId]?.incoming || 0) + (anchors[anchorId]?.outgoing || 0)
@@ -677,9 +734,9 @@ const WorkbenchDependencyGraph = ({
             onClick: ({ key }) => {
               if (key === 'duplicate') {
                 if (node.type === 'exploration') {
-                  onDuplicateExploration?.(node.explorationId);
+                  onDuplicateExploration?.(node.explorationId, node.id);
                 } else {
-                  onDuplicateDataset?.(node.datasetEntry);
+                  onDuplicateDataset?.(node.datasetEntry, node.id);
                 }
               }
               if (key === 'delete') {
@@ -712,7 +769,7 @@ const WorkbenchDependencyGraph = ({
                       <div className="flex items-center gap-1">
                         {node.type === 'dataset' && (
                           <Tag color="green" variant="filled" className="rounded-full px-2 text-[10px]">
-                            Dataset
+                            {isFlattenedDataset ? 'Flattened dataset' : 'Dataset'}
                           </Tag>
                         )}
                         <Dropdown menu={cardMenu} trigger={['click']} placement="bottomRight">
@@ -735,19 +792,19 @@ const WorkbenchDependencyGraph = ({
                   >
                     {node.type === 'exploration' ? (
                       <>
-                        <Tag color="purple" variant="filled" className="rounded-full px-2 text-[10px]">
+                        <Tag color="default" variant="filled" className="rounded-full px-2 text-[10px]">
                           {node.nodeCount} nodes
                         </Tag>
-                        <Tag color="gold" variant="filled" className="rounded-full px-2 text-[10px]">
+                        <Tag color="default" variant="filled" className="rounded-full px-2 text-[10px]">
                           {node.branchCount} branches
                         </Tag>
                       </>
                     ) : (
                       <>
-                        <Tag color="cyan" variant="filled" className="rounded-full px-2 text-[10px]">
+                        <Tag color="default" variant="filled" className="rounded-full px-2 text-[10px]">
                           {node.rowCount} rows
                         </Tag>
-                        <Tag color="purple" variant="filled" className="rounded-full px-2 text-[10px]">
+                        <Tag color="default" variant="filled" className="rounded-full px-2 text-[10px]">
                           {node.columnCount} cols
                         </Tag>
                       </>
