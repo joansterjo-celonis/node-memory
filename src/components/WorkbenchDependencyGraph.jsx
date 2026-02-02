@@ -1,8 +1,8 @@
 // src/components/WorkbenchDependencyGraph.jsx
 // Free-layout style dependency graph for workbenches and datasets.
 import React from 'react';
-import { Button, Tag } from 'antd';
-import { Layout, ChevronDown, ChevronRight } from '../ui/icons';
+import { Button, Dropdown, Tag } from 'antd';
+import { Layout, ChevronDown, ChevronRight, MoreHorizontal } from '../ui/icons';
 import {
   buildMinimapLayout,
   getMinimapBounds,
@@ -51,8 +51,50 @@ const GRAPH_COLUMN_GAP = GRAPH_CARD_WIDTH + 220;
 const GRAPH_VERTICAL_GAP = 32;
 const GRAPH_ROW_GAP = GRAPH_CARD_COLLAPSED_HEIGHT + GRAPH_VERTICAL_GAP;
 const GRAPH_BASE_OFFSET = { x: 80, y: 80 };
+const GRAPH_LAYOUT_STORAGE_KEY = 'nma-workbench-graph-layout-v1';
+const GRAPH_LAYOUT_STORAGE_VERSION = 1;
 
 const clampScale = (value) => Math.min(GRAPH_MAX_SCALE, Math.max(GRAPH_MIN_SCALE, value));
+
+const isValidStoredPosition = (value) => (
+  value
+  && Number.isFinite(value.x)
+  && Number.isFinite(value.y)
+);
+
+const readStoredGraphPositions = () => {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(GRAPH_LAYOUT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const payload = parsed?.positions && typeof parsed === 'object' ? parsed.positions : parsed;
+    if (!payload || typeof payload !== 'object') return null;
+    const positions = {};
+    Object.keys(payload).forEach((id) => {
+      const value = payload[id];
+      if (isValidStoredPosition(value)) {
+        positions[id] = { x: value.x, y: value.y };
+      }
+    });
+    return Object.keys(positions).length > 0 ? positions : null;
+  } catch (err) {
+    return null;
+  }
+};
+
+const writeStoredGraphPositions = (positions) => {
+  if (typeof window === 'undefined' || !window.localStorage) return false;
+  try {
+    window.localStorage.setItem(
+      GRAPH_LAYOUT_STORAGE_KEY,
+      JSON.stringify({ version: GRAPH_LAYOUT_STORAGE_VERSION, positions })
+    );
+    return true;
+  } catch (err) {
+    return false;
+  }
+};
 
 const buildDefaultGraphLayout = (nodes, edges, expandedNodeIds) => {
   const positions = {};
@@ -288,6 +330,10 @@ const WorkbenchDependencyGraph = ({
   anchorsByNodeId = {},
   onOpenExploration,
   onOpenDataset,
+  onDuplicateExploration,
+  onDeleteExploration,
+  onDuplicateDataset,
+  onDeleteDataset,
   className = ''
 }) => {
   const containerRef = React.useRef(null);
@@ -299,10 +345,21 @@ const WorkbenchDependencyGraph = ({
   const panStateRef = React.useRef(null);
   const dragStateRef = React.useRef(null);
   const dragFrameRef = React.useRef(null);
+  const storedPositionsRef = React.useRef(readStoredGraphPositions());
 
-  const [nodePositions, setNodePositions] = React.useState(() => (
-    buildDefaultGraphLayout(nodes, edges, expandedNodeIds)
-  ));
+  const [nodePositions, setNodePositions] = React.useState(() => {
+    const defaults = buildDefaultGraphLayout(nodes, edges, expandedNodeIds);
+    const stored = storedPositionsRef.current;
+    if (!stored) return defaults;
+    const next = { ...defaults };
+    nodes.forEach((node) => {
+      const storedPosition = stored[node.id];
+      if (isValidStoredPosition(storedPosition)) {
+        next[node.id] = { x: storedPosition.x, y: storedPosition.y };
+      }
+    });
+    return next;
+  });
 
   React.useEffect(() => {
     viewportRef.current = viewport;
@@ -313,9 +370,13 @@ const WorkbenchDependencyGraph = ({
       const defaults = buildDefaultGraphLayout(nodes, edges, expandedNodeIds);
       let hasChanges = false;
       const next = { ...prev };
+      const stored = storedPositionsRef.current || {};
       nodes.forEach((node) => {
         if (!next[node.id]) {
-          next[node.id] = defaults[node.id] || { x: GRAPH_BASE_OFFSET.x, y: GRAPH_BASE_OFFSET.y };
+          const storedPosition = stored[node.id];
+          next[node.id] = isValidStoredPosition(storedPosition)
+            ? { x: storedPosition.x, y: storedPosition.y }
+            : (defaults[node.id] || { x: GRAPH_BASE_OFFSET.x, y: GRAPH_BASE_OFFSET.y });
           hasChanges = true;
         }
       });
@@ -328,6 +389,23 @@ const WorkbenchDependencyGraph = ({
       return hasChanges ? next : prev;
     });
   }, [nodes, edges, expandedNodeIds]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return undefined;
+    if (!Array.isArray(nodes) || nodes.length === 0) return undefined;
+    const timeout = window.setTimeout(() => {
+      const nextStored = {};
+      nodes.forEach((node) => {
+        const position = nodePositions[node.id];
+        if (isValidStoredPosition(position)) {
+          nextStored[node.id] = { x: position.x, y: position.y };
+        }
+      });
+      storedPositionsRef.current = nextStored;
+      writeStoredGraphPositions(nextStored);
+    }, 200);
+    return () => window.clearTimeout(timeout);
+  }, [nodePositions, nodes]);
 
   const minimapLayouts = React.useMemo(() => {
     const map = new Map();
@@ -591,6 +669,28 @@ const WorkbenchDependencyGraph = ({
           const cardToneClass = node.type === 'dataset'
             ? 'border-emerald-200/70 dark:border-emerald-700/60 bg-white/95 dark:bg-slate-900/90'
             : 'border-slate-200/70 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80';
+          const cardMenu = {
+            items: [
+              { key: 'duplicate', label: 'Duplicate' },
+              { key: 'delete', label: 'Delete', danger: true }
+            ],
+            onClick: ({ key }) => {
+              if (key === 'duplicate') {
+                if (node.type === 'exploration') {
+                  onDuplicateExploration?.(node.explorationId);
+                } else {
+                  onDuplicateDataset?.(node.datasetEntry);
+                }
+              }
+              if (key === 'delete') {
+                if (node.type === 'exploration') {
+                  onDeleteExploration?.(node.explorationId);
+                } else {
+                  onDeleteDataset?.(node.datasetEntry);
+                }
+              }
+            }
+          };
 
           return (
             <div
@@ -609,11 +709,23 @@ const WorkbenchDependencyGraph = ({
                       <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
                         {node.title}
                       </div>
-                      {node.type === 'dataset' && (
-                        <Tag color="green" variant="filled" className="rounded-full px-2 text-[10px]">
-                          Dataset
-                        </Tag>
-                      )}
+                      <div className="flex items-center gap-1">
+                        {node.type === 'dataset' && (
+                          <Tag color="green" variant="filled" className="rounded-full px-2 text-[10px]">
+                            Dataset
+                          </Tag>
+                        )}
+                        <Dropdown menu={cardMenu} trigger={['click']} placement="bottomRight">
+                          <Button
+                            type="text"
+                            size="small"
+                            icon={<MoreHorizontal size={14} />}
+                            onClick={(event) => event.stopPropagation()}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            aria-label="Card actions"
+                          />
+                        </Dropdown>
+                      </div>
                     </div>
                   </div>
 

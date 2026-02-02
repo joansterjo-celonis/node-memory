@@ -25,12 +25,12 @@ import {
   TableIcon,
   X,
   Plus,
-  Trash2,
   Play,
   Save,
   ArrowLeft,
   Edit as EditIcon,
-  QuestionCircle
+  QuestionCircle,
+  MoreHorizontal
 } from '../ui/icons';
 import { parseCSVFile, readFileAsArrayBuffer, parseXLSX, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB } from '../utils/ingest';
 import { getChildren, getCalculationOrder, getNodeResult, buildLeafCountMap } from '../utils/nodeUtils';
@@ -1873,6 +1873,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const normalizeExplorationDescription = (value) => (
     typeof value === 'string' ? value.trim() : ''
   );
+  const buildCopyLabel = (value, fallback) => {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    return `${trimmed || fallback} copy`;
+  };
 
   const buildLegacyToStableMap = useCallback((explorationList = []) => {
     const legacyUsedNames = new Set();
@@ -2145,6 +2149,150 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     if (activeExplorationId === id) {
       setActiveExplorationId(null);
     }
+  };
+
+  const duplicateExploration = (id) => {
+    if (!id) return;
+    setExplorations((prev) => {
+      const target = prev.find(exp => exp.id === id);
+      if (!target) return prev;
+      const now = new Date().toISOString();
+      const copyName = normalizeExplorationName(buildCopyLabel(target.name || target.rawDataName, 'Exploration'));
+      const copyId = `exp-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      const nextEntry = {
+        ...target,
+        id: copyId,
+        name: copyName,
+        createdAt: now,
+        updatedAt: now
+      };
+      const next = [nextEntry, ...prev];
+      try {
+        persistExplorations(next);
+      } catch (err) {
+        // Ignore storage errors on duplicate.
+      }
+      return next;
+    });
+  };
+
+  const deleteDatasetEntry = (entry) => {
+    if (!entry?.explorationId || !entry?.nodeId) return;
+    setExplorations((prev) => {
+      const targetIndex = prev.findIndex(exp => exp.id === entry.explorationId);
+      if (targetIndex === -1) return prev;
+      const target = prev[targetIndex];
+      const nodesList = Array.isArray(target.nodes) ? target.nodes : [];
+      let changed = false;
+      const nextNodes = nodesList.map((node) => {
+        if (node.id !== entry.nodeId) return node;
+        changed = true;
+        const nextParams = {
+          ...node.params,
+          isDataset: false,
+          isFlattened: false,
+          datasetSnapshot: null
+        };
+        return { ...node, params: nextParams };
+      });
+      if (!changed) return prev;
+      const now = new Date().toISOString();
+      const hasFlattenedDataset = nextNodes.some((node) => (
+        node.params?.isFlattened && node.params?.datasetSnapshot
+      ));
+      const nextEntry = {
+        ...target,
+        nodes: nextNodes,
+        updatedAt: now,
+        ...(target.isFlattenedDataset && !hasFlattenedDataset ? { isFlattenedDataset: false } : {})
+      };
+      const next = [...prev];
+      next[targetIndex] = nextEntry;
+      try {
+        persistExplorations(next);
+      } catch (err) {
+        // Ignore storage errors on dataset delete.
+      }
+      if (activeExplorationId === target.id) {
+        replaceCurrentNodes(nextNodes);
+      }
+      return next;
+    });
+  };
+
+  const duplicateDatasetEntry = (entry) => {
+    if (!entry?.explorationId || !entry?.nodeId) return;
+    setExplorations((prev) => {
+      const target = prev.find(exp => exp.id === entry.explorationId);
+      if (!target) return prev;
+      const nodesList = Array.isArray(target.nodes) ? target.nodes : [];
+      if (nodesList.length === 0) return prev;
+      const nodesById = new Map(nodesList.map((node) => [node.id, node]));
+      if (!nodesById.has(entry.nodeId)) return prev;
+      const copyName = buildCopyLabel(entry.datasetName || entry.nodeTitle, 'Dataset');
+
+      const lineageIds = new Set();
+      let currentId = entry.nodeId;
+      while (currentId && nodesById.has(currentId)) {
+        lineageIds.add(currentId);
+        const current = nodesById.get(currentId);
+        currentId = current?.parentId;
+      }
+
+      const lineageNodes = nodesList
+        .filter((node) => lineageIds.has(node.id))
+        .map((node) => {
+          let nextNode = node;
+          if (node.id === entry.nodeId) {
+            const nextParams = {
+              ...node.params,
+              isDataset: true,
+              datasetName: copyName
+            };
+            nextNode = {
+              ...node,
+              title: copyName,
+              params: nextParams
+            };
+            const branchBase = typeof node.branchName === 'string' ? node.branchName.trim() : '';
+            if (branchBase) {
+              nextNode.branchName = `${branchBase} copy`;
+            }
+          }
+          if (nextNode.entangledPeerId && !lineageIds.has(nextNode.entangledPeerId)) {
+            nextNode = {
+              ...nextNode,
+              entangledPeerId: undefined,
+              entangledRootId: undefined,
+              entangledColor: undefined
+            };
+          }
+          return nextNode;
+        });
+
+      const now = new Date().toISOString();
+      const stats = getExplorationStats(target.dataModel || { tables: {}, order: [] });
+      const nextEntry = {
+        id: `exp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        name: copyName,
+        description: target.description || '',
+        createdAt: now,
+        updatedAt: now,
+        nodes: sanitizeNodesForStorage(lineageNodes),
+        dataModel: target.dataModel || { tables: {}, order: [] },
+        rawDataName: copyName,
+        tableCount: stats.tableCount,
+        rowCount: stats.rowCount,
+        isFlattenedDataset: entry.isFlattened === true
+      };
+      const next = [nextEntry, ...prev];
+      try {
+        persistExplorations(next);
+      } catch (err) {
+        // Ignore storage errors on dataset duplicate.
+      }
+      return next;
+    });
   };
 
   const startNewExploration = () => {
@@ -2834,6 +2982,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const datasetEntryByKey = new Map();
     const datasetNodeIdByKey = new Map();
     const explorationNodeIdById = new Map();
+    const explorationMetaById = new Map();
     const datasetEntriesList = externalTableRegistry.datasets || [];
 
     (externalTableRegistry.allList || []).forEach((entry) => {
@@ -2852,6 +3001,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         0
       );
       const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+      const nodesById = new Map(nodesList.map((node) => [node.id, node]));
+      explorationMetaById.set(exp.id, { nodesList, nodesById });
       const nodeCount = nodesList.length;
       const branchCount = nodesList.reduce((sum, node) => (
         getChildren(nodesList, node.id).length === 0 ? sum + 1 : sum
@@ -2871,12 +3022,36 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       });
     });
 
+    const resolveLineageNodes = (meta, nodeId) => {
+      if (!meta || !nodeId) return [];
+      const { nodesList, nodesById } = meta;
+      if (!Array.isArray(nodesList) || nodesList.length === 0 || !nodesById?.has?.(nodeId)) {
+        return [];
+      }
+      const lineageIds = new Set();
+      let currentId = nodeId;
+      while (currentId && nodesById.has(currentId)) {
+        lineageIds.add(currentId);
+        currentId = nodesById.get(currentId)?.parentId;
+      }
+      return nodesList.filter((node) => lineageIds.has(node.id));
+    };
+
     const datasetNodes = datasetEntriesList
       .map((entry) => {
         if (!entry) return null;
         const key = `${entry.explorationId}:${entry.nodeId}`;
         const nodeId = datasetNodeIdByKey.get(key) || `dataset:${key}`;
         datasetNodeIdByKey.set(key, nodeId);
+        const explorationMeta = explorationMetaById.get(entry.explorationId);
+        const lineageNodes = resolveLineageNodes(explorationMeta, entry.nodeId);
+        const internalNodes = lineageNodes.length > 0
+          ? lineageNodes
+          : [{
+            id: entry.nodeId,
+            parentId: null,
+            title: entry.nodeTitle || entry.datasetName || 'Dataset'
+          }];
         return {
           id: nodeId,
           type: 'dataset',
@@ -2886,11 +3061,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           updatedAt: entry.explorationUpdatedAt,
           rowCount: entry.rowCount || 0,
           columnCount: entry.schema?.length || 0,
-          internalNodes: [{
-            id: entry.nodeId,
-            parentId: null,
-            title: entry.nodeTitle || entry.datasetName || 'Dataset'
-          }]
+          internalNodes
         };
       })
       .filter(Boolean);
@@ -3031,6 +3202,17 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     onClick: ({ key }) => setRenderMode(key)
   }), [renderMode]);
 
+  const buildCardMenu = (onDuplicate, onDelete) => ({
+    items: [
+      { key: 'duplicate', label: 'Duplicate' },
+      { key: 'delete', label: 'Delete', danger: true }
+    ],
+    onClick: ({ key }) => {
+      if (key === 'duplicate') onDuplicate?.();
+      if (key === 'delete') onDelete?.();
+    }
+  });
+
   const renderExplorationEmpty = () => (
     <div className={`bg-white border border-gray-200 rounded-2xl text-center shadow-sm dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'p-6' : 'p-10'}`}>
       <Empty
@@ -3070,6 +3252,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           const updatedLabel = updated ? `Updated ${updated}` : 'Updated just now';
           const isEditingName = editingExplorationId === exp.id;
           const isEditingDescription = editingExplorationDescriptionId === exp.id;
+          const cardMenu = buildCardMenu(
+            () => duplicateExploration(exp.id),
+            () => deleteExploration(exp.id)
+          );
           return (
             <Card
               key={exp.id}
@@ -3198,15 +3384,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                 </div>
               )}
               extra={
-                <Button
-                  type="text"
-                  size="small"
-                  danger
-                  icon={<Trash2 size={14} />}
-                  onClick={() => deleteExploration(exp.id)}
-                >
-                  Delete
-                </Button>
+                <Dropdown menu={cardMenu} trigger={['click']} placement="bottomRight">
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<MoreHorizontal size={16} />}
+                    onClick={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    aria-label="Exploration actions"
+                  />
+                </Dropdown>
               }
             >
               <div className="flex w-full flex-1 flex-col">
@@ -3263,6 +3450,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           const exp = explorations.find((item) => item.id === entry.explorationId);
           if (exp) openExploration(exp, { focusNodeId: entry.nodeId });
         }}
+        onDuplicateExploration={duplicateExploration}
+        onDeleteExploration={deleteExploration}
+        onDuplicateDataset={duplicateDatasetEntry}
+        onDeleteDataset={deleteDatasetEntry}
         className={isLandingGraph ? 'flex-1 min-h-0' : ''}
       />
     )
@@ -3291,6 +3482,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
             const rowCount = dataset.rowCount || 0;
             const dependencies = Array.isArray(dataset.dependencies) ? dataset.dependencies : [];
             const descriptionLabel = dataset.explorationDescription || 'No description';
+            const cardMenu = buildCardMenu(
+              () => duplicateDatasetEntry(dataset),
+              () => deleteDatasetEntry(dataset)
+            );
             return (
               <Card
                 key={`${dataset.explorationId}-${dataset.nodeId}`}
@@ -3322,6 +3517,18 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     </div>
                   </div>
                 )}
+                extra={
+                  <Dropdown menu={cardMenu} trigger={['click']} placement="bottomRight">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<MoreHorizontal size={16} />}
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      aria-label="Dataset actions"
+                    />
+                  </Dropdown>
+                }
               >
                 <div className="flex w-full flex-1 flex-col gap-3">
                   <div className="flex flex-col gap-2">
