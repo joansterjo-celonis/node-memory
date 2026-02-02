@@ -320,6 +320,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [landingViewMode, setLandingViewMode] = useState(initialSession?.landingViewMode ?? 'cards');
   const [flattenModalEntry, setFlattenModalEntry] = useState(null);
   const [isFlattenModalOpen, setIsFlattenModalOpen] = useState(false);
+  const [deleteModalState, setDeleteModalState] = useState(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const shouldAutoMobile = useMemo(() => isMobileUserAgent(), []);
   const [renderMode, setRenderMode] = useState(() => (
     shouldAutoMobile ? 'mobile' : (initialSession?.renderMode ?? 'classic')
@@ -1228,7 +1230,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     allList.sort((a, b) => a.label.localeCompare(b.label));
     externalList.sort((a, b) => a.label.localeCompare(b.label));
     datasets.sort((a, b) => (b.explorationUpdatedAt || '').localeCompare(a.explorationUpdatedAt || ''));
-    return { byName: externalByName, list: externalList, datasets, allList, allByName };
+    return {
+      byName: externalByName,
+      list: externalList,
+      datasets,
+      allList,
+      allByName,
+      dependenciesByExpId,
+      dependentsByExpId
+    };
   }, [explorations, activeExplorationId, buildNodeSpec]);
 
   const dataEngine = useMemo(
@@ -2350,6 +2360,191 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     });
   };
 
+  const getExplorationLabel = useCallback((expId) => {
+    const match = explorations.find((item) => item.id === expId);
+    return match?.name || match?.rawDataName || 'Exploration';
+  }, [explorations]);
+
+  const formatDatasetLabel = useCallback((datasetName, explorationName) => {
+    const resolvedExploration = explorationName || 'Exploration';
+    const resolvedDataset = datasetName || 'Dataset';
+    return `${resolvedExploration} / ${resolvedDataset}`;
+  }, []);
+
+  const getDatasetDisplayLabel = useCallback((entry) => {
+    if (!entry) return 'Dataset';
+    const datasetName = entry.datasetName || entry.nodeTitle || '';
+    if (datasetName) {
+      return formatDatasetLabel(datasetName, entry.explorationName);
+    }
+    return entry.label || entry.name || 'Dataset';
+  }, [formatDatasetLabel]);
+
+  const buildExplorationDeleteDetails = useCallback((expId) => {
+    const normalizeList = (items) => (
+      Array.from(new Set((items || []).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+    );
+    const target = explorations.find((item) => item.id === expId);
+    if (!target) return { dependencies: [], dependents: [] };
+    const nodesList = Array.isArray(target.nodes) ? target.nodes : [];
+    const dependenciesByKey = new Map();
+    const externalNameEntries = Object.entries(externalTableRegistry.allByName || {})
+      .map(([name, entry]) => ({ name, entry }))
+      .filter(({ entry }) => entry?.explorationId && entry.explorationId !== expId && entry.isDataset);
+    const sqlMatchers = externalNameEntries.map(({ name, entry }) => ({
+      entry,
+      regex: new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i')
+    }));
+    const addDependencyEntry = (depEntry) => {
+      if (!depEntry?.explorationId || !depEntry?.nodeId || depEntry.explorationId === expId) return;
+      if (!depEntry.isDataset) return;
+      dependenciesByKey.set(`${depEntry.explorationId}:${depEntry.nodeId}`, depEntry);
+    };
+    nodesList.forEach((node) => {
+      if (node.type === 'SOURCE' && node.params?.ingestionMode === 'inherited') {
+        const tableName = node.params?.inheritedTable || '';
+        const depEntry = tableName ? externalTableRegistry.allByName?.[tableName] : null;
+        addDependencyEntry(depEntry);
+      }
+      if (node.type === 'JOIN') {
+        const sqlMode = node.params?.sqlMode || 'visual';
+        if (sqlMode === 'custom') {
+          const sqlText = String(node.params?.sqlText || '');
+          if (!sqlText) return;
+          sqlMatchers.forEach(({ entry, regex }) => {
+            if (regex.test(sqlText)) {
+              addDependencyEntry(entry);
+            }
+          });
+          return;
+        }
+        const tableName = node.params?.rightTable || '';
+        const depEntry = tableName ? externalTableRegistry.allByName?.[tableName] : null;
+        addDependencyEntry(depEntry);
+      }
+    });
+    const dependencies = normalizeList(
+      Array.from(dependenciesByKey.values()).map((depEntry) => getDatasetDisplayLabel(depEntry))
+    );
+    const dependentExplorations = (
+      externalTableRegistry?.dependentsByExpId?.get?.(expId) || []
+    ).map((depId) => getExplorationLabel(depId));
+    const originDatasets = (externalTableRegistry.datasets || [])
+      .filter((entry) => entry?.explorationId === expId)
+      .map((entry) => getDatasetDisplayLabel(entry));
+    const dependentDatasets = (externalTableRegistry.datasets || [])
+      .filter((entry) => entry?.explorationId && entry.explorationId !== expId)
+      .filter((entry) => {
+        const deps = Array.isArray(entry.dependencies) ? entry.dependencies : [];
+        return deps.some((dep) => dep?.explorationId === expId && dep?.nodeId);
+      })
+      .map((entry) => getDatasetDisplayLabel(entry));
+    const dependents = normalizeList([
+      ...dependentExplorations,
+      ...originDatasets,
+      ...dependentDatasets
+    ]);
+    return { dependencies, dependents };
+  }, [externalTableRegistry, explorations, getDatasetDisplayLabel, getExplorationLabel]);
+
+  const buildDatasetDeleteDetails = useCallback((entry) => {
+    if (!entry?.explorationId || !entry?.nodeId) return { dependencies: [], dependents: [] };
+    const normalizeList = (items) => (
+      Array.from(new Set((items || []).filter(Boolean))).sort((a, b) => a.localeCompare(b))
+    );
+    const dependencies = normalizeList(
+      (Array.isArray(entry.dependencies) ? entry.dependencies : []).map((dep) => (
+        getDatasetDisplayLabel(dep)
+      ))
+    );
+    const targetKey = `${entry.explorationId}:${entry.nodeId}`;
+    const datasetDependents = (externalTableRegistry.datasets || [])
+      .filter((candidate) => {
+        if (!candidate?.explorationId || !candidate?.nodeId) return false;
+        if (`${candidate.explorationId}:${candidate.nodeId}` === targetKey) return false;
+        const deps = Array.isArray(candidate.dependencies) ? candidate.dependencies : [];
+        return deps.some((dep) => (
+          dep.explorationId === entry.explorationId && dep.nodeId === entry.nodeId
+        ));
+      })
+      .map((candidate) => getDatasetDisplayLabel(candidate));
+    const targetNames = [entry.name, entry.legacyName].filter(Boolean);
+    const targetNameSet = new Set(targetNames.map((name) => String(name).toLowerCase()));
+    const sqlMatchers = targetNames.map((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i'));
+    const explorationDependents = explorations
+      .filter((exp) => exp?.id && exp.id !== entry.explorationId)
+      .filter((exp) => {
+        const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+        return nodesList.some((node) => {
+          if (node.type === 'SOURCE' && node.params?.ingestionMode === 'inherited') {
+            const tableName = String(node.params?.inheritedTable || '').toLowerCase();
+            return targetNameSet.has(tableName);
+          }
+          if (node.type === 'JOIN') {
+            const sqlMode = node.params?.sqlMode || 'visual';
+            if (sqlMode === 'custom') {
+              const sqlText = String(node.params?.sqlText || '');
+              if (!sqlText) return false;
+              return sqlMatchers.some((regex) => regex.test(sqlText));
+            }
+            const tableName = String(node.params?.rightTable || '').toLowerCase();
+            return targetNameSet.has(tableName);
+          }
+          return false;
+        });
+      })
+      .map((exp) => getExplorationLabel(exp.id));
+    const dependents = normalizeList([...datasetDependents, ...explorationDependents]);
+    return { dependencies, dependents };
+  }, [externalTableRegistry, explorations, getDatasetDisplayLabel, getExplorationLabel]);
+
+  const openDeleteExplorationModal = useCallback((expId) => {
+    if (!expId) return;
+    const title = getExplorationLabel(expId);
+    const { dependencies, dependents } = buildExplorationDeleteDetails(expId);
+    setDeleteModalState({
+      type: 'exploration',
+      explorationId: expId,
+      title,
+      dependencies,
+      dependents
+    });
+    setIsDeleteModalOpen(true);
+  }, [buildExplorationDeleteDetails, getExplorationLabel]);
+
+  const openDeleteDatasetModal = useCallback((entry) => {
+    if (!entry?.explorationId || !entry?.nodeId) return;
+    const title = formatDatasetLabel(entry.datasetName || entry.nodeTitle, entry.explorationName);
+    const { dependencies, dependents } = buildDatasetDeleteDetails(entry);
+    setDeleteModalState({
+      type: 'dataset',
+      datasetEntry: entry,
+      title,
+      dependencies,
+      dependents
+    });
+    setIsDeleteModalOpen(true);
+  }, [buildDatasetDeleteDetails, formatDatasetLabel]);
+
+  const closeDeleteModal = useCallback(() => {
+    setIsDeleteModalOpen(false);
+    setDeleteModalState(null);
+  }, []);
+
+  const confirmDeleteModal = useCallback(() => {
+    if (!deleteModalState) {
+      closeDeleteModal();
+      return;
+    }
+    if (deleteModalState.type === 'exploration') {
+      deleteExploration(deleteModalState.explorationId);
+    }
+    if (deleteModalState.type === 'dataset') {
+      deleteDatasetEntry(deleteModalState.datasetEntry);
+    }
+    closeDeleteModal();
+  }, [deleteModalState, deleteExploration, deleteDatasetEntry, closeDeleteModal]);
+
   const duplicateDatasetEntry = (entry, originGraphNodeId) => {
     if (!entry?.explorationId || !entry?.nodeId) return;
     let createdGraphId = null;
@@ -3215,6 +3410,27 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       })
       .filter(Boolean);
 
+    const addOriginEdge = (entry) => {
+      if (!entry?.isDataset) return;
+      if (!entry.explorationId || !entry.nodeId) return;
+      const explorationNodeId = explorationNodeIdById.get(entry.explorationId);
+      if (!explorationNodeId) return;
+      const datasetKey = `${entry.explorationId}:${entry.nodeId}`;
+      const datasetNodeId = datasetNodeIdByKey.get(datasetKey);
+      if (!datasetNodeId) return;
+      const edgeId = `edge:origin:${datasetKey}`;
+      if (edgeIds.has(edgeId)) return;
+      edgeIds.add(edgeId);
+      edges.push({
+        id: edgeId,
+        from: explorationNodeId,
+        to: datasetNodeId,
+        sourceAnchorId: entry.nodeId,
+        targetAnchorId: entry.nodeId,
+        kind: 'origin'
+      });
+    };
+
     const addEdge = (exp, node, entry, kind) => {
       if (!entry || !entry.isDataset || !exp?.id || !node?.id) return;
       if (entry.explorationId === exp.id) return;
@@ -3267,6 +3483,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           addEdge(exp, node, entry, 'join');
         }
       });
+    });
+
+    datasetEntriesList.forEach((entry) => {
+      addOriginEdge(entry);
     });
 
     const addDatasetDependencyEdge = (sourceEntry, targetEntry) => {
@@ -3343,6 +3563,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const selectedResult = getNodeResult(chainData, selectedNodeId);
   const selectedSchema = selectedResult?.schema || [];
   const selectedData = selectedResult?.sampleRows || selectedResult?.data || [];
+  const deleteModalDependencies = deleteModalState?.dependencies || [];
+  const deleteModalDependents = deleteModalState?.dependents || [];
+  const deleteModalTarget = deleteModalState?.title
+    || (deleteModalState?.type === 'dataset' ? 'this dataset' : 'this exploration');
+  const deleteModalTypeLabel = deleteModalState?.type === 'dataset' ? 'dataset' : 'exploration';
 
   const renderModeLabels = {
     classic: 'Classic',
@@ -3455,7 +3680,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           const isEditingDescription = editingExplorationDescriptionId === exp.id;
           const cardMenu = buildCardMenu(
             () => duplicateExploration(exp.id),
-            () => deleteExploration(exp.id)
+            () => openDeleteExplorationModal(exp.id)
           );
           return (
             <Card
@@ -3653,9 +3878,9 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           if (exp) openExploration(exp, { focusNodeId: entry.nodeId });
         }}
         onDuplicateExploration={duplicateExploration}
-        onDeleteExploration={deleteExploration}
+        onDeleteExploration={openDeleteExplorationModal}
         onDuplicateDataset={duplicateDatasetEntry}
-        onDeleteDataset={deleteDatasetEntry}
+        onDeleteDataset={openDeleteDatasetModal}
         className={isLandingGraph ? 'flex-1 min-h-0' : ''}
       />
     )
@@ -3686,7 +3911,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
             const descriptionLabel = dataset.explorationDescription || 'No description';
             const cardMenu = buildCardMenu(
               () => duplicateDatasetEntry(dataset),
-              () => deleteDatasetEntry(dataset)
+              () => openDeleteDatasetModal(dataset)
             );
             return (
               <Card
@@ -3925,7 +4150,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       )}
 
       {/* 2. MAIN CANVAS AREA */}
-      <div className="flex-1 flex flex-col relative overflow-hidden bg-[#F8FAFC] dark:bg-slate-950">
+      <div className="flex-1 flex flex-col relative overflow-hidden min-h-0 bg-[#F8FAFC] dark:bg-slate-950">
         <header className={`bg-white border-b border-gray-200 flex items-center justify-between shadow-sm z-40 relative dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'flex-wrap gap-2 px-4 py-3' : 'h-16 px-8'}`}>
           <div className={`flex items-center gap-4 ${isMobileMode ? 'w-full justify-between' : ''}`}>
             <div className="flex items-center gap-3 min-w-0">
@@ -4169,7 +4394,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         </header>
 
         {viewMode === 'landing' ? (
-          <div className={`flex-1 ${isLandingGraph ? 'overflow-hidden' : 'overflow-auto'} bg-slate-50 dark:bg-slate-950`}>
+          <div className={`flex-1 min-h-0 ${isLandingGraph ? 'overflow-hidden' : 'overflow-auto'} bg-slate-50 dark:bg-slate-950`}>
             <div className={isLandingGraph
               ? 'flex h-full min-h-0 flex-col'
               : `space-y-8 ${isMobileMode ? 'max-w-none px-4 py-6' : 'max-w-6xl mx-auto px-10 py-12'}`}
@@ -4348,7 +4573,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                             size="small"
                             danger
                             icon={<Trash2 size={14} />}
-                            onClick={() => deleteExploration(exp.id)}
+                            onClick={() => openDeleteExplorationModal(exp.id)}
                           >
                             Delete
                           </Button>
@@ -4561,8 +4786,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           <div
             ref={canvasScrollRef}
             className={renderMode === 'freeLayout'
-              ? 'flex-1 overflow-hidden bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-slate-50 dark:bg-slate-950 dark:bg-none'
-              : 'flex-1 overflow-auto bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-slate-50 dark:bg-slate-950 dark:bg-none cursor-grab active:cursor-grabbing'}
+              ? 'flex-1 min-h-0 overflow-hidden bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-slate-50 dark:bg-slate-950 dark:bg-none'
+              : 'flex-1 min-h-0 overflow-auto bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-slate-50 dark:bg-slate-950 dark:bg-none cursor-grab active:cursor-grabbing'}
             onClick={() => {
               setShowAddMenuForId(null);
               setShowInsertMenuForId(null);
@@ -4786,6 +5011,58 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       )}
 
       <HelpModal open={showHelp} onClose={() => setShowHelp(false)} isMobile={isMobileMode} />
+
+      <Modal
+        open={isDeleteModalOpen}
+        onCancel={closeDeleteModal}
+        onOk={confirmDeleteModal}
+        okText="Delete"
+        cancelText="Cancel"
+        okButtonProps={{ danger: true }}
+        centered
+        title={deleteModalState?.type === 'dataset' ? 'Delete dataset' : 'Delete exploration'}
+      >
+        <div className="space-y-4 text-sm text-slate-600 dark:text-slate-300">
+          <div>
+            This will delete{' '}
+            <span className="font-semibold text-slate-900 dark:text-slate-100">
+              {deleteModalTarget}
+            </span>
+            .
+          </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Only this {deleteModalTypeLabel} will be deleted. Dependent items will not be removed.
+          </div>
+          <div className="space-y-2">
+            <div className="text-xs uppercase tracking-wide text-slate-400">
+              Dependencies ({deleteModalDependencies.length})
+            </div>
+            {deleteModalDependencies.length > 0 ? (
+              <ul className="list-disc pl-5 space-y-1">
+                {deleteModalDependencies.map((item, index) => (
+                  <li key={`dep-${index}`}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-xs text-slate-400">No dependencies.</div>
+            )}
+          </div>
+          <div className="space-y-2">
+            <div className="text-xs uppercase tracking-wide text-slate-400">
+              Affected entities ({deleteModalDependents.length})
+            </div>
+            {deleteModalDependents.length > 0 ? (
+              <ul className="list-disc pl-5 space-y-1">
+                {deleteModalDependents.map((item, index) => (
+                  <li key={`dependent-${index}`}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-xs text-slate-400">No affected entities.</div>
+            )}
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={isFlattenModalOpen}
