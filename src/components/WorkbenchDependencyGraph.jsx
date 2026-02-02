@@ -2,7 +2,14 @@
 // Free-layout style dependency graph for workbenches and datasets.
 import React from 'react';
 import { Button, Dropdown, Tag } from 'antd';
-import { Layout, ChevronDown, ChevronRight, MoreHorizontal } from '../ui/icons';
+import {
+  ChevronsDown,
+  ChevronsUp,
+  Layout,
+  ChevronDown,
+  ChevronRight,
+  MoreHorizontal
+} from '../ui/icons';
 import {
   buildMinimapLayout,
   getMinimapBounds,
@@ -694,6 +701,19 @@ const WorkbenchDependencyGraph = ({
     });
   }, []);
 
+  const isAllExpanded = React.useMemo(() => (
+    nodes.length > 0 && nodes.every((node) => expandedNodeIds.has(node.id))
+  ), [nodes, expandedNodeIds]);
+
+  const handleToggleExpandAll = React.useCallback(() => {
+    setExpandedNodeIds((prev) => {
+      if (!Array.isArray(nodes) || nodes.length === 0) return new Set();
+      const allExpanded = nodes.every((node) => prev.has(node.id));
+      if (allExpanded) return new Set();
+      return new Set(nodes.map((node) => node.id));
+    });
+  }, [nodes]);
+
   return (
     <div
       ref={containerRef}
@@ -921,6 +941,14 @@ const WorkbenchDependencyGraph = ({
           aria-label="Optimize layout"
         >
           <Layout size={14} />
+        </button>
+        <button
+          onClick={handleToggleExpandAll}
+          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800 flex items-center justify-center"
+          title={isAllExpanded ? 'Collapse all cards' : 'Expand all cards'}
+          aria-label={isAllExpanded ? 'Collapse all cards' : 'Expand all cards'}
+        >
+          {isAllExpanded ? <ChevronsUp size={14} /> : <ChevronsDown size={14} />}
         </button>
       </div>
     </div>
