@@ -23,6 +23,7 @@ import {
   Layout
 } from '../ui/icons';
 import { getChildren, countDescendants, getNodeResult, formatNumber } from '../utils/nodeUtils';
+import { SQL_INCOMING_TABLE } from '../utils/dataEngine';
 import { normalizeFilters, resolveFilterMode } from '../utils/filterUtils';
 import VisxChart from '../ui/SimpleChart';
 import WorldMapChart from '../ui/WorldMapChart';
@@ -75,7 +76,7 @@ const INSERT_MENU_ITEMS = [
     children: [
       { key: 'FILTER', label: 'Filter', icon: <span className="w-1.5 h-1.5 rounded-full bg-orange-400" /> },
       { key: 'AGGREGATE', label: 'Aggregate', icon: <span className="w-1.5 h-1.5 rounded-full bg-purple-400" /> },
-      { key: 'JOIN', label: 'Join', icon: <span className="w-1.5 h-1.5 rounded-full bg-pink-400" /> },
+      { key: 'JOIN', label: 'SQL', icon: <span className="w-1.5 h-1.5 rounded-full bg-pink-400" /> },
       { type: 'divider' },
       { key: 'COMPONENT:TABLE', label: 'Table', icon: <TableIcon size={12} /> },
       { key: 'COMPONENT:PIVOT', label: 'Pivot Table', icon: <TableIcon size={12} /> },
@@ -126,7 +127,7 @@ const EntangledIndicator = ({
   const colorPicker = (
     <div className="flex flex-col gap-2" onClick={(event) => event.stopPropagation()}>
       <Radio.Group value={draftColor} onChange={(event) => setDraftColor(event.target.value)}>
-        <Space direction="vertical" size={4}>
+        <Space orientation="vertical" size={4}>
           {ENTANGLED_COLOR_OPTIONS.map((option) => (
             <Radio key={option.value} value={option.value}>
               <Space size="small">
@@ -529,7 +530,7 @@ const TablePreview = React.memo(({
   );
 
   const cellActionContent = cellAction?.payload ? (
-    <Space direction="vertical" size="small">
+    <Space orientation="vertical" size="small">
       <Text type="secondary" className="text-xs">
         Apply filter
       </Text>
@@ -924,6 +925,7 @@ const TreeNode = ({
   onRemove,
   onToggleExpand,
   onToggleBranch,
+  onToggleDataset,
   onDrillDown,
   onTableCellClick,
   onTableSortChange,
@@ -985,6 +987,7 @@ const TreeNode = ({
   const isActive = selectedNodeId === nodeId;
   const isExpanded = node.isExpanded !== false;
   const isBranchCollapsed = node.isBranchCollapsed === true;
+  const isDataset = !!node.params?.isDataset;
   const isEntangledMode = renderMode === 'entangled' || renderMode === 'entangledSmart';
   const isClassicSmartMode = renderMode === 'classicSmart' || renderMode === 'entangledSmart';
   const isMobileMode = renderMode === 'mobile';
@@ -1150,7 +1153,7 @@ const TreeNode = ({
       children: [
         { key: 'FILTER', label: 'Filter', icon: <span className="w-2 h-2 rounded-full bg-orange-400" /> },
         { key: 'AGGREGATE', label: 'Aggregate', icon: <span className="w-2 h-2 rounded-full bg-purple-400" /> },
-        { key: 'JOIN', label: 'SQL Join', icon: <span className="w-2 h-2 rounded-full bg-pink-400" /> }
+        { key: 'JOIN', label: 'SQL', icon: <span className="w-2 h-2 rounded-full bg-pink-400" /> }
       ]
     },
     { type: 'divider' },
@@ -1434,7 +1437,7 @@ const TreeNode = ({
   const isEditingFilter = filterBuilderTargetIndex != null && filterBuilderTargetIndex >= 0;
   const filterBuilderContent = (
     <div className="w-80 p-3" onClick={(e) => e.stopPropagation()}>
-      <Space direction="vertical" size="small" className="w-full">
+      <Space orientation="vertical" size="small" className="w-full">
         <Text type="secondary" className="text-xs">
           {isEditingFilter ? 'Edit filter' : 'Add a filter'}
         </Text>
@@ -1449,7 +1452,7 @@ const TreeNode = ({
           <Radio.Button value="attribute">Attribute</Radio.Button>
         </Radio.Group>
         {filterBuilderMode === 'operator' ? (
-          <Space direction="vertical" size="small" className="w-full">
+          <Space orientation="vertical" size="small" className="w-full">
             <Select
               placeholder="Select column"
               value={operatorDraft.field || undefined}
@@ -1490,7 +1493,7 @@ const TreeNode = ({
             </Button>
           </Space>
         ) : (
-          <Space direction="vertical" size="small" className="w-full">
+          <Space orientation="vertical" size="small" className="w-full">
             <Select
               placeholder="Select column"
               value={attributeDraft.field || undefined}
@@ -2051,6 +2054,14 @@ const TreeNode = ({
                   </span>
                 </Tag>
               )}
+              {isDataset && (
+                <Tag
+                  color="green"
+                  className="uppercase text-[9px] font-bold inline-flex items-center leading-tight"
+                >
+                  Dataset
+                </Tag>
+              )}
               {showCompactFilterInline && renderFilterChips(true)}
               {node.entangledPeerId && (
                 <EntangledIndicator
@@ -2072,7 +2083,9 @@ const TreeNode = ({
               ) : (
                 <Text type="secondary" className="text-xs truncate block">
                   {node.type === 'AGGREGATE' ? `Group by ${node.params.groupBy}` :
-                    node.type === 'JOIN' ? `with ${node.params.rightTable || '...'}` :
+                    node.type === 'JOIN'
+                      ? (node.params.sqlMode === 'custom' ? 'Custom SQL' : `with ${node.params.rightTable || '...'}`)
+                      :
                     node.type === 'COMPONENT' ? (node.params.subtype === 'AI' ? 'AI Assistant' : `${node.params.subtype} View`) :
                     node.description || node.type}
                 </Text>
@@ -2328,14 +2341,36 @@ const TreeNode = ({
               {node.type === 'JOIN' && (
                 <Card size="small" styles={{ body: { padding: 12 } }}>
                   <div className="bg-slate-900 rounded p-3 text-[10px] font-mono text-slate-300 overflow-auto">
-                    <div><span className="text-pink-400">SELECT</span> *</div>
-                    <div><span className="text-pink-400">FROM</span> [PreviousNode]</div>
-                    <div><span className="text-pink-400">{node.params.joinType || 'LEFT'} JOIN</span> {node.params.rightTable || '...'}</div>
-                    <div><span className="text-pink-400">ON</span> {node.params.leftKey || '?'} = {node.params.rightKey || '?'}</div>
-                    <div className="mt-2 pt-2 border-t border-slate-700 text-slate-500 dark:text-slate-400 italic">
-                      Result: {result.rowCount} rows merged
-                    </div>
+                    {node.params.sqlMode === 'custom' ? (
+                      <>
+                        <pre className="whitespace-pre-wrap m-0">
+                          {node.params.sqlText?.trim() || `SELECT * FROM ${SQL_INCOMING_TABLE}`}
+                        </pre>
+                        <div className="mt-2 pt-2 border-t border-slate-700 text-slate-500 dark:text-slate-400 italic">
+                          Result: {result.rowCount} rows
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div><span className="text-pink-400">SELECT</span> *</div>
+                        <div><span className="text-pink-400">FROM</span> {SQL_INCOMING_TABLE}</div>
+                        <div><span className="text-pink-400">{node.params.joinType || 'LEFT'} JOIN</span> {node.params.rightTable || '...'}</div>
+                        <div><span className="text-pink-400">ON</span> {node.params.leftKey || '?'} = {node.params.rightKey || '?'}</div>
+                        <div className="mt-2 pt-2 border-t border-slate-700 text-slate-500 dark:text-slate-400 italic">
+                          Result: {result.rowCount} rows merged
+                        </div>
+                      </>
+                    )}
                   </div>
+                  {result.error && (
+                    <Alert
+                      type="error"
+                      showIcon
+                      message="SQL error"
+                      description={result.error}
+                      className="mt-2"
+                    />
+                  )}
                 </Card>
               )}
 
@@ -2425,19 +2460,32 @@ const TreeNode = ({
       {/* ADD BUTTON - Only show if NO children */}
       {rawChildren.length === 0 && (
         <div className={`absolute -bottom-6 left-1/2 -translate-x-1/2 translate-y-full z-20 transition-all ${!isExpanded ? '-mt-4' : ''}`}>
-          <div ref={addMenuRef}>
-            <Dropdown
-              menu={{ items: addMenuItems, onClick: handleAddMenuClick }}
-              trigger={['click']}
-              open={showAddMenuForId === resolvedMenuId}
-              onOpenChange={(open) => setShowAddMenuForId(open ? resolvedMenuId : null)}
-            >
+          <div className="flex items-center gap-2">
+            <div ref={addMenuRef}>
+              <Dropdown
+                menu={{ items: addMenuItems, onClick: handleAddMenuClick }}
+                trigger={['click']}
+                open={showAddMenuForId === resolvedMenuId}
+                onOpenChange={(open) => setShowAddMenuForId(open ? resolvedMenuId : null)}
+              >
+                <Button
+                  shape="circle"
+                  icon={<Plus size={16} strokeWidth={3} />}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </Dropdown>
+            </div>
+            <Tooltip title={isDataset ? 'Remove dataset' : 'Save as dataset'}>
               <Button
                 shape="circle"
-                icon={<Plus size={16} strokeWidth={3} />}
-                onClick={(e) => e.stopPropagation()}
+                type={isDataset ? 'primary' : 'default'}
+                icon={<Database size={14} />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleDataset?.(nodeId);
+                }}
               />
-            </Dropdown>
+            </Tooltip>
           </div>
         </div>
       )}
@@ -2491,6 +2539,7 @@ const TreeNode = ({
               onRemove={onRemove}
               onToggleExpand={onToggleExpand}
               onToggleBranch={onToggleBranch}
+              onToggleDataset={onToggleDataset}
               onDrillDown={onDrillDown}
               onTableCellClick={onTableCellClick}
               onTableSortChange={onTableSortChange}
@@ -2531,6 +2580,7 @@ const TreeNode = ({
                   onRemove={onRemove}
                   onToggleExpand={onToggleExpand}
                   onToggleBranch={onToggleBranch}
+                  onToggleDataset={onToggleDataset}
                   onDrillDown={onDrillDown}
                   onTableCellClick={onTableCellClick}
                   onTableSortChange={onTableSortChange}
@@ -2608,6 +2658,7 @@ const FreeLayoutCanvas = ({
   onRemove,
   onToggleExpand,
   onToggleBranch,
+  onToggleDataset,
   onDrillDown,
   onTableCellClick,
   onTableSortChange,
@@ -3350,6 +3401,7 @@ const FreeLayoutCanvas = ({
                 onRemove={onRemove}
                 onToggleExpand={onToggleExpand}
                 onToggleBranch={onToggleBranch}
+                onToggleDataset={onToggleDataset}
                 onDrillDown={onDrillDown}
                 onTableCellClick={onTableCellClick}
                 onTableSortChange={onTableSortChange}

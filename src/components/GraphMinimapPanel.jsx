@@ -3,6 +3,13 @@
 import React from 'react';
 import { Button } from 'antd';
 import { Layout, Minimize2 } from '../ui/icons';
+import {
+  buildMinimapLayout,
+  getMinimapBounds,
+  getMinimapFitTransform,
+  MINIMAP_NODE_WIDTH,
+  MINIMAP_NODE_HEIGHT
+} from '../utils/minimapLayout';
 
 const PANEL_WIDTH = 240;
 const PANEL_HEIGHT = 160;
@@ -10,8 +17,8 @@ const MIN_PANEL_WIDTH = 180;
 const MIN_PANEL_HEIGHT = 120;
 const MAX_PANEL_WIDTH = 480;
 const MAX_PANEL_HEIGHT = 360;
-const NODE_WIDTH = 110;
-const NODE_HEIGHT = 32;
+const NODE_WIDTH = MINIMAP_NODE_WIDTH;
+const NODE_HEIGHT = MINIMAP_NODE_HEIGHT;
 const NODE_PADDING_X = 6;
 const TITLE_CHAR_LIMIT = 18;
 const MIN_SCALE = 0.2;
@@ -27,88 +34,7 @@ const truncateText = (value, maxChars) => {
   return `${text.slice(0, maxChars - 3)}...`;
 };
 
-const buildMinimapLayout = (nodes) => {
-  const positions = {};
-  if (!Array.isArray(nodes) || nodes.length === 0) return positions;
-
-  const nodesById = new Map();
-  const childrenByParent = new Map();
-  nodes.forEach((node) => {
-    if (!node?.id) return;
-    nodesById.set(node.id, node);
-    const key = node.parentId ?? null;
-    const list = childrenByParent.get(key) || [];
-    list.push(node);
-    childrenByParent.set(key, list);
-  });
-
-  const roots = [];
-  nodes.forEach((node) => {
-    if (!node?.id) return;
-    if (!node.parentId || !nodesById.has(node.parentId)) roots.push(node);
-  });
-
-  const columnGap = NODE_WIDTH + 24;
-  const rowGap = NODE_HEIGHT + 44;
-  const offset = { x: 16, y: 16 };
-  let leafIndex = 0;
-
-  const assign = (nodeId, depth, stack) => {
-    if (positions[nodeId]) return positions[nodeId].x;
-    if (stack.has(nodeId)) return leafIndex * columnGap;
-    stack.add(nodeId);
-    const children = childrenByParent.get(nodeId) || [];
-    if (children.length === 0) {
-      const x = leafIndex * columnGap;
-      positions[nodeId] = { x, y: depth * rowGap };
-      leafIndex += 1;
-      stack.delete(nodeId);
-      return x;
-    }
-    const childXs = children.map((child) => assign(child.id, depth + 1, stack));
-    const x = childXs.reduce((sum, value) => sum + value, 0) / childXs.length;
-    positions[nodeId] = { x, y: depth * rowGap };
-    stack.delete(nodeId);
-    return x;
-  };
-
-  roots.forEach((root) => assign(root.id, 0, new Set()));
-  nodes.forEach((node) => {
-    if (!node?.id || positions[node.id]) return;
-    const x = leafIndex * columnGap;
-    positions[node.id] = { x, y: 0 };
-    leafIndex += 1;
-  });
-
-  Object.keys(positions).forEach((id) => {
-    positions[id] = {
-      x: positions[id].x + offset.x,
-      y: positions[id].y + offset.y
-    };
-  });
-
-  return positions;
-};
-
-const getBounds = (nodes) => {
-  if (!nodes.length) return null;
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-  nodes.forEach((node) => {
-    minX = Math.min(minX, node.x);
-    minY = Math.min(minY, node.y);
-    maxX = Math.max(maxX, node.x + NODE_WIDTH);
-    maxY = Math.max(maxY, node.y + NODE_HEIGHT);
-  });
-  const width = Math.max(1, maxX - minX);
-  const height = Math.max(1, maxY - minY);
-  return { minX, minY, maxX, maxY, width, height };
-};
-
 const clampScale = (value) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
-const clampFitScale = (value) => Math.min(FIT_MAX_SCALE, Math.max(FIT_MIN_SCALE, value));
 
 const GraphMinimapPanel = ({
   nodes = [],
@@ -216,22 +142,20 @@ const GraphMinimapPanel = ({
     return lines;
   }, [minimapNodes]);
 
-  const bounds = React.useMemo(() => getBounds(minimapNodes), [minimapNodes]);
+  const bounds = React.useMemo(
+    () => getMinimapBounds(minimapNodes, NODE_WIDTH, NODE_HEIGHT),
+    [minimapNodes]
+  );
 
   const fitTransform = React.useMemo(() => {
     if (!bounds) return null;
     const width = panelSize.width || panelRect.width;
     const height = panelSize.height || panelRect.height;
-    if (width === 0 || height === 0) return null;
-    const availableWidth = Math.max(1, width - FIT_PADDING * 2);
-    const availableHeight = Math.max(1, height - FIT_PADDING * 2);
-    const scale = clampFitScale(Math.min(
-      availableWidth / bounds.width,
-      availableHeight / bounds.height
-    ));
-    const x = FIT_PADDING + (width - bounds.width * scale) / 2 - bounds.minX * scale;
-    const y = FIT_PADDING + (height - bounds.height * scale) / 2 - bounds.minY * scale;
-    return { x, y, scale };
+    return getMinimapFitTransform(bounds, width, height, {
+      padding: FIT_PADDING,
+      minScale: FIT_MIN_SCALE,
+      maxScale: FIT_MAX_SCALE
+    });
   }, [bounds, panelRect, panelSize]);
 
   React.useEffect(() => {

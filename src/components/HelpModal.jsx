@@ -26,6 +26,7 @@ const HelpModal = ({ open, onClose, isMobile }) => {
               <li>Start in the Source step to load CSV or Excel files.</li>
               <li>Files are staged first, then parsed when you click Ingest Data.</li>
               <li>Loading new files replaces the data model feeding the chain.</li>
+              <li>Switch to Inherited table to begin from a saved end node in another exploration.</li>
             </ul>
           </Section>
           <Section title="Tables and sheets">
@@ -102,7 +103,7 @@ const HelpModal = ({ open, onClose, isMobile }) => {
             <ul className="list-disc pl-5 space-y-1">
               <li>Filter nodes apply conditions such as equals, contains, and comparisons.</li>
               <li>Aggregate nodes group rows and compute metrics over numeric columns.</li>
-              <li>SQL Join nodes combine tables with LEFT/INNER/RIGHT joins.</li>
+              <li>SQL nodes can run visual joins or custom SQL across local and external tables.</li>
             </ul>
           </Section>
           <Section title="Component types">
@@ -144,6 +145,7 @@ const HelpModal = ({ open, onClose, isMobile }) => {
               <li>Undo and Redo navigate your step history.</li>
               <li>Save and Exit captures the exploration for the landing page.</li>
               <li>Explorations list shows table counts, rows, and branch totals.</li>
+              <li>Data sets highlight saved end nodes you can reuse elsewhere.</li>
             </ul>
           </Section>
           <Section title="Branch controls and settings">
