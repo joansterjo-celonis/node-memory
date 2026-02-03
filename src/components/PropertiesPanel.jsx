@@ -75,6 +75,7 @@ const PropertiesPanel = ({
   onIngest,
   onClearData,
   onShowDataModel,
+  assetType,
   isFlattenedDataset = false,
   onCollapse,
   activeFilterIndex,
@@ -90,6 +91,7 @@ const PropertiesPanel = ({
   useEffect(() => {
     if (node) setLocalParams(node.params || {});
   }, [node?.id, node?.params]);
+
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.localStorage) return;
@@ -117,6 +119,7 @@ const PropertiesPanel = ({
   const headerPaddingClass = isMobile ? 'p-4' : 'p-5';
   const bodyPaddingClass = isMobile ? 'p-4' : 'p-5';
   const emptyCardMarginClass = isMobile ? 'm-3' : 'm-4';
+  const isRawDatasetAsset = assetType === 'rawDataset';
 
   if (!node) {
     return (
@@ -183,7 +186,16 @@ const PropertiesPanel = ({
 
   const currentFiles = node.params?.__files || [];
   const ingestionMode = node.params?.ingestionMode || 'manual';
+  const rawIngestionMode = (ingestionMode === 'manual' || ingestionMode === 'api') ? ingestionMode : 'manual';
   const inheritedTable = node.params?.inheritedTable || '';
+
+  useEffect(() => {
+    if (!isRawDatasetAsset) return;
+    if (!node || node.type !== 'SOURCE') return;
+    if (ingestionMode !== 'manual' && ingestionMode !== 'api') {
+      handleChange('ingestionMode', 'manual');
+    }
+  }, [isRawDatasetAsset, node, ingestionMode, handleChange]);
   const sqlMode = localParams.sqlMode || 'visual';
   const sqlError = nodeResult?.error || '';
   const localTables = availableTables?.local || [];
@@ -291,6 +303,7 @@ const PropertiesPanel = ({
     : [];
 
   const selectedColumns = Array.isArray(node.params?.columns) ? node.params.columns : schema;
+  const rawDatasetColumns = Array.isArray(node.params?.visibleColumns) ? node.params.visibleColumns : schema;
   const selectDropdownProps = { popupMatchSelectWidth: false, styles: { popup: { root: { minWidth: 320 } } } };
   const fullWidthSelect = { ...selectDropdownProps, style: { width: '100%' } };
   const isSourceError = sourceStatus?.title === 'Error';
@@ -334,28 +347,172 @@ const PropertiesPanel = ({
     handleChange('filters', next);
   };
 
+  const renderManualIngestionControls = () => (
+    <>
+      {/* Table selector (only if XLSX has multiple sheets) */}
+      {dataModel.order.length > 1 && (
+        <Form.Item label="Table">
+          <Select
+            value={node.params.table || dataModel.order[0]}
+            onChange={(value) => handleChange('table', value)}
+            options={dataModel.order.map((name) => ({ label: name, value: name }))}
+            {...fullWidthSelect}
+          />
+        </Form.Item>
+      )}
+
+      {/* File ingestion controls */}
+      <Form.Item label="Upload data (CSV or Excel)">
+        <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+          <Space size="small" wrap>
+            <Upload
+              multiple
+              accept=".csv,.xlsx,.xls"
+              beforeUpload={() => false}
+              showUploadList={false}
+              onChange={({ fileList }) => {
+                const files = fileList.map((file) => file.originFileObj).filter(Boolean);
+                if (files.length) addPendingFiles(files);
+              }}
+            >
+              <Button icon={<Plus size={14} />}>Select files</Button>
+            </Upload>
+            {showSampleButton && (
+              <Button
+                type="default"
+                icon={<Database size={14} />}
+                onClick={handleLoadSample}
+                loading={isSampleLoading}
+                disabled={isSampleLoading || sourceStatus?.loading}
+              >
+                Load sample
+              </Button>
+            )}
+          </Space>
+          <Text type="secondary" className="text-xs">
+            Tip: uploading files replaces the data model feeding the chain.
+          </Text>
+          <Text type="secondary" className="text-xs">
+            Max {MAX_UPLOAD_MB} MB per file / {MAX_UPLOAD_MB} MB total. Selected: {totalPendingMb} MB.
+          </Text>
+          {uploadError && (
+            <Text type="danger" className="text-xs">
+              {uploadError}
+            </Text>
+          )}
+        </Space>
+      </Form.Item>
+
+      {currentFiles.length > 0 && (
+        <Card size="small" title="Pending Files">
+          <Space orientation="vertical" size="small" style={{ width: '100%' }}>
+            {currentFiles.map((file, idx) => (
+              <div key={`pending-${file.name}-${idx}`} className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <Text ellipsis className="block truncate">
+                    {file.name}
+                  </Text>
+                  <Text type="secondary" className="text-xs">
+                    {Math.round(file.size / 1024)} KB
+                  </Text>
+                </div>
+                <Button
+                  key={`remove-${file.name}-${idx}`}
+                  type="text"
+                  danger
+                  size="small"
+                  onClick={() => removePendingFile(idx)}
+                >
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </Space>
+          <Button type="link" size="small" onClick={clearPendingFiles}>
+            Clear all
+          </Button>
+        </Card>
+      )}
+
+      <Button
+        type="primary"
+        block
+        onClick={() => onIngest && onIngest()}
+        disabled={currentFiles.length === 0 || sourceStatus?.loading}
+        loading={sourceStatus?.loading}
+      >
+        {sourceStatus?.loading ? 'Ingesting…' : 'Ingest Data'}
+      </Button>
+
+      {/* Status + progress */}
+      <Card size="small">
+        <Space align="start">
+          <Database size={18} className={isSourceError ? 'text-red-500' : 'text-blue-600'} />
+          <Space orientation="vertical" size={0}>
+            <Text strong type={isSourceError ? 'danger' : undefined}>
+              {sourceStatus?.title || 'No dataset loaded'}
+            </Text>
+            <Text type="secondary" className="text-xs">
+              {sourceStatus?.detail || 'Upload a CSV or Excel file to get started.'}
+            </Text>
+          </Space>
+        </Space>
+      </Card>
+      {sourceStatus?.loading && <Progress percent={100} showInfo={false} status="active" />}
+
+      {dataModel.order.length > 0 && (
+        <Button danger block onClick={() => onClearData && onClearData()}>
+          Clear data
+        </Button>
+      )}
+
+      <Button
+        type="default"
+        block
+        icon={<Database size={14} />}
+        onClick={() => onShowDataModel && onShowDataModel()}
+        disabled={dataModel.order.length === 0}
+      >
+        Preview Data Model
+      </Button>
+    </>
+  );
+
   return (
     <div className={`h-full flex flex-col bg-white shadow-xl shadow-gray-200/50 dark:bg-slate-900 dark:shadow-black/40 animate-in slide-in-from-right duration-300 z-50 ${containerWidthClass} ${containerBorderClass}`}>
       {/* Header */}
       <div className={`${headerPaddingClass} border-b border-gray-100 bg-white dark:bg-slate-900 dark:border-slate-700`}>
         <div className="flex items-start justify-between gap-3">
           <Space orientation="vertical" size={6} style={{ width: '100%' }}>
-            <Text type="secondary" className="uppercase tracking-wider text-[11px]">
-              {(node.type === 'COMPONENT'
-                ? node.params.subtype
-                : (node.type === 'JOIN' ? 'SQL' : node.type))} Node
-            </Text>
-            <Input
-              size="middle"
-              variant="borderless"
-              value={node.title}
-              onChange={(e) => handleMetaChange('title', e.target.value)}
-              placeholder="Node title"
-              style={{ paddingInline: 0, paddingBlock: 0 }}
-            />
-            <Text type="secondary" className="font-mono text-[11px]">
-              ID: {node.id.split('-').pop()}
-            </Text>
+            {isRawDatasetAsset ? (
+              <>
+                <Text type="secondary" className="uppercase tracking-wider text-[11px]">
+                  Raw dataset
+                </Text>
+                <Text className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                  Ingestion
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text type="secondary" className="uppercase tracking-wider text-[11px]">
+                  {(node.type === 'COMPONENT'
+                    ? node.params.subtype
+                    : (node.type === 'JOIN' ? 'SQL' : node.type))} Node
+                </Text>
+                <Input
+                  size="middle"
+                  variant="borderless"
+                  value={node.title}
+                  onChange={(e) => handleMetaChange('title', e.target.value)}
+                  placeholder="Node title"
+                  style={{ paddingInline: 0, paddingBlock: 0 }}
+                />
+                <Text type="secondary" className="font-mono text-[11px]">
+                  ID: {node.id.split('-').pop()}
+                </Text>
+              </>
+            )}
           </Space>
           {onCollapse && (
             <Button
@@ -373,16 +530,20 @@ const PropertiesPanel = ({
       {/* Body */}
       <div className={`${bodyPaddingClass} flex-1 overflow-y-auto space-y-6`}>
         <Form layout="vertical" requiredMark={false}>
-          {/* Shared: Branch label */}
-          <Form.Item label="Branch Label">
-            <Input
-              placeholder="e.g. Experiment A"
-              value={node.branchName || ''}
-              onChange={(e) => handleMetaChange('branchName', e.target.value)}
-            />
-          </Form.Item>
+          {!isRawDatasetAsset && (
+            <>
+              {/* Shared: Branch label */}
+              <Form.Item label="Branch Label">
+                <Input
+                  placeholder="e.g. Experiment A"
+                  value={node.branchName || ''}
+                  onChange={(e) => handleMetaChange('branchName', e.target.value)}
+                />
+              </Form.Item>
 
-          <Divider />
+              <Divider />
+            </>
+          )}
 
         {/* SOURCE CONFIG */}
         {node.type === 'SOURCE' && (
@@ -411,191 +572,121 @@ const PropertiesPanel = ({
               </>
             ) : (
               <>
-                <Form.Item label="Ingestion Mode">
-                  <Radio.Group
-                    value={ingestionMode}
-                    onChange={(e) => handleChange('ingestionMode', e.target.value)}
-                    style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}
-                  >
-                    <Radio.Button value="manual" style={{ width: '100%', textAlign: 'center' }}>
-                      Manual upload
-                    </Radio.Button>
-                    <Radio.Button value="inherited" style={{ width: '100%', textAlign: 'center' }}>
-                      Inherited table
-                    </Radio.Button>
-                  </Radio.Group>
-                </Form.Item>
-
-                {ingestionMode === 'manual' && (
+                {isRawDatasetAsset ? (
                   <>
-                    {/* Table selector (only if XLSX has multiple sheets) */}
-                    {dataModel.order.length > 1 && (
-                      <Form.Item label="Table">
-                        <Select
-                          value={node.params.table || dataModel.order[0]}
-                          onChange={(value) => handleChange('table', value)}
-                          options={dataModel.order.map((name) => ({ label: name, value: name }))}
-                          {...fullWidthSelect}
-                        />
-                      </Form.Item>
-                    )}
-
-                    {/* File ingestion controls */}
-                    <Form.Item label="Upload data (CSV or Excel)">
-                      <Space orientation="vertical" size="small" style={{ width: '100%' }}>
-                        <Space size="small" wrap>
-                          <Upload
-                            multiple
-                            accept=".csv,.xlsx,.xls"
-                            beforeUpload={() => false}
-                            showUploadList={false}
-                            onChange={({ fileList }) => {
-                              const files = fileList.map((file) => file.originFileObj).filter(Boolean);
-                              if (files.length) addPendingFiles(files);
-                            }}
-                          >
-                            <Button icon={<Plus size={14} />}>Select files</Button>
-                          </Upload>
-                          {showSampleButton && (
-                            <Button
-                              type="default"
-                              icon={<Database size={14} />}
-                              onClick={handleLoadSample}
-                              loading={isSampleLoading}
-                              disabled={isSampleLoading || sourceStatus?.loading}
-                            >
-                              Load sample
-                            </Button>
-                          )}
-                        </Space>
-                        <Text type="secondary" className="text-xs">
-                          Tip: uploading files replaces the data model feeding the chain.
-                        </Text>
-                        <Text type="secondary" className="text-xs">
-                          Max {MAX_UPLOAD_MB} MB per file / {MAX_UPLOAD_MB} MB total. Selected: {totalPendingMb} MB.
-                        </Text>
-                        {uploadError && (
-                          <Text type="danger" className="text-xs">
-                            {uploadError}
-                          </Text>
-                        )}
-                      </Space>
+                    <Form.Item label="Ingestion Mode">
+                      <Radio.Group
+                        value={rawIngestionMode}
+                        onChange={(e) => handleChange('ingestionMode', e.target.value)}
+                        style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}
+                      >
+                        <Radio.Button value="manual" style={{ width: '100%', textAlign: 'center' }}>
+                          Manual upload
+                        </Radio.Button>
+                        <Radio.Button value="api" style={{ width: '100%', textAlign: 'center' }} disabled>
+                          API connection
+                        </Radio.Button>
+                      </Radio.Group>
+                      <Text type="secondary" className="text-xs">
+                        API connections are coming soon.
+                      </Text>
                     </Form.Item>
 
-                    {currentFiles.length > 0 && (
-                      <Card size="small" title="Pending Files">
-                        <Space orientation="vertical" size="small" style={{ width: '100%' }}>
-                          {currentFiles.map((file, idx) => (
-                            <div key={`pending-${file.name}-${idx}`} className="flex items-center justify-between gap-2">
-                              <div className="min-w-0">
-                                <Text ellipsis className="block truncate">
-                                  {file.name}
-                                </Text>
-                                <Text type="secondary" className="text-xs">
-                                  {Math.round(file.size / 1024)} KB
-                                </Text>
-                              </div>
-                              <Button
-                                key={`remove-${file.name}-${idx}`}
-                                type="text"
-                                danger
-                                size="small"
-                                onClick={() => removePendingFile(idx)}
-                              >
-                                Remove
-                              </Button>
-                            </div>
-                          ))}
-                        </Space>
-                        <Button type="link" size="small" onClick={clearPendingFiles}>
-                          Clear all
-                        </Button>
+                    {rawIngestionMode === 'manual' ? (
+                      renderManualIngestionControls()
+                    ) : (
+                      <Card size="small">
+                        <Text type="secondary" className="text-xs">
+                          API connections are not available yet. Manual upload is supported today.
+                        </Text>
                       </Card>
                     )}
+                  </>
+                ) : (
+                  <>
+                    <Form.Item label="Ingestion Mode">
+                      <Radio.Group
+                        value={ingestionMode}
+                        onChange={(e) => handleChange('ingestionMode', e.target.value)}
+                        style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}
+                      >
+                        <Radio.Button value="manual" style={{ width: '100%', textAlign: 'center' }}>
+                          Manual upload
+                        </Radio.Button>
+                        <Radio.Button value="inherited" style={{ width: '100%', textAlign: 'center' }}>
+                          Inherited table
+                        </Radio.Button>
+                      </Radio.Group>
+                    </Form.Item>
 
-                    <Button
-                      type="primary"
-                      block
-                      onClick={() => onIngest && onIngest()}
-                      disabled={currentFiles.length === 0 || sourceStatus?.loading}
-                      loading={sourceStatus?.loading}
-                    >
-                      {sourceStatus?.loading ? 'Ingesting…' : 'Ingest Data'}
-                    </Button>
+                    {ingestionMode === 'manual' && renderManualIngestionControls()}
 
-                    {/* Status + progress */}
-                    <Card size="small">
-                      <Space align="start">
-                        <Database size={18} className={isSourceError ? 'text-red-500' : 'text-blue-600'} />
-                        <Space orientation="vertical" size={0}>
-                          <Text strong type={isSourceError ? 'danger' : undefined}>
-                            {sourceStatus?.title || 'No dataset loaded'}
-                          </Text>
+                    {ingestionMode === 'inherited' && (
+                      <>
+                        <Form.Item label="Inherited table">
+                          <Select
+                            value={inheritedTable || ''}
+                            onChange={(value) => handleChange('inheritedTable', value)}
+                            options={[
+                              { label: 'Select table...', value: '' },
+                              ...datasetTables.map((table) => ({
+                                label: table.label,
+                                value: table.name
+                              })),
+                              ...(inheritedTable && !datasetTables.some((table) => table.name === inheritedTable)
+                                ? [{ label: inheritedLabel || inheritedTable, value: inheritedTable }]
+                                : [])
+                            ]}
+                            {...fullWidthSelect}
+                          />
+                        </Form.Item>
+                        {datasetTables.length === 0 && (
                           <Text type="secondary" className="text-xs">
-                            {sourceStatus?.detail || 'Upload a CSV or Excel file to get started.'}
+                            No datasets available yet. Save a dataset or asset output to reuse it here.
                           </Text>
-                        </Space>
-                      </Space>
-                    </Card>
-                    {sourceStatus?.loading && <Progress percent={100} showInfo={false} status="active" />}
-
-                    {dataModel.order.length > 0 && (
-                      <Button danger block onClick={() => onClearData && onClearData()}>
-                        Clear data
-                      </Button>
+                        )}
+                        <Card size="small">
+                          <Space align="start">
+                            <Database size={18} className={inheritedTable ? 'text-blue-600' : 'text-slate-400'} />
+                            <Space orientation="vertical" size={0}>
+                              <Text strong>
+                                {inheritedTable ? 'Inherited table connected' : 'Select an inherited table'}
+                              </Text>
+                              <Text type="secondary" className="text-xs">
+                                {inheritedTable
+                                  ? `Using ${inheritedLabel || inheritedTable} from another asset.`
+                                  : 'Pick a saved dataset or asset output to start here.'}
+                              </Text>
+                            </Space>
+                          </Space>
+                        </Card>
+                      </>
                     )}
-
-                    <Button
-                      type="default"
-                      block
-                      icon={<Database size={14} />}
-                      onClick={() => onShowDataModel && onShowDataModel()}
-                      disabled={dataModel.order.length === 0}
-                    >
-                      Preview Data Model
-                    </Button>
                   </>
                 )}
 
-                {ingestionMode === 'inherited' && (
+                {assetType === 'rawDataset' && schema.length > 0 && (
                   <>
-                    <Form.Item label="Inherited table">
-                      <Select
-                        value={inheritedTable || ''}
-                        onChange={(value) => handleChange('inheritedTable', value)}
-                        options={[
-                          { label: 'Select table...', value: '' },
-                          ...datasetTables.map((table) => ({
-                            label: table.label,
-                            value: table.name
-                          })),
-                          ...(inheritedTable && !datasetTables.some((table) => table.name === inheritedTable)
-                            ? [{ label: inheritedLabel || inheritedTable, value: inheritedTable }]
-                            : [])
-                        ]}
-                        {...fullWidthSelect}
+                    <Divider />
+                    <Form.Item label="Visible Columns">
+                      <Checkbox.Group
+                        value={rawDatasetColumns}
+                        onChange={(values) => handleChange('visibleColumns', values)}
+                        options={schema.map((field) => ({ label: field, value: field }))}
+                        style={{ maxHeight: 200, overflowY: 'auto', display: 'grid', gap: 4 }}
                       />
-                    </Form.Item>
-                    {datasetTables.length === 0 && (
-                      <Text type="secondary" className="text-xs">
-                        No datasets from other explorations yet. Save a dataset to reuse it here.
-                      </Text>
-                    )}
-                    <Card size="small">
-                      <Space align="start">
-                        <Database size={18} className={inheritedTable ? 'text-blue-600' : 'text-slate-400'} />
-                        <Space orientation="vertical" size={0}>
-                          <Text strong>
-                            {inheritedTable ? 'Inherited table connected' : 'Select an inherited table'}
-                          </Text>
-                          <Text type="secondary" className="text-xs">
-                            {inheritedTable
-                              ? `Using ${inheritedLabel || inheritedTable} from another exploration.`
-                              : 'Pick a saved end node from another exploration to start here.'}
-                          </Text>
-                        </Space>
+                      <Space size="small" style={{ marginTop: 8 }}>
+                        <Button type="link" size="small" onClick={() => handleChange('visibleColumns', schema)}>
+                          Select All
+                        </Button>
+                        <Button type="link" size="small" onClick={() => handleChange('visibleColumns', [])}>
+                          Clear All
+                        </Button>
                       </Space>
-                    </Card>
+                      <Text type="secondary" className="text-xs">
+                        Hidden columns will be removed from the saved dataset.
+                      </Text>
+                    </Form.Item>
                   </>
                 )}
               </>
@@ -651,7 +742,7 @@ const PropertiesPanel = ({
                         options: localTables.map((table) => ({ label: table.label, value: table.name }))
                       }] : []),
                       ...(externalTables.length > 0 ? [{
-                        label: 'Other explorations',
+                        label: 'Other assets',
                         options: externalTables.map((table) => ({
                           label: table.isDataset ? `${table.label} (dataset)` : table.label,
                           value: table.name

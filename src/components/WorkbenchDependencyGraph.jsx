@@ -61,6 +61,8 @@ const GRAPH_ROW_GAP = GRAPH_CARD_COLLAPSED_HEIGHT + GRAPH_VERTICAL_GAP;
 const GRAPH_BASE_OFFSET = { x: 80, y: 80 };
 const GRAPH_LAYOUT_STORAGE_KEY = 'nma-workbench-graph-layout-v1';
 const GRAPH_LAYOUT_STORAGE_VERSION = 1;
+const GRAPH_EXPANDED_STORAGE_KEY = 'nma-workbench-graph-expanded-v1';
+const GRAPH_EXPANDED_STORAGE_VERSION = 1;
 
 const clampScale = (value) => Math.min(GRAPH_MAX_SCALE, Math.max(GRAPH_MIN_SCALE, value));
 
@@ -104,13 +106,41 @@ const writeStoredGraphPositions = (positions) => {
   }
 };
 
+const readStoredExpandedNodeIds = () => {
+  if (typeof window === 'undefined' || !window.localStorage) return null;
+  try {
+    const raw = window.localStorage.getItem(GRAPH_EXPANDED_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    const payload = Array.isArray(parsed?.ids) ? parsed.ids : (Array.isArray(parsed) ? parsed : []);
+    const ids = payload.filter((id) => typeof id === 'string' && id.trim());
+    return new Set(ids);
+  } catch (err) {
+    return null;
+  }
+};
+
+const writeStoredExpandedNodeIds = (ids) => {
+  if (typeof window === 'undefined' || !window.localStorage) return false;
+  try {
+    const list = Array.from(ids || []).filter((id) => typeof id === 'string' && id.trim());
+    window.localStorage.setItem(
+      GRAPH_EXPANDED_STORAGE_KEY,
+      JSON.stringify({ version: GRAPH_EXPANDED_STORAGE_VERSION, ids: list })
+    );
+    return true;
+  } catch (err) {
+    return false;
+  }
+};
+
 const buildDefaultGraphLayout = (nodes, edges, expandedNodeIds) => {
   const positions = {};
   if (!Array.isArray(nodes) || nodes.length === 0) return positions;
 
-  const explorationNodes = nodes.filter((node) => node.type === 'exploration');
+  const assetNodes = nodes.filter((node) => node.type !== 'dataset');
   const datasetNodes = nodes.filter((node) => node.type === 'dataset');
-  const explorationOrder = [...explorationNodes].sort((a, b) => (
+  const explorationOrder = [...assetNodes].sort((a, b) => (
     (b.updatedAt || '').localeCompare(a.updatedAt || '') || a.title.localeCompare(b.title)
   ));
   const explorationIndex = new Map(explorationOrder.map((node, idx) => [node.id, idx]));
@@ -337,11 +367,11 @@ const WorkbenchDependencyGraph = ({
   edges = [],
   anchorsByNodeId = {},
   placementHints = {},
-  onOpenExploration,
+  onOpenAsset,
   onOpenDataset,
   onFlattenDataset,
-  onDuplicateExploration,
-  onDeleteExploration,
+  onDuplicateAsset,
+  onDeleteAsset,
   onDuplicateDataset,
   onDeleteDataset,
   className = ''
@@ -351,7 +381,17 @@ const WorkbenchDependencyGraph = ({
   const viewportRef = React.useRef(viewport);
   const [isPanning, setIsPanning] = React.useState(false);
   const [isDragging, setIsDragging] = React.useState(false);
-  const [expandedNodeIds, setExpandedNodeIds] = React.useState(() => new Set());
+  const [expandedNodeIds, setExpandedNodeIds] = React.useState(() => (
+    readStoredExpandedNodeIds() || new Set()
+  ));
+  const expandableNodes = React.useMemo(
+    () => nodes.filter((node) => node.type !== 'rawDataset' && node.type !== 'sql'),
+    [nodes]
+  );
+  const expandableNodeIds = React.useMemo(
+    () => new Set(expandableNodes.map((node) => node.id)),
+    [expandableNodes]
+  );
   const panStateRef = React.useRef(null);
   const dragStateRef = React.useRef(null);
   const dragFrameRef = React.useRef(null);
@@ -471,6 +511,23 @@ const WorkbenchDependencyGraph = ({
     }, 200);
     return () => window.clearTimeout(timeout);
   }, [nodePositions, nodes]);
+
+  React.useEffect(() => {
+    if (!Array.isArray(nodes)) return;
+    const idSet = new Set(nodes.map((node) => node.id));
+    setExpandedNodeIds((prev) => {
+      const next = new Set(Array.from(prev).filter((id) => idSet.has(id) && expandableNodeIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [nodes, expandableNodeIds]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !window.localStorage) return undefined;
+    const timeout = window.setTimeout(() => {
+      writeStoredExpandedNodeIds(expandedNodeIds);
+    }, 200);
+    return () => window.clearTimeout(timeout);
+  }, [expandedNodeIds]);
 
   const minimapLayouts = React.useMemo(() => {
     const map = new Map();
@@ -704,17 +761,17 @@ const WorkbenchDependencyGraph = ({
   }, []);
 
   const isAllExpanded = React.useMemo(() => (
-    nodes.length > 0 && nodes.every((node) => expandedNodeIds.has(node.id))
-  ), [nodes, expandedNodeIds]);
+    expandableNodes.length > 0 && expandableNodes.every((node) => expandedNodeIds.has(node.id))
+  ), [expandableNodes, expandedNodeIds]);
 
   const handleToggleExpandAll = React.useCallback(() => {
     setExpandedNodeIds((prev) => {
-      if (!Array.isArray(nodes) || nodes.length === 0) return new Set();
-      const allExpanded = nodes.every((node) => prev.has(node.id));
+      if (expandableNodes.length === 0) return new Set();
+      const allExpanded = expandableNodes.every((node) => prev.has(node.id));
       if (allExpanded) return new Set();
-      return new Set(nodes.map((node) => node.id));
+      return new Set(expandableNodes.map((node) => node.id));
     });
-  }, [nodes]);
+  }, [expandableNodes]);
 
   return (
     <div
@@ -733,10 +790,15 @@ const WorkbenchDependencyGraph = ({
       >
         {nodes.map((node) => {
           const position = resolveNodePosition(node.id) || { x: GRAPH_BASE_OFFSET.x, y: GRAPH_BASE_OFFSET.y };
-          const isExpanded = expandedNodeIds.has(node.id);
+          const isExpandable = node.type !== 'rawDataset' && node.type !== 'sql';
+          const isExpanded = isExpandable && expandedNodeIds.has(node.id);
           const layout = minimapLayouts.get(node.id);
           const anchors = anchorsByNodeId[node.id] || {};
-          const isFlattenedDataset = node.type === 'dataset' && node.datasetEntry?.isFlattened === true;
+          const isDatasetNode = node.type === 'dataset';
+          const isRawDatasetNode = node.type === 'rawDataset';
+          const isSqlNode = node.type === 'sql';
+          const isAssetNode = !isDatasetNode;
+          const isFlattenedDataset = isDatasetNode && node.datasetEntry?.isFlattened === true;
           const anchorIds = Object.keys(anchors);
           const linkCount = anchorIds.reduce((sum, anchorId) => (
             sum + (anchors[anchorId]?.incoming || 0) + (anchors[anchorId]?.outgoing || 0)
@@ -745,11 +807,15 @@ const WorkbenchDependencyGraph = ({
             ? `Updated ${new Date(node.updatedAt).toLocaleDateString()}`
             : 'Updated just now';
 
-          const cardToneClass = node.type === 'dataset'
+          const cardToneClass = isDatasetNode
             ? 'border-emerald-200/70 dark:border-emerald-700/60 bg-white/95 dark:bg-slate-900/90'
-            : 'border-slate-200/70 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80';
+            : isRawDatasetNode
+              ? 'border-blue-300/80 dark:border-blue-600/70 bg-blue-50/80 dark:bg-blue-950/30'
+              : isSqlNode
+                ? 'border-fuchsia-300/80 dark:border-fuchsia-600/70 bg-fuchsia-50/80 dark:bg-fuchsia-950/30'
+                : 'border-slate-200/70 dark:border-slate-800 bg-white/90 dark:bg-slate-900/80';
           const cardMenuItems = [];
-          if (node.type === 'dataset' && onFlattenDataset) {
+          if (isDatasetNode && onFlattenDataset) {
             cardMenuItems.push({
               key: 'flatten',
               label: isFlattenedDataset ? 'Flattened' : 'Flatten dataset',
@@ -767,17 +833,17 @@ const WorkbenchDependencyGraph = ({
                 onFlattenDataset?.(node.datasetEntry);
               }
               if (key === 'duplicate') {
-                if (node.type === 'exploration') {
-                  onDuplicateExploration?.(node.explorationId, node.id);
-                } else {
+                if (isDatasetNode) {
                   onDuplicateDataset?.(node.datasetEntry, node.id);
+                } else {
+                  onDuplicateAsset?.(node.assetId, node.id);
                 }
               }
               if (key === 'delete') {
-                if (node.type === 'exploration') {
-                  onDeleteExploration?.(node.explorationId);
-                } else {
+                if (isDatasetNode) {
                   onDeleteDataset?.(node.datasetEntry);
+                } else {
+                  onDeleteAsset?.(node.assetId);
                 }
               }
             }
@@ -801,9 +867,19 @@ const WorkbenchDependencyGraph = ({
                         {node.title}
                       </div>
                       <div className="flex items-center gap-1">
-                        {node.type === 'dataset' && (
+                        {isDatasetNode && (
                           <Tag color="green" variant="filled" className="rounded-full px-2 text-[10px]">
                             {isFlattenedDataset ? 'Flattened dataset' : 'Dataset'}
+                          </Tag>
+                        )}
+                        {isRawDatasetNode && (
+                          <Tag color="blue" variant="filled" className="rounded-full px-2 text-[10px]">
+                            Raw dataset
+                          </Tag>
+                        )}
+                        {isSqlNode && (
+                          <Tag color="purple" variant="filled" className="rounded-full px-2 text-[10px]">
+                            SQL
                           </Tag>
                         )}
                         <Dropdown menu={cardMenu} trigger={['click']} placement="bottomRight">
@@ -854,32 +930,36 @@ const WorkbenchDependencyGraph = ({
                       type="default"
                       onClick={(event) => {
                         event.stopPropagation();
-                        if (node.type === 'exploration') {
-                          onOpenExploration?.(node.explorationId);
-                        } else {
+                        if (isDatasetNode) {
                           onOpenDataset?.(node.datasetEntry);
+                        } else {
+                          onOpenAsset?.(node.assetId, node.type);
                         }
                       }}
                       onPointerDown={(event) => event.stopPropagation()}
                     >
-                      {node.type === 'dataset' ? 'Open Dataset' : 'Open Exploration'}
+                      {isDatasetNode
+                        ? 'Open Dataset'
+                        : (isRawDatasetNode ? 'Open Raw Dataset' : (isSqlNode ? 'Open SQL Transformation' : 'Open Exploration'))}
                     </Button>
-                    <Button
-                      size="small"
-                      type="text"
-                      icon={isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleExpand(node.id);
-                      }}
-                      onPointerDown={(event) => event.stopPropagation()}
-                    >
-                      {isExpanded ? 'Collapse' : 'Expand'}
-                    </Button>
+                    {isExpandable && (
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleExpand(node.id);
+                        }}
+                        onPointerDown={(event) => event.stopPropagation()}
+                      >
+                        {isExpanded ? 'Collapse' : 'Expand'}
+                      </Button>
+                    )}
                   </div>
                 </div>
 
-                {isExpanded && (
+                {isExpanded && isExpandable && (
                   <div style={{ padding: `0 ${GRAPH_CARD_PADDING}px ${GRAPH_CARD_PADDING}px` }}>
                     <div className="flex items-center justify-between text-[11px] text-slate-400 pb-2">
                       <span>{updatedLabel}</span>

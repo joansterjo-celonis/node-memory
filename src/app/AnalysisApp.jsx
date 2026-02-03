@@ -7,7 +7,9 @@ import { PropertiesPanel } from '../components/PropertiesPanel';
 import HelpModal from '../components/HelpModal';
 import { GraphMinimapPanel } from '../components/GraphMinimapPanel';
 import WorkbenchDependencyGraph from '../components/WorkbenchDependencyGraph';
-import { TreeNode, FreeLayoutCanvas } from '../components/TreeNode';
+import ExplorationAssetView from './assets/ExplorationAssetView';
+import RawDatasetAssetView from './assets/RawDatasetAssetView';
+import SqlTransformationAssetView from './assets/SqlTransformationAssetView';
 import {
   Layout,
   LayoutClassic,
@@ -57,11 +59,64 @@ const createInitialNodes = () => ([
   }
 ]);
 
+const createInitialSqlNodes = () => ([
+  {
+    id: 'node-start',
+    parentId: null,
+    type: 'SOURCE',
+    title: 'Select Input',
+    description: 'Choose a dataset to transform',
+    branchName: 'Main',
+    isExpanded: true,
+    params: {
+      table: null,
+      __files: [],
+      ingestionMode: 'inherited',
+      inheritedTable: ''
+    }
+  },
+  {
+    id: 'node-sql',
+    parentId: 'node-start',
+    type: 'JOIN',
+    title: 'SQL Transformation',
+    description: 'Write custom SQL to transform the data',
+    branchName: 'Main',
+    isExpanded: true,
+    params: {
+      sqlMode: 'custom',
+      sqlText: '',
+      joinType: 'LEFT',
+      leftKey: '',
+      rightKey: '',
+      rightTable: ''
+    }
+  }
+]);
+
 const TABLE_DENSITY_STORAGE_KEY = 'nma-table-density';
 const DEFAULT_TABLE_DENSITY = 'comfortable';
 const DEFAULT_ENTANGLED_COLOR = '#facc15';
 const DEFAULT_INGESTION_MODE = 'manual';
 const DEFAULT_SQL_MODE = 'visual';
+const ASSET_TYPES = {
+  EXPLORATION: 'exploration',
+  RAW_DATASET: 'rawDataset',
+  SQL: 'sql'
+};
+const VALID_ASSET_TYPES = new Set(Object.values(ASSET_TYPES));
+function normalizeExplorationName(value, fallback = 'Exploration') {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed || fallback;
+}
+function resolveAssetFallbackName(assetType) {
+  if (assetType === ASSET_TYPES.RAW_DATASET) return 'Raw dataset';
+  if (assetType === ASSET_TYPES.SQL) return 'SQL transformation';
+  return 'Exploration';
+}
+function resolveAssetType(asset) {
+  return VALID_ASSET_TYPES.has(asset?.assetType) ? asset.assetType : ASSET_TYPES.EXPLORATION;
+}
 const SESSION_STORAGE_KEY = 'nma-session-v1';
 const SESSION_VERSION = 1;
 const VALID_VIEW_MODES = new Set(['canvas', 'landing']);
@@ -193,6 +248,9 @@ const readSessionState = () => {
     const landingViewMode = VALID_LANDING_VIEW_MODES.has(parsed.landingViewMode)
       ? parsed.landingViewMode
       : 'cards';
+    const activeAssetType = VALID_ASSET_TYPES.has(parsed.activeAssetType)
+      ? parsed.activeAssetType
+      : ASSET_TYPES.EXPLORATION;
     const dataModel = parsed.dataModel
       && typeof parsed.dataModel === 'object'
       && parsed.dataModel.tables
@@ -220,7 +278,8 @@ const readSessionState = () => {
         : getDefaultStatsPanelRect(),
       isPropertiesCollapsed: parsed.isPropertiesCollapsed === true,
       showDataModel: parsed.showDataModel === true,
-      activeExplorationId: typeof parsed.activeExplorationId === 'string' ? parsed.activeExplorationId : null
+      activeExplorationId: typeof parsed.activeExplorationId === 'string' ? parsed.activeExplorationId : null,
+      activeAssetType
     };
   } catch (err) {
     return null;
@@ -330,6 +389,32 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const [dataModelSorts, setDataModelSorts] = useState(initialSession?.dataModelSorts ?? {});
   const [explorations, setExplorations] = useState([]);
   const [activeExplorationId, setActiveExplorationId] = useState(initialSession?.activeExplorationId ?? null);
+  const [activeAssetType, setActiveAssetType] = useState(
+    initialSession?.activeAssetType ?? ASSET_TYPES.EXPLORATION
+  );
+  const [sqlDraftText, setSqlDraftText] = useState('');
+  const [sqlDraftInput, setSqlDraftInput] = useState('');
+  const [sqlDraftError, setSqlDraftError] = useState('');
+  const [sqlDraftMode, setSqlDraftMode] = useState('custom');
+  const [sqlDraftJoinType, setSqlDraftJoinType] = useState('LEFT');
+  const [sqlDraftRightTable, setSqlDraftRightTable] = useState('');
+  const [sqlDraftLeftKey, setSqlDraftLeftKey] = useState('');
+  const [sqlDraftRightKey, setSqlDraftRightKey] = useState('');
+
+  useEffect(() => {
+    if (activeAssetType !== ASSET_TYPES.SQL) return;
+    const sourceNode = nodes.find((node) => node.type === 'SOURCE');
+    const sqlNode = nodes.find((node) => node.type === 'JOIN');
+    const nextParams = sqlNode?.params || {};
+    setSqlDraftText(nextParams?.sqlText || '');
+    setSqlDraftInput(sourceNode?.params?.inheritedTable || '');
+    setSqlDraftMode(nextParams?.sqlMode || 'custom');
+    setSqlDraftJoinType(nextParams?.joinType || 'LEFT');
+    setSqlDraftRightTable(nextParams?.rightTable || '');
+    setSqlDraftLeftKey(nextParams?.leftKey || '');
+    setSqlDraftRightKey(nextParams?.rightKey || '');
+    setSqlDraftError('');
+  }, [activeAssetType, activeExplorationId, historyIndex]);
   const [draftExplorationName, setDraftExplorationName] = useState(null);
   const [draftExplorationDescription, setDraftExplorationDescription] = useState(null);
   const [editingExplorationId, setEditingExplorationId] = useState(null);
@@ -646,13 +731,28 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const resolveNodeTitle = (parentId, branchName, fallbackTitle) => fallbackTitle;
 
   const EXPLORATION_STORAGE_KEY = 'nma-explorations';
+  const normalizeAssetEntry = (entry) => {
+    if (!entry || typeof entry !== 'object') return entry;
+    const hasRawSnapshot = !!entry.datasetSnapshot;
+    const hasSqlSnapshot = !!entry.sqlSnapshot || !!entry.sqlText || !!entry.sqlInputTable;
+    let inferred = null;
+    if (hasRawSnapshot) inferred = ASSET_TYPES.RAW_DATASET;
+    if (hasSqlSnapshot) inferred = ASSET_TYPES.SQL;
+    const existingType = VALID_ASSET_TYPES.has(entry.assetType) ? entry.assetType : null;
+    let resolved = existingType || inferred || ASSET_TYPES.EXPLORATION;
+    if (inferred && (!existingType || existingType === ASSET_TYPES.EXPLORATION)) {
+      resolved = inferred;
+    }
+    if (resolved === entry.assetType) return entry;
+    return { ...entry, assetType: resolved };
+  };
   const loadExplorations = () => {
     if (typeof window === 'undefined' || !window.localStorage) return [];
     try {
       const raw = window.localStorage.getItem(EXPLORATION_STORAGE_KEY);
       if (!raw) return [];
       const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
+      return Array.isArray(parsed) ? parsed.map(normalizeAssetEntry) : [];
     } catch (err) {
       return [];
     }
@@ -666,6 +766,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   useEffect(() => {
     setExplorations(loadExplorations());
   }, []);
+
+  useEffect(() => {
+    if (!activeExplorationId) return;
+    const target = explorations.find((item) => item.id === activeExplorationId);
+    if (!target) return;
+    const nextType = resolveAssetType(target);
+    if (nextType !== activeAssetType) {
+      setActiveAssetType(nextType);
+    }
+  }, [activeExplorationId, activeAssetType, explorations, resolveAssetType]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.localStorage) return undefined;
@@ -688,7 +798,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         statsPanelRect,
         isPropertiesCollapsed,
         showDataModel,
-        activeExplorationId
+        activeExplorationId,
+        activeAssetType
       };
       writeSessionState(snapshot);
     }, 300);
@@ -709,7 +820,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     statsPanelRect,
     isPropertiesCollapsed,
     showDataModel,
-    activeExplorationId
+    activeExplorationId,
+    activeAssetType
   ]);
 
   useEffect(() => {
@@ -985,10 +1097,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const allByName = {};
     const allList = [];
     const datasets = [];
+    const assetTables = [];
+    const rawDatasetEntries = [];
+    const sqlAssetEntries = [];
     const legacyUsedNames = new Set();
     const explorationMetaList = [];
+    const explorationAssets = (explorations || []).filter((exp) => resolveAssetType(exp) === ASSET_TYPES.EXPLORATION);
+    const rawDatasetAssets = (explorations || []).filter((exp) => resolveAssetType(exp) === ASSET_TYPES.RAW_DATASET);
+    const sqlAssets = (explorations || []).filter((exp) => resolveAssetType(exp) === ASSET_TYPES.SQL);
 
-    (explorations || []).forEach((exp) => {
+    explorationAssets.forEach((exp) => {
       if (!exp) return;
       const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
       if (nodesList.length === 0) return;
@@ -1034,6 +1152,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           rows: resolvedRows,
           schema: resolvedSchema,
           rowCount: resolvedRowCount,
+          assetType: ASSET_TYPES.EXPLORATION,
+          assetId: exp.id,
           explorationId: exp.id,
           explorationName: displayExpName,
           explorationDescription: exp.description || '',
@@ -1050,8 +1170,119 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           allByName[legacyName] = entry;
         }
         allList.push(entry);
-        if (entry.isDataset) datasets.push(entry);
+        if (entry.isDataset) {
+          datasets.push(entry);
+          assetTables.push(entry);
+        }
       });
+    });
+
+    const registerEntry = (entry) => {
+      if (!entry || !entry.name) return;
+      allByName[entry.name] = entry;
+      if (entry.legacyName && !allByName[entry.legacyName]) {
+        allByName[entry.legacyName] = entry;
+      }
+      allList.push(entry);
+    };
+
+    rawDatasetAssets.forEach((asset) => {
+      if (!asset?.id) return;
+      const nodesList = Array.isArray(asset.nodes) ? asset.nodes : [];
+      const sourceNode = nodesList.find((node) => node.type === 'SOURCE') || nodesList[0];
+      const snapshot = asset.datasetSnapshot || {};
+      const rows = Array.isArray(snapshot.rows) ? snapshot.rows : [];
+      const schema = Array.isArray(snapshot.schema)
+        ? snapshot.schema
+        : (rows.length > 0 ? Object.keys(rows[0] || {}) : []);
+      const rowCount = Number.isFinite(snapshot.rowCount) ? snapshot.rowCount : rows.length;
+      const label = asset.name || asset.rawDataName || 'Raw dataset';
+      const nodeId = sourceNode?.id || 'node-start';
+      const entry = {
+        name: buildStableExternalTableName(asset.id, nodeId),
+        legacyName: null,
+        label,
+        rows,
+        schema,
+        rowCount,
+        assetType: ASSET_TYPES.RAW_DATASET,
+        assetId: asset.id,
+        assetName: asset.name || '',
+        assetDescription: asset.description || '',
+        assetUpdatedAt: asset.updatedAt,
+        nodeId,
+        nodeTitle: label,
+        isDataset: true,
+        isFlattened: true,
+        datasetName: label
+      };
+      registerEntry(entry);
+      assetTables.push(entry);
+      rawDatasetEntries.push(entry);
+
+      const model = asset.dataModel || { tables: {}, order: [] };
+      const tableOrder = Array.isArray(model.order) ? model.order : [];
+      if (tableOrder.length > 1) {
+        tableOrder.forEach((tableName) => {
+          const tableRows = Array.isArray(model.tables?.[tableName]) ? model.tables[tableName] : [];
+          const tableSchema = tableRows.length > 0 ? Object.keys(tableRows[0] || {}) : [];
+          const tableEntry = {
+            name: buildStableExternalTableName(asset.id, `table_${tableName}`),
+            legacyName: null,
+            label: `${label} / ${tableName}`,
+            rows: tableRows,
+            schema: tableSchema,
+            rowCount: tableRows.length,
+            assetType: ASSET_TYPES.RAW_DATASET,
+            assetId: asset.id,
+            assetName: asset.name || '',
+            assetDescription: asset.description || '',
+            assetUpdatedAt: asset.updatedAt,
+            nodeId: `table:${tableName}`,
+            nodeTitle: tableName,
+            isDataset: false,
+            isFlattened: true,
+            isAssetTable: true,
+            datasetName: tableName
+          };
+          registerEntry(tableEntry);
+        });
+      }
+    });
+
+    sqlAssets.forEach((asset) => {
+      if (!asset?.id) return;
+      const nodesList = Array.isArray(asset.nodes) ? asset.nodes : [];
+      const sqlNode = nodesList.find((node) => node.type === 'JOIN') || nodesList[0];
+      const nodeId = sqlNode?.id || 'node-sql';
+      const snapshot = asset.sqlSnapshot || {};
+      const rows = Array.isArray(snapshot.rows) ? snapshot.rows : [];
+      const schema = Array.isArray(snapshot.schema)
+        ? snapshot.schema
+        : (rows.length > 0 ? Object.keys(rows[0] || {}) : []);
+      const rowCount = Number.isFinite(snapshot.rowCount) ? snapshot.rowCount : rows.length;
+      const label = asset.name || 'SQL transformation';
+      const entry = {
+        name: buildStableExternalTableName(asset.id, nodeId),
+        legacyName: null,
+        label,
+        rows,
+        schema,
+        rowCount,
+        assetType: ASSET_TYPES.SQL,
+        assetId: asset.id,
+        assetName: asset.name || '',
+        assetDescription: asset.description || '',
+        assetUpdatedAt: asset.updatedAt,
+        nodeId,
+        nodeTitle: label,
+        isDataset: true,
+        isFlattened: true,
+        datasetName: label
+      };
+      registerEntry(entry);
+      assetTables.push(entry);
+      sqlAssetEntries.push(entry);
     });
 
     const entryByKey = new Map();
@@ -1065,9 +1296,13 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       name,
       entry
     }));
-    const buildSqlMatchers = (expId) => (
+    const getEntryOwnerId = (entry) => entry?.assetId || entry?.explorationId || null;
+    const buildSqlMatchers = (ownerId) => (
       externalNameEntries
-        .filter(({ entry }) => entry?.explorationId && entry.explorationId !== expId)
+        .filter(({ entry }) => {
+          const entryOwnerId = getEntryOwnerId(entry);
+          return entryOwnerId && entryOwnerId !== ownerId;
+        })
         .map(({ name, entry }) => ({
           entry,
           regex: new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i')
@@ -1089,14 +1324,18 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           return;
         }
         const depsByKey = new Map();
+        const addDependency = (depEntry) => {
+          if (!depEntry?.name) return;
+          const depOwnerId = getEntryOwnerId(depEntry);
+          if (!depOwnerId || depOwnerId === exp.id) return;
+          depsByKey.set(depEntry.name, depEntry);
+        };
         let current = leaf;
         while (current) {
           if (current.type === 'SOURCE' && current.params?.ingestionMode === 'inherited') {
             const tableName = current.params?.inheritedTable || '';
             const depEntry = tableName ? allByName[tableName] : null;
-            if (depEntry && depEntry.explorationId !== exp.id) {
-              depsByKey.set(`${depEntry.explorationId}:${depEntry.nodeId}`, depEntry);
-            }
+            addDependency(depEntry);
           }
           if (current.type === 'JOIN') {
             const sqlMode = current.params?.sqlMode || 'visual';
@@ -1105,16 +1344,14 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
               if (sqlText) {
                 sqlMatchers.forEach(({ entry: depEntry, regex }) => {
                   if (regex.test(sqlText)) {
-                    depsByKey.set(`${depEntry.explorationId}:${depEntry.nodeId}`, depEntry);
+                    addDependency(depEntry);
                   }
                 });
               }
             } else {
               const tableName = current.params?.rightTable || '';
               const depEntry = tableName ? allByName[tableName] : null;
-              if (depEntry && depEntry.explorationId !== exp.id) {
-                depsByKey.set(`${depEntry.explorationId}:${depEntry.nodeId}`, depEntry);
-              }
+              addDependency(depEntry);
             }
           }
           current = current.parentId ? nodesById.get(current.parentId) : null;
@@ -1122,6 +1359,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         entry.dependencies = Array.from(depsByKey.values()).map((depEntry) => ({
           name: depEntry.name,
           label: depEntry.nodeTitle || depEntry.label,
+          assetType: depEntry.assetType,
+          assetId: depEntry.assetId || depEntry.explorationId,
           explorationName: depEntry.explorationName,
           explorationId: depEntry.explorationId,
           nodeId: depEntry.nodeId,
@@ -1140,8 +1379,9 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         if (node.type === 'SOURCE' && node.params?.ingestionMode === 'inherited') {
           const tableName = node.params?.inheritedTable || '';
           const depEntry = tableName ? allByName[tableName] : null;
-          if (depEntry && depEntry.explorationId !== exp.id) {
-            deps.add(depEntry.explorationId);
+          const depOwnerId = getEntryOwnerId(depEntry);
+          if (depOwnerId && depOwnerId !== exp.id) {
+            deps.add(depOwnerId);
           }
         }
         if (node.type === 'JOIN') {
@@ -1150,16 +1390,18 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
             const sqlText = String(node.params?.sqlText || '');
             if (sqlText) {
               sqlMatchers.forEach(({ entry: depEntry, regex }) => {
-                if (regex.test(sqlText) && depEntry.explorationId !== exp.id) {
-                  deps.add(depEntry.explorationId);
+                const depOwnerId = getEntryOwnerId(depEntry);
+                if (regex.test(sqlText) && depOwnerId && depOwnerId !== exp.id) {
+                  deps.add(depOwnerId);
                 }
               });
             }
           } else {
             const tableName = node.params?.rightTable || '';
             const depEntry = tableName ? allByName[tableName] : null;
-            if (depEntry && depEntry.explorationId !== exp.id) {
-              deps.add(depEntry.explorationId);
+            const depOwnerId = getEntryOwnerId(depEntry);
+            if (depOwnerId && depOwnerId !== exp.id) {
+              deps.add(depOwnerId);
             }
           }
         }
@@ -1236,7 +1478,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         });
       });
 
-    const externalList = allList.filter((entry) => entry.explorationId !== activeExplorationId);
+    const externalList = allList.filter((entry) => {
+      const ownerId = getEntryOwnerId(entry);
+      return ownerId ? ownerId !== activeExplorationId : true;
+    });
     const externalByName = externalList.reduce((acc, entry) => {
       acc[entry.name] = entry;
       if (entry.legacyName && !acc[entry.legacyName]) {
@@ -1247,10 +1492,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     allList.sort((a, b) => a.label.localeCompare(b.label));
     externalList.sort((a, b) => a.label.localeCompare(b.label));
     datasets.sort((a, b) => (b.explorationUpdatedAt || '').localeCompare(a.explorationUpdatedAt || ''));
+    assetTables.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+    rawDatasetEntries.sort((a, b) => (b.assetUpdatedAt || '').localeCompare(a.assetUpdatedAt || ''));
+    sqlAssetEntries.sort((a, b) => (b.assetUpdatedAt || '').localeCompare(a.assetUpdatedAt || ''));
     return {
       byName: externalByName,
       list: externalList,
       datasets,
+      assetTables,
+      rawDatasetEntries,
+      sqlAssetEntries,
       allList,
       allByName,
       dependenciesByExpId,
@@ -2055,6 +2306,74 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     updateNode(nodeId, { ...targetNode.params, tableSortBy: nextSortBy, tableSortDirection: nextSortDirection });
   };
 
+  const runSqlDraft = useCallback(() => {
+    const sourceNode = nodes.find((node) => node.type === 'SOURCE');
+    const sqlNode = nodes.find((node) => node.type === 'JOIN');
+    if (!sourceNode || !sqlNode) return;
+    const nextInput = String(sqlDraftInput || '').trim();
+    const nextSqlText = String(sqlDraftText || '').trim();
+    const nextMode = sqlDraftMode || 'custom';
+    if (!nextInput) {
+      setSqlDraftError('Select an input dataset to run SQL.');
+      return;
+    }
+    if (nextMode === 'custom' && !nextSqlText) {
+      setSqlDraftError('Enter a SQL query to run.');
+      return;
+    }
+    if (nextMode === 'visual') {
+      if (!sqlDraftRightTable) {
+        setSqlDraftError('Select a table to join.');
+        return;
+      }
+      if (!sqlDraftLeftKey || !sqlDraftRightKey) {
+        setSqlDraftError('Select join keys for both tables.');
+        return;
+      }
+    }
+    setSqlDraftError('');
+    const visualSqlPreview = `SELECT * FROM ${SQL_INCOMING_TABLE}\n${sqlDraftJoinType || 'LEFT'} JOIN ${sqlDraftRightTable || '?'}\nON ${SQL_INCOMING_TABLE}.${sqlDraftLeftKey || '?'} = ${sqlDraftRightTable || '?'}.${sqlDraftRightKey || '?'}`;
+    const nextNodes = nodes.map((node) => {
+      if (node.id === sourceNode.id) {
+        return {
+          ...node,
+          params: {
+            ...node.params,
+            ingestionMode: 'inherited',
+            inheritedTable: nextInput
+          }
+        };
+      }
+      if (node.id === sqlNode.id) {
+        return {
+          ...node,
+          params: {
+            ...node.params,
+            sqlMode: nextMode,
+            sqlText: nextMode === 'visual' ? visualSqlPreview : nextSqlText,
+            joinType: sqlDraftJoinType || node.params?.joinType || 'LEFT',
+            rightTable: sqlDraftRightTable || node.params?.rightTable || '',
+            leftKey: sqlDraftLeftKey || node.params?.leftKey || '',
+            rightKey: sqlDraftRightKey || node.params?.rightKey || ''
+          }
+        };
+      }
+      return node;
+    });
+    updateNodes(nextNodes);
+    setSelectedNodeId(sqlNode.id);
+  }, [
+    nodes,
+    sqlDraftInput,
+    sqlDraftText,
+    sqlDraftMode,
+    sqlDraftJoinType,
+    sqlDraftRightTable,
+    sqlDraftLeftKey,
+    sqlDraftRightKey,
+    updateNodes
+  ]);
+
   const getSortedRows = (rows, sortBy, sortDirection) => {
     if (!sortBy || !sortDirection) return rows;
     const withIndex = rows.map((row, index) => ({ row, index }));
@@ -2092,11 +2411,6 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       }
       return { ...prev, [tableName]: { sortBy: '', sortDirection: '' } };
     });
-  };
-
-  const normalizeExplorationName = (value) => {
-    const trimmed = typeof value === 'string' ? value.trim() : '';
-    return trimmed || 'Exploration';
   };
 
   const normalizeExplorationDescription = (value) => (
@@ -2157,17 +2471,47 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const rowCount = order.reduce((sum, name) => sum + ((model.tables?.[name] || []).length), 0);
     return { tableCount: order.length, rowCount };
   };
+  const buildRawDatasetSnapshot = (model, sourceNode, timestamp) => {
+    const order = model?.order || [];
+    const tableName = sourceNode?.params?.table || order[0] || '';
+    const rows = Array.isArray(model?.tables?.[tableName]) ? model.tables[tableName] : [];
+    const schema = rows.length > 0 ? Object.keys(rows[0] || {}) : [];
+    const visibleColumns = Array.isArray(sourceNode?.params?.visibleColumns)
+      ? sourceNode.params.visibleColumns
+      : [];
+    const columnSet = new Set(schema);
+    const resolvedColumns = (visibleColumns.length > 0 ? visibleColumns : schema)
+      .filter((col) => columnSet.has(col));
+    const filteredRows = resolvedColumns.length > 0
+      ? rows.map((row) => resolvedColumns.reduce((acc, key) => {
+        acc[key] = row?.[key];
+        return acc;
+      }, {}))
+      : rows;
+    return {
+      tableName,
+      rows: filteredRows,
+      schema: resolvedColumns.length > 0 ? resolvedColumns : schema,
+      rowCount: filteredRows.length,
+      createdAt: timestamp
+    };
+  };
 
-  const saveExploration = () => {
+  const saveAsset = () => {
     setSaveError(null);
     const now = new Date().toISOString();
     const stats = getExplorationStats(dataModel);
     const existing = explorations.find(exp => exp.id === activeExplorationId);
-    const baseName = normalizeExplorationName(draftExplorationName || rawDataName);
+    const assetType = existing
+      ? resolveAssetType(existing)
+      : (activeAssetType || ASSET_TYPES.EXPLORATION);
+    const fallbackName = resolveAssetFallbackName(assetType);
+    const baseName = normalizeExplorationName(draftExplorationName || rawDataName, fallbackName);
     const name = existing?.name || baseName;
     const description = existing?.description ?? normalizeExplorationDescription(draftExplorationDescription);
     const payload = {
       id: existing?.id || `exp-${Date.now()}`,
+      assetType,
       name,
       description,
       createdAt: existing?.createdAt || now,
@@ -2178,6 +2522,51 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       tableCount: stats.tableCount,
       rowCount: stats.rowCount
     };
+
+    if (assetType === ASSET_TYPES.RAW_DATASET) {
+      const sourceNode = nodes.find((node) => node.type === 'SOURCE') || nodes[0];
+      const snapshot = buildRawDatasetSnapshot(dataModel, sourceNode, now);
+      payload.datasetSnapshot = snapshot;
+      payload.tableCount = dataModel?.order?.length || 0;
+      payload.rowCount = snapshot.rowCount || 0;
+    }
+
+    if (assetType === ASSET_TYPES.SQL) {
+      const sourceNode = nodes.find((node) => node.type === 'SOURCE');
+      const sqlNode = nodes.find((node) => node.type === 'JOIN');
+      const sqlText = String(sqlNode?.params?.sqlText || '').trim();
+      const inputTable = sourceNode?.params?.inheritedTable || '';
+      const result = sqlNode ? getNodeResult(chainData, sqlNode.id) : null;
+      const hasError = Boolean(result?.error);
+      const rowCount = result?.rowCount || 0;
+      const rows = result?.getRows ? result.getRows({ start: 0, size: rowCount }) : [];
+      const schema = Array.isArray(result?.schema) ? result.schema : [];
+      payload.sqlText = sqlText;
+      payload.sqlInputTable = inputTable;
+      if (sqlText && !hasError) {
+        payload.sqlSnapshot = {
+          rows,
+          schema,
+          rowCount,
+          createdAt: now
+        };
+        payload.rowCount = rowCount;
+        payload.tableCount = schema.length > 0 ? 1 : 0;
+      } else if (hasError) {
+        payload.sqlSnapshot = existing?.sqlSnapshot || null;
+        const fallbackSchema = Array.isArray(existing?.sqlSnapshot?.schema) ? existing.sqlSnapshot.schema : [];
+        const fallbackRowCount = Number.isFinite(existing?.sqlSnapshot?.rowCount)
+          ? existing.sqlSnapshot.rowCount
+          : 0;
+        payload.rowCount = fallbackRowCount;
+        payload.tableCount = fallbackSchema.length > 0 ? 1 : 0;
+      } else {
+        payload.sqlSnapshot = null;
+        payload.rowCount = 0;
+        payload.tableCount = 0;
+      }
+    }
+
     const next = existing
       ? explorations.map(exp => exp.id === payload.id ? payload : exp)
       : [payload, ...explorations];
@@ -2185,20 +2574,25 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       persistExplorations(next);
       setExplorations(next);
       setActiveExplorationId(payload.id);
+      setActiveAssetType(assetType);
       setDraftExplorationName(null);
       setDraftExplorationDescription(null);
       setShowDataModel(false);
       setViewMode('landing');
     } catch (err) {
-      setSaveError('Unable to save this exploration. Storage may be full.');
+      setSaveError('Unable to save this asset. Storage may be full.');
     }
   };
 
-  const updateExplorationName = (id, nextName) => {
-    const safeName = normalizeExplorationName(nextName);
+  const updateAssetName = (id, nextName) => {
     setExplorations((prev) => {
       const target = prev.find(exp => exp.id === id);
-      if (!target || target.name === safeName) {
+      if (!target) {
+        return prev;
+      }
+      const fallback = resolveAssetFallbackName(resolveAssetType(target));
+      const safeName = normalizeExplorationName(nextName, fallback);
+      if (target.name === safeName) {
         return prev;
       }
       const now = new Date().toISOString();
@@ -2230,7 +2624,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     });
   };
 
-  const updateExplorationDescription = (id, nextDescription) => {
+  const updateAssetDescription = (id, nextDescription) => {
     const safeDescription = normalizeExplorationDescription(nextDescription);
     setExplorations((prev) => {
       const target = prev.find(exp => exp.id === id);
@@ -2251,18 +2645,17 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   };
 
   const handleExplorationRename = (value) => {
-    const safeName = normalizeExplorationName(value);
     if (activeExplorationId) {
-      updateExplorationName(activeExplorationId, safeName);
+      updateAssetName(activeExplorationId, value);
       return;
     }
-    setDraftExplorationName(safeName);
+    setDraftExplorationName(value);
   };
 
   const handleExplorationDescriptionChange = (value) => {
     const safeDescription = normalizeExplorationDescription(value);
     if (activeExplorationId) {
-      updateExplorationDescription(activeExplorationId, safeDescription);
+      updateAssetDescription(activeExplorationId, safeDescription);
       return;
     }
     setDraftExplorationDescription(safeDescription);
@@ -2280,7 +2673,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
   const commitEditingExplorationName = (id) => {
     if (!id || editingExplorationId !== id) return;
-    updateExplorationName(id, editingExplorationNameDraft);
+    updateAssetName(id, editingExplorationNameDraft);
     cancelEditingExplorationName();
   };
 
@@ -2296,7 +2689,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
   const commitEditingExplorationDescription = (id) => {
     if (!id || editingExplorationDescriptionId !== id) return;
-    updateExplorationDescription(id, editingExplorationDescriptionDraft);
+    updateAssetDescription(id, editingExplorationDescriptionDraft);
     cancelEditingExplorationDescription();
   };
 
@@ -2337,18 +2730,23 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setViewMode('landing');
   };
 
-  const openExploration = (exploration, options = {}) => {
-    if (!exploration) return;
-    const nextNodes = exploration.nodes || createInitialNodes();
+  const openAsset = (asset, options = {}) => {
+    if (!asset) return;
+    const assetType = resolveAssetType(asset);
+    const fallbackNodes = assetType === ASSET_TYPES.SQL ? createInitialSqlNodes() : createInitialNodes();
+    const nextNodes = asset.nodes || fallbackNodes;
     const focusNodeId = options.focusNodeId;
     const hasFocusNode = focusNodeId && nextNodes.some((node) => node.id === focusNodeId);
-    const nextSelectedId = hasFocusNode ? focusNodeId : (nextNodes[0]?.id || 'node-start');
+    const defaultSelected = assetType === ASSET_TYPES.SQL
+      ? (nextNodes.find((node) => node.type === 'JOIN')?.id || 'node-sql')
+      : (nextNodes[0]?.id || 'node-start');
+    const nextSelectedId = hasFocusNode ? focusNodeId : defaultSelected;
     setLineageFocusNodeId(hasFocusNode ? focusNodeId : null);
     setHistory([nextNodes]);
     setHistoryIndex(0);
     setSelectedNodeId(nextSelectedId);
-    setDataModel(exploration.dataModel || { tables: {}, order: [] });
-    setRawDataName(exploration.rawDataName || exploration.name || null);
+    setDataModel(asset.dataModel || { tables: {}, order: [] });
+    setRawDataName(asset.rawDataName || asset.name || null);
     setLoadError(null);
     setSelectedFiles([]);
     setPendingFiles([]);
@@ -2363,11 +2761,12 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setShowDataModel(false);
     setShowAddMenuForId(null);
     setShowInsertMenuForId(null);
-    setActiveExplorationId(exploration.id);
+    setActiveExplorationId(asset.id);
+    setActiveAssetType(assetType);
     setViewMode('canvas');
   };
 
-  const deleteExploration = (id) => {
+  const deleteAsset = (id) => {
     const next = explorations.filter(exp => exp.id !== id);
     try {
       persistExplorations(next);
@@ -2377,19 +2776,26 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setExplorations(next);
     if (activeExplorationId === id) {
       setActiveExplorationId(null);
+      setActiveAssetType(ASSET_TYPES.EXPLORATION);
+      setViewMode('landing');
     }
   };
 
-  const duplicateExploration = (id, originGraphNodeId) => {
+  const duplicateAsset = (id, originGraphNodeId) => {
     if (!id) return;
     let createdGraphId = null;
     setExplorations((prev) => {
       const target = prev.find(exp => exp.id === id);
       if (!target) return prev;
+      const assetType = resolveAssetType(target);
       const now = new Date().toISOString();
-      const copyName = normalizeExplorationName(buildCopyLabel(target.name || target.rawDataName, 'Exploration'));
+      const fallback = resolveAssetFallbackName(assetType);
+      const copyName = normalizeExplorationName(
+        buildCopyLabel(target.name || target.rawDataName, fallback),
+        fallback
+      );
       const copyId = `exp-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      createdGraphId = `exp:${copyId}`;
+      createdGraphId = assetType === ASSET_TYPES.EXPLORATION ? `exp:${copyId}` : `${assetType}:${copyId}`;
       const nextEntry = {
         ...target,
         id: copyId,
@@ -2456,8 +2862,10 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
   const getExplorationLabel = useCallback((expId) => {
     const match = explorations.find((item) => item.id === expId);
-    return match?.name || match?.rawDataName || 'Exploration';
-  }, [explorations]);
+    if (!match) return 'Exploration';
+    const fallback = resolveAssetFallbackName(resolveAssetType(match));
+    return match?.name || match?.rawDataName || fallback;
+  }, [explorations, resolveAssetType, resolveAssetFallbackName]);
 
   const formatDatasetLabel = useCallback((datasetName, explorationName) => {
     const resolvedExploration = explorationName || 'Exploration';
@@ -2467,6 +2875,12 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
   const getDatasetDisplayLabel = useCallback((entry) => {
     if (!entry) return 'Dataset';
+    if (entry.assetType === ASSET_TYPES.RAW_DATASET) {
+      return entry.label || entry.assetName || 'Raw dataset';
+    }
+    if (entry.assetType === ASSET_TYPES.SQL) {
+      return entry.label || entry.assetName || 'SQL transformation';
+    }
     const datasetName = entry.datasetName || entry.nodeTitle || '';
     if (datasetName) {
       return formatDatasetLabel(datasetName, entry.explorationName);
@@ -2484,15 +2898,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const dependenciesByKey = new Map();
     const externalNameEntries = Object.entries(externalTableRegistry.allByName || {})
       .map(([name, entry]) => ({ name, entry }))
-      .filter(({ entry }) => entry?.explorationId && entry.explorationId !== expId && entry.isDataset);
+      .filter(({ entry }) => entry?.isDataset);
     const sqlMatchers = externalNameEntries.map(({ name, entry }) => ({
       entry,
       regex: new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i')
     }));
     const addDependencyEntry = (depEntry) => {
-      if (!depEntry?.explorationId || !depEntry?.nodeId || depEntry.explorationId === expId) return;
+      const depOwnerId = depEntry?.assetId || depEntry?.explorationId;
+      if (!depOwnerId || depOwnerId === expId) return;
       if (!depEntry.isDataset) return;
-      dependenciesByKey.set(`${depEntry.explorationId}:${depEntry.nodeId}`, depEntry);
+      dependenciesByKey.set(depEntry.name, depEntry);
     };
     nodesList.forEach((node) => {
       if (node.type === 'SOURCE' && node.params?.ingestionMode === 'inherited') {
@@ -2520,21 +2935,54 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     const dependencies = normalizeList(
       Array.from(dependenciesByKey.values()).map((depEntry) => getDatasetDisplayLabel(depEntry))
     );
-    const dependentExplorations = (
-      externalTableRegistry?.dependentsByExpId?.get?.(expId) || []
-    ).map((depId) => getExplorationLabel(depId));
+
+    const targetEntries = (externalTableRegistry.allList || [])
+      .filter((entry) => (entry?.assetId || entry?.explorationId) === expId);
+    const targetNames = targetEntries
+      .flatMap((entry) => [entry.name, entry.legacyName])
+      .filter(Boolean)
+      .map((name) => String(name).toLowerCase());
+    const targetNameSet = new Set(targetNames);
+    const sqlMatchersForTarget = targetNames.map((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i'));
+
+    const dependentAssets = explorations
+      .filter((asset) => asset?.id && asset.id !== expId)
+      .filter((asset) => {
+        const assetNodes = Array.isArray(asset.nodes) ? asset.nodes : [];
+        return assetNodes.some((node) => {
+          if (node.type === 'SOURCE' && node.params?.ingestionMode === 'inherited') {
+            const tableName = String(node.params?.inheritedTable || '').toLowerCase();
+            return targetNameSet.has(tableName);
+          }
+          if (node.type === 'JOIN') {
+            const sqlMode = node.params?.sqlMode || 'visual';
+            if (sqlMode === 'custom') {
+              const sqlText = String(node.params?.sqlText || '');
+              if (!sqlText) return false;
+              return sqlMatchersForTarget.some((regex) => regex.test(sqlText));
+            }
+            const tableName = String(node.params?.rightTable || '').toLowerCase();
+            return targetNameSet.has(tableName);
+          }
+          return false;
+        });
+      })
+      .map((asset) => getExplorationLabel(asset.id));
+
     const originDatasets = (externalTableRegistry.datasets || [])
       .filter((entry) => entry?.explorationId === expId)
       .map((entry) => getDatasetDisplayLabel(entry));
+
     const dependentDatasets = (externalTableRegistry.datasets || [])
       .filter((entry) => entry?.explorationId && entry.explorationId !== expId)
       .filter((entry) => {
         const deps = Array.isArray(entry.dependencies) ? entry.dependencies : [];
-        return deps.some((dep) => dep?.explorationId === expId && dep?.nodeId);
+        return deps.some((dep) => dep?.assetId === expId || dep?.explorationId === expId);
       })
       .map((entry) => getDatasetDisplayLabel(entry));
+
     const dependents = normalizeList([
-      ...dependentExplorations,
+      ...dependentAssets,
       ...originDatasets,
       ...dependentDatasets
     ]);
@@ -2594,17 +3042,20 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
   const openDeleteExplorationModal = useCallback((expId) => {
     if (!expId) return;
+    const target = explorations.find((item) => item.id === expId);
+    const assetType = resolveAssetType(target);
     const title = getExplorationLabel(expId);
     const { dependencies, dependents } = buildExplorationDeleteDetails(expId);
     setDeleteModalState({
-      type: 'exploration',
+      type: 'asset',
+      assetType,
       explorationId: expId,
       title,
       dependencies,
       dependents
     });
     setIsDeleteModalOpen(true);
-  }, [buildExplorationDeleteDetails, getExplorationLabel]);
+  }, [buildExplorationDeleteDetails, explorations, getExplorationLabel, resolveAssetType]);
 
   const openDeleteDatasetModal = useCallback((entry) => {
     if (!entry?.explorationId || !entry?.nodeId) return;
@@ -2630,14 +3081,14 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       closeDeleteModal();
       return;
     }
-    if (deleteModalState.type === 'exploration') {
-      deleteExploration(deleteModalState.explorationId);
+    if (deleteModalState.type === 'asset' && deleteModalState.explorationId) {
+      deleteAsset(deleteModalState.explorationId);
     }
     if (deleteModalState.type === 'dataset') {
       deleteDatasetEntry(deleteModalState.datasetEntry);
     }
     closeDeleteModal();
-  }, [deleteModalState, deleteExploration, deleteDatasetEntry, closeDeleteModal]);
+  }, [deleteModalState, deleteAsset, deleteDatasetEntry, closeDeleteModal]);
 
   const duplicateDatasetEntry = (entry, originGraphNodeId) => {
     if (!entry?.explorationId || !entry?.nodeId) return;
@@ -2720,11 +3171,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     }
   };
 
-  const startNewExploration = () => {
-    const nextNodes = createInitialNodes();
+  const startNewAsset = (type = ASSET_TYPES.EXPLORATION) => {
+    const assetType = VALID_ASSET_TYPES.has(type) ? type : ASSET_TYPES.EXPLORATION;
+    const nextNodes = assetType === ASSET_TYPES.SQL ? createInitialSqlNodes() : createInitialNodes();
+    const defaultSelected = assetType === ASSET_TYPES.SQL
+      ? (nextNodes.find((node) => node.type === 'JOIN')?.id || 'node-sql')
+      : (nextNodes[0]?.id || 'node-start');
     setHistory([nextNodes]);
     setHistoryIndex(0);
-    setSelectedNodeId(nextNodes[0]?.id || 'node-start');
+    setSelectedNodeId(defaultSelected);
     setLineageFocusNodeId(null);
     setDataModel({ tables: {}, order: [] });
     setRawDataName(null);
@@ -2743,6 +3198,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     setShowAddMenuForId(null);
     setShowInsertMenuForId(null);
     setActiveExplorationId(null);
+    setActiveAssetType(assetType);
     setViewMode('canvas');
   };
 
@@ -3365,7 +3821,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     if (loadError) return { title: 'Error', detail: loadError };
     const tableCount = dataModel.order.length;
     const totalRows = dataModel.order.reduce((sum, name) => sum + ((dataModel.tables[name] || []).length), 0);
-    const label = rawDataName || 'Dataset';
+    const fallbackLabel = activeAssetType === ASSET_TYPES.RAW_DATASET ? 'Raw dataset' : 'Dataset';
+    const label = rawDataName || fallbackLabel;
     if (tableCount === 0) {
       return { title: 'No data', detail: 'Upload a CSV or Excel file to get started.' };
     }
@@ -3379,7 +3836,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       source: 'local',
       sqlName: slugifySqlName(name)
     }));
-    const externalEntries = [...(externalTableRegistry.datasets || [])]
+    const externalEntries = [...(externalTableRegistry.assetTables || [])]
       .sort((a, b) => a.label.localeCompare(b.label));
     const external = externalEntries.map((entry) => ({
       name: entry.name,
@@ -3388,6 +3845,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       explorationName: entry.explorationName,
       nodeTitle: entry.nodeTitle,
       isDataset: entry.isDataset,
+      assetType: entry.assetType,
+      assetId: entry.assetId,
       schema: entry.schema,
       rowCount: entry.rowCount,
       legacyName: entry.legacyName,
@@ -3398,29 +3857,55 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       local,
       external
     };
-  }, [dataModel.order, externalTableRegistry.datasets]);
+  }, [dataModel.order, externalTableRegistry.assetTables]);
 
   const datasetEntries = externalTableRegistry.datasets || [];
+  const explorationAssets = useMemo(() => (
+    (explorations || []).filter((exp) => resolveAssetType(exp) === ASSET_TYPES.EXPLORATION)
+  ), [explorations, resolveAssetType]);
+  const rawDatasetAssets = useMemo(() => (
+    (explorations || []).filter((exp) => resolveAssetType(exp) === ASSET_TYPES.RAW_DATASET)
+  ), [explorations, resolveAssetType]);
+  const sqlAssets = useMemo(() => (
+    (explorations || []).filter((exp) => resolveAssetType(exp) === ASSET_TYPES.SQL)
+  ), [explorations, resolveAssetType]);
   const visibleExplorations = useMemo(() => (
-    (explorations || []).filter((exp) => exp && exp.isFlattenedDataset !== true)
-  ), [explorations]);
+    explorationAssets.filter((exp) => exp && exp.isFlattenedDataset !== true)
+  ), [explorationAssets]);
 
   const workbenchDependencyGraph = useMemo(() => {
     const explorationNodes = [];
+    const rawDatasetNodes = [];
+    const sqlAssetNodes = [];
     const edges = [];
     const datasetEntryByKey = new Map();
     const datasetNodeIdByKey = new Map();
     const explorationNodeIdById = new Map();
+    const rawDatasetNodeIdById = new Map();
+    const sqlNodeIdById = new Map();
     const explorationMetaById = new Map();
     const datasetEntriesList = externalTableRegistry.datasets || [];
+    const rawDatasetEntriesById = new Map(
+      (externalTableRegistry.rawDatasetEntries || []).map((entry) => [entry.assetId, entry])
+    );
+    const sqlAssetEntriesById = new Map(
+      (externalTableRegistry.sqlAssetEntries || []).map((entry) => [entry.assetId, entry])
+    );
     const edgeIds = new Set();
     const externalNameEntries = Object.entries(externalTableRegistry.allByName || {}).map(([name, entry]) => ({
       name,
       entry
     }));
-    const buildSqlMatchers = (expId) => (
+    const getAssetGraphId = (assetType, assetId) => (
+      assetType === ASSET_TYPES.EXPLORATION ? `exp:${assetId}` : `${assetType}:${assetId}`
+    );
+    const resolveEntryOwnerId = (entry) => entry?.assetId || entry?.explorationId || null;
+    const buildSqlMatchers = (ownerId) => (
       externalNameEntries
-        .filter(({ entry }) => entry?.explorationId && entry.explorationId !== expId)
+        .filter(({ entry }) => {
+          const entryOwnerId = resolveEntryOwnerId(entry);
+          return entryOwnerId && entryOwnerId !== ownerId;
+        })
         .map(({ name, entry }) => ({
           entry,
           regex: new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i')
@@ -3432,7 +3917,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       datasetEntryByKey.set(`${entry.explorationId}:${entry.nodeId}`, entry);
     });
 
-    explorations.forEach((exp) => {
+    explorationAssets.forEach((exp) => {
       if (!exp?.id) return;
       const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
       const nodesById = new Map(nodesList.map((node) => [node.id, node]));
@@ -3441,7 +3926,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
     visibleExplorations.forEach((exp) => {
       if (!exp?.id) return;
-      const graphId = `exp:${exp.id}`;
+      const graphId = getAssetGraphId(ASSET_TYPES.EXPLORATION, exp.id);
       explorationNodeIdById.set(exp.id, graphId);
       const order = exp.dataModel?.order || [];
       const tableCount = exp.tableCount ?? order.length;
@@ -3458,6 +3943,8 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       explorationNodes.push({
         id: graphId,
         type: 'exploration',
+        assetId: exp.id,
+        assetType: ASSET_TYPES.EXPLORATION,
         explorationId: exp.id,
         title: exp.name || 'Exploration',
         subtitle: exp.description || '',
@@ -3466,6 +3953,48 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         rowCount,
         nodeCount,
         branchCount,
+        internalNodes: nodesList
+      });
+    });
+
+    rawDatasetAssets.forEach((asset) => {
+      if (!asset?.id) return;
+      const graphId = getAssetGraphId(ASSET_TYPES.RAW_DATASET, asset.id);
+      rawDatasetNodeIdById.set(asset.id, graphId);
+      const entry = rawDatasetEntriesById.get(asset.id);
+      const nodesList = Array.isArray(asset.nodes) ? asset.nodes : [];
+      const rowCount = entry?.rowCount || 0;
+      const columnCount = entry?.schema?.length || 0;
+      rawDatasetNodes.push({
+        id: graphId,
+        type: ASSET_TYPES.RAW_DATASET,
+        assetId: asset.id,
+        title: asset.name || asset.rawDataName || 'Raw dataset',
+        subtitle: asset.description || '',
+        updatedAt: asset.updatedAt || asset.createdAt,
+        rowCount,
+        columnCount,
+        internalNodes: nodesList
+      });
+    });
+
+    sqlAssets.forEach((asset) => {
+      if (!asset?.id) return;
+      const graphId = getAssetGraphId(ASSET_TYPES.SQL, asset.id);
+      sqlNodeIdById.set(asset.id, graphId);
+      const entry = sqlAssetEntriesById.get(asset.id);
+      const nodesList = Array.isArray(asset.nodes) ? asset.nodes : [];
+      const rowCount = entry?.rowCount || 0;
+      const columnCount = entry?.schema?.length || 0;
+      sqlAssetNodes.push({
+        id: graphId,
+        type: ASSET_TYPES.SQL,
+        assetId: asset.id,
+        title: asset.name || 'SQL transformation',
+        subtitle: asset.description || '',
+        updatedAt: asset.updatedAt || asset.createdAt,
+        rowCount,
+        columnCount,
         internalNodes: nodesList
       });
     });
@@ -3514,6 +4043,21 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       })
       .filter(Boolean);
 
+    const resolveProviderNodeId = (entry) => {
+      if (!entry) return null;
+      if (entry.assetType === ASSET_TYPES.RAW_DATASET) {
+        return rawDatasetNodeIdById.get(entry.assetId);
+      }
+      if (entry.assetType === ASSET_TYPES.SQL) {
+        return sqlNodeIdById.get(entry.assetId);
+      }
+      if (entry.explorationId && entry.nodeId) {
+        const key = `${entry.explorationId}:${entry.nodeId}`;
+        return datasetNodeIdByKey.get(key) || `dataset:${key}`;
+      }
+      return null;
+    };
+
     const addOriginEdge = (entry) => {
       if (!entry?.isDataset) return;
       if (!entry.explorationId || !entry.nodeId) return;
@@ -3537,21 +4081,40 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
     const addEdge = (exp, node, entry, kind) => {
       if (!entry || !entry.isDataset || !exp?.id || !node?.id) return;
-      if (entry.explorationId === exp.id) return;
+      const entryOwnerId = entry.assetId || entry.explorationId;
+      if (entryOwnerId && entryOwnerId === exp.id) return;
       const explorationNodeId = explorationNodeIdById.get(exp.id);
       if (!explorationNodeId) return;
-      const key = `${entry.explorationId}:${entry.nodeId}`;
-      const datasetNodeId = datasetNodeIdByKey.get(key) || `dataset:${key}`;
-      datasetNodeIdByKey.set(key, datasetNodeId);
+      const providerNodeId = resolveProviderNodeId(entry);
+      if (!providerNodeId) return;
       const edgeId = `edge:${exp.id}:${node.id}:${entry.name || entry.nodeId}:${kind}`;
       if (edgeIds.has(edgeId)) return;
       edgeIds.add(edgeId);
       edges.push({
         id: edgeId,
-        from: datasetNodeId,
+        from: providerNodeId,
         to: explorationNodeId,
         sourceAnchorId: entry.nodeId,
         targetAnchorId: node.id,
+        kind
+      });
+    };
+
+    const addAssetUsageEdge = (assetId, assetNodeId, nodeId, entry, kind) => {
+      if (!assetId || !assetNodeId || !nodeId || !entry || !entry.isDataset) return;
+      const entryOwnerId = entry.assetId || entry.explorationId;
+      if (entryOwnerId && entryOwnerId === assetId) return;
+      const providerNodeId = resolveProviderNodeId(entry);
+      if (!providerNodeId) return;
+      const edgeId = `edge:${assetId}:${nodeId}:${entry.name || entry.nodeId}:${kind}`;
+      if (edgeIds.has(edgeId)) return;
+      edgeIds.add(edgeId);
+      edges.push({
+        id: edgeId,
+        from: providerNodeId,
+        to: assetNodeId,
+        sourceAnchorId: entry.nodeId,
+        targetAnchorId: nodeId,
         kind
       });
     };
@@ -3585,6 +4148,39 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           if (!tableName) return;
           const entry = externalTableRegistry.allByName?.[tableName];
           addEdge(exp, node, entry, 'join');
+        }
+      });
+    });
+
+    sqlAssets.forEach((asset) => {
+      if (!asset?.id) return;
+      const assetNodeId = sqlNodeIdById.get(asset.id);
+      if (!assetNodeId) return;
+      const nodesList = Array.isArray(asset.nodes) ? asset.nodes : [];
+      const sqlMatchers = buildSqlMatchers(asset.id);
+      nodesList.forEach((node) => {
+        if (node.type === 'SOURCE' && node.params?.ingestionMode === 'inherited') {
+          const tableName = node.params?.inheritedTable || '';
+          if (!tableName) return;
+          const entry = externalTableRegistry.allByName?.[tableName];
+          addAssetUsageEdge(asset.id, assetNodeId, node.id, entry, 'inherited');
+        }
+        if (node.type === 'JOIN') {
+          const sqlMode = node.params?.sqlMode || 'visual';
+          if (sqlMode === 'custom') {
+            const sqlText = String(node.params?.sqlText || '');
+            if (!sqlText) return;
+            sqlMatchers.forEach(({ entry, regex }) => {
+              if (regex.test(sqlText)) {
+                addAssetUsageEdge(asset.id, assetNodeId, node.id, entry, 'sql');
+              }
+            });
+            return;
+          }
+          const tableName = node.params?.rightTable || '';
+          if (!tableName) return;
+          const entry = externalTableRegistry.allByName?.[tableName];
+          addAssetUsageEdge(asset.id, assetNodeId, node.id, entry, 'join');
         }
       });
     });
@@ -3658,16 +4254,20 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     });
 
     return {
-      nodes: [...explorationNodes, ...datasetNodes],
+      nodes: [...explorationNodes, ...rawDatasetNodes, ...sqlAssetNodes, ...datasetNodes],
       edges,
       anchorsByNodeId
     };
   }, [
-    explorations,
+    explorationAssets,
+    rawDatasetAssets,
+    sqlAssets,
     visibleExplorations,
     externalTableRegistry.allByName,
     externalTableRegistry.allList,
-    externalTableRegistry.datasets
+    externalTableRegistry.datasets,
+    externalTableRegistry.rawDatasetEntries,
+    externalTableRegistry.sqlAssetEntries
   ]);
 
   const selectedResult = getNodeResult(chainData, selectedNodeId);
@@ -3676,8 +4276,16 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   const deleteModalDependencies = deleteModalState?.dependencies || [];
   const deleteModalDependents = deleteModalState?.dependents || [];
   const deleteModalTarget = deleteModalState?.title
-    || (deleteModalState?.type === 'dataset' ? 'this dataset' : 'this exploration');
-  const deleteModalTypeLabel = deleteModalState?.type === 'dataset' ? 'dataset' : 'exploration';
+    || (deleteModalState?.type === 'dataset'
+      ? 'this dataset'
+      : (deleteModalState?.assetType === ASSET_TYPES.RAW_DATASET
+        ? 'this raw dataset'
+        : (deleteModalState?.assetType === ASSET_TYPES.SQL ? 'this SQL transformation' : 'this exploration')));
+  const deleteModalTypeLabel = deleteModalState?.type === 'dataset'
+    ? 'dataset'
+    : (deleteModalState?.assetType === ASSET_TYPES.RAW_DATASET
+      ? 'raw dataset'
+      : (deleteModalState?.assetType === ASSET_TYPES.SQL ? 'SQL transformation' : 'exploration'));
 
   const renderModeLabels = {
     classic: 'Classic',
@@ -3738,6 +4346,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
     onClick: ({ key }) => setRenderMode(key)
   }), [renderMode]);
 
+  const newAssetMenu = {
+    items: [
+      { key: ASSET_TYPES.EXPLORATION, label: 'Exploration' },
+      { key: ASSET_TYPES.RAW_DATASET, label: 'Raw dataset' },
+      { key: ASSET_TYPES.SQL, label: 'SQL transformation' }
+    ],
+    onClick: ({ key }) => startNewAsset(key)
+  };
+
   const buildCardMenu = (onDuplicate, onDelete, options = {}) => {
     const { onFlatten, isFlattened } = options;
     const items = [];
@@ -3772,219 +4389,460 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
           </div>
         }
       >
-        <Button type="primary" icon={<Plus size={14} />} onClick={startNewExploration} block={isMobileMode}>
-          Create new exploration
+        <Dropdown menu={newAssetMenu} trigger={['click']}>
+          <Button type="primary" icon={<Plus size={14} />} block={isMobileMode}>
+            Create new asset
+          </Button>
+        </Dropdown>
+      </Empty>
+    </div>
+  );
+
+  const renderRawDatasetEmpty = () => (
+    <div className={`bg-white border border-gray-200 rounded-2xl text-center shadow-sm dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'p-6' : 'p-8'}`}>
+      <Empty
+        description={(
+          <div className="space-y-1">
+            <div className="text-base font-semibold text-gray-900 dark:text-slate-100">No raw datasets yet</div>
+            <Text type="secondary">Ingest a dataset and save it to reuse across explorations.</Text>
+          </div>
+        )}
+      >
+        <Button type="primary" icon={<Plus size={14} />} onClick={() => startNewAsset(ASSET_TYPES.RAW_DATASET)} block={isMobileMode}>
+          New raw dataset
         </Button>
       </Empty>
     </div>
   );
 
-  const renderExplorationCards = () => (
-    visibleExplorations.length === 0
-      ? (explorations.length === 0 ? renderExplorationEmpty() : null)
-      : (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {visibleExplorations.map((exp) => {
-          const order = exp.dataModel?.order || [];
-          const tableCount = exp.tableCount ?? order.length;
-          const rowCount = exp.rowCount ?? order.reduce((sum, name) => sum + ((exp.dataModel?.tables?.[name] || []).length), 0);
-          const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
-          const nodeCount = nodesList.length;
-          const branchCount = nodesList.reduce((sum, node) => (
-            getChildren(nodesList, node.id).length === 0 ? sum + 1 : sum
-          ), 0);
-          const displayName = exp.name || 'Exploration';
-          const description = exp.description || '';
-          const descriptionLabel = description || 'Add a description';
-          const descriptionTone = description
-            ? 'text-slate-700 dark:text-slate-200'
-            : 'text-slate-500 dark:text-slate-400 italic';
-          const updated = exp.updatedAt ? new Date(exp.updatedAt).toLocaleString() : '';
-          const updatedLabel = updated ? `Updated ${updated}` : 'Updated just now';
-          const isEditingName = editingExplorationId === exp.id;
-          const isEditingDescription = editingExplorationDescriptionId === exp.id;
-          const cardMenu = buildCardMenu(
-            () => duplicateExploration(exp.id),
-            () => openDeleteExplorationModal(exp.id)
-          );
-          return (
-            <Card
-              key={exp.id}
-              size="small"
-              variant="borderless"
-              className="exploration-card group h-full rounded-2xl border border-slate-200/70 bg-white/90 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/80 flex flex-col"
-              styles={{
-                body: {
-                  padding: 16,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  flex: 1,
-                },
-                header: { padding: '12px 16px' },
-              }}
-              title={(
-                <div className="exploration-card-title">
-                  <div className="flex flex-col gap-1 w-full min-w-0">
-                    <div className={`relative flex-1 min-w-0 group/exp-card-title ${cardTitleHeightClass}`}>
-                      <div className={isEditingName ? 'opacity-0' : ''}>
-                        <div
-                          className={`exploration-card-title-text truncate text-slate-900 dark:text-slate-100 ${cardTitleTextClass} ${editableFieldPadding}`}
-                          title={displayName}
-                        >
-                          {displayName}
+  const renderSqlAssetEmpty = () => (
+    <div className={`bg-white border border-gray-200 rounded-2xl text-center shadow-sm dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'p-6' : 'p-8'}`}>
+      <Empty
+        description={(
+          <div className="space-y-1">
+            <div className="text-base font-semibold text-gray-900 dark:text-slate-100">No SQL transformations yet</div>
+            <Text type="secondary">Build a reusable SQL transformation on top of any dataset.</Text>
+          </div>
+        )}
+      >
+        <Button type="primary" icon={<Plus size={14} />} onClick={() => startNewAsset(ASSET_TYPES.SQL)} block={isMobileMode}>
+          New SQL transformation
+        </Button>
+      </Empty>
+    </div>
+  );
+
+  const renderExplorationCards = () => {
+    const renderSectionHeader = (title, subtitle) => (
+      <div className="flex flex-col gap-1">
+        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</div>
+        {subtitle && <Text type="secondary" className="text-xs">{subtitle}</Text>}
+      </div>
+    );
+
+    const renderExplorationGrid = () => (
+      visibleExplorations.length === 0
+        ? renderExplorationEmpty()
+        : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {visibleExplorations.map((exp) => {
+            const order = exp.dataModel?.order || [];
+            const tableCount = exp.tableCount ?? order.length;
+            const rowCount = exp.rowCount ?? order.reduce((sum, name) => sum + ((exp.dataModel?.tables?.[name] || []).length), 0);
+            const nodesList = Array.isArray(exp.nodes) ? exp.nodes : [];
+            const nodeCount = nodesList.length;
+            const branchCount = nodesList.reduce((sum, node) => (
+              getChildren(nodesList, node.id).length === 0 ? sum + 1 : sum
+            ), 0);
+            const displayName = exp.name || 'Exploration';
+            const description = exp.description || '';
+            const descriptionLabel = description || 'Add a description';
+            const descriptionTone = description
+              ? 'text-slate-700 dark:text-slate-200'
+              : 'text-slate-500 dark:text-slate-400 italic';
+            const updated = exp.updatedAt ? new Date(exp.updatedAt).toLocaleString() : '';
+            const updatedLabel = updated ? `Updated ${updated}` : 'Updated just now';
+            const isEditingName = editingExplorationId === exp.id;
+            const isEditingDescription = editingExplorationDescriptionId === exp.id;
+            const cardMenu = buildCardMenu(
+              () => duplicateAsset(exp.id),
+              () => openDeleteExplorationModal(exp.id)
+            );
+            return (
+              <Card
+                key={exp.id}
+                size="small"
+                variant="borderless"
+                className="exploration-card group h-full rounded-2xl border border-slate-200/70 bg-white/90 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900/80 flex flex-col"
+                styles={{
+                  body: {
+                    padding: 16,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    flex: 1,
+                  },
+                  header: { padding: '12px 16px' },
+                }}
+                title={(
+                  <div className="exploration-card-title">
+                    <div className="flex flex-col gap-1 w-full min-w-0">
+                      <div className={`relative flex-1 min-w-0 group/exp-card-title ${cardTitleHeightClass}`}>
+                        <div className={isEditingName ? 'opacity-0' : ''}>
+                          <div
+                            className={`exploration-card-title-text truncate text-slate-900 dark:text-slate-100 ${cardTitleTextClass} ${editableFieldPadding}`}
+                            title={displayName}
+                          >
+                            {displayName}
+                          </div>
                         </div>
-                      </div>
-                      {isEditingName && (
-                        <input
-                          ref={explorationNameInputRef}
-                          className={`absolute inset-0 h-full w-full rounded-md border border-blue-400 bg-white/95 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-slate-900 dark:text-slate-100 ${cardTitleTextClass} ${editableFieldPadding}`}
-                          value={editingExplorationNameDraft}
-                          onChange={(e) => setEditingExplorationNameDraft(e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              skipExplorationNameCommitRef.current = true;
-                              e.preventDefault();
+                        {isEditingName && (
+                          <input
+                            ref={explorationNameInputRef}
+                            className={`absolute inset-0 h-full w-full rounded-md border border-blue-400 bg-white/95 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-slate-900 dark:text-slate-100 ${cardTitleTextClass} ${editableFieldPadding}`}
+                            value={editingExplorationNameDraft}
+                            onChange={(e) => setEditingExplorationNameDraft(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                skipExplorationNameCommitRef.current = true;
+                                e.preventDefault();
+                                commitEditingExplorationName(exp.id);
+                              }
+                              if (e.key === 'Escape') {
+                                skipExplorationNameCommitRef.current = true;
+                                e.preventDefault();
+                                cancelEditingExplorationName();
+                              }
+                            }}
+                            onBlur={() => {
+                              if (skipExplorationNameCommitRef.current) {
+                                skipExplorationNameCommitRef.current = false;
+                                return;
+                              }
                               commitEditingExplorationName(exp.id);
-                            }
-                            if (e.key === 'Escape') {
-                              skipExplorationNameCommitRef.current = true;
-                              e.preventDefault();
-                              cancelEditingExplorationName();
-                            }
-                          }}
-                          onBlur={() => {
-                            if (skipExplorationNameCommitRef.current) {
-                              skipExplorationNameCommitRef.current = false;
-                              return;
-                            }
-                            commitEditingExplorationName(exp.id);
-                          }}
-                          aria-label="Rename exploration"
-                        />
-                      )}
-                      {!isEditingName && (
-                        <button
-                          type="button"
-                          className={`absolute right-0 top-1/2 -translate-y-1/2 z-10 opacity-0 transition-opacity pointer-events-none group-hover/exp-card-title:opacity-100 group-hover/exp-card-title:pointer-events-auto ${editButtonClass}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startEditingExplorationName(exp.id, displayName);
-                          }}
-                          aria-label="Rename exploration"
-                        >
-                          <EditIcon size={editIconSize} />
-                        </button>
-                      )}
-                    </div>
-                    <div className={`relative group/exp-card-desc w-full min-w-0 ${descriptionHeightClass}`}>
-                      <div className={isEditingDescription ? 'opacity-0' : ''}>
-                        <div
-                          className={`truncate ${descriptionTextClass} ${descriptionTone} ${editableFieldPadding}`}
-                          title={descriptionLabel}
-                        >
-                          {descriptionLabel}
-                        </div>
+                            }}
+                            aria-label="Rename exploration"
+                          />
+                        )}
+                        {!isEditingName && (
+                          <button
+                            type="button"
+                            className={`absolute right-0 top-1/2 -translate-y-1/2 z-10 opacity-0 transition-opacity pointer-events-none group-hover/exp-card-title:opacity-100 group-hover/exp-card-title:pointer-events-auto ${editButtonClass}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startEditingExplorationName(exp.id, displayName);
+                            }}
+                            aria-label="Rename exploration"
+                          >
+                            <EditIcon size={editIconSize} />
+                          </button>
+                        )}
                       </div>
-                      {isEditingDescription && (
-                        <input
-                          ref={explorationDescriptionInputRef}
-                          className={`absolute inset-0 h-full w-full rounded-md border border-blue-400 bg-white/95 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-slate-900 dark:text-slate-100 ${descriptionTextClass} ${editableFieldPadding}`}
-                          value={editingExplorationDescriptionDraft}
-                          onChange={(e) => setEditingExplorationDescriptionDraft(e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              skipExplorationDescriptionCommitRef.current = true;
-                              e.preventDefault();
+                      <div className={`relative group/exp-card-desc w-full min-w-0 ${descriptionHeightClass}`}>
+                        <div className={isEditingDescription ? 'opacity-0' : ''}>
+                          <div
+                            className={`truncate ${descriptionTextClass} ${descriptionTone} ${editableFieldPadding}`}
+                            title={descriptionLabel}
+                          >
+                            {descriptionLabel}
+                          </div>
+                        </div>
+                        {isEditingDescription && (
+                          <input
+                            ref={explorationDescriptionInputRef}
+                            className={`absolute inset-0 h-full w-full rounded-md border border-blue-400 bg-white/95 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-slate-900 dark:text-slate-100 ${descriptionTextClass} ${editableFieldPadding}`}
+                            value={editingExplorationDescriptionDraft}
+                            onChange={(e) => setEditingExplorationDescriptionDraft(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                skipExplorationDescriptionCommitRef.current = true;
+                                e.preventDefault();
+                                commitEditingExplorationDescription(exp.id);
+                              }
+                              if (e.key === 'Escape') {
+                                skipExplorationDescriptionCommitRef.current = true;
+                                e.preventDefault();
+                                cancelEditingExplorationDescription();
+                              }
+                            }}
+                            onBlur={() => {
+                              if (skipExplorationDescriptionCommitRef.current) {
+                                skipExplorationDescriptionCommitRef.current = false;
+                                return;
+                              }
                               commitEditingExplorationDescription(exp.id);
-                            }
-                            if (e.key === 'Escape') {
-                              skipExplorationDescriptionCommitRef.current = true;
-                              e.preventDefault();
-                              cancelEditingExplorationDescription();
-                            }
-                          }}
-                          onBlur={() => {
-                            if (skipExplorationDescriptionCommitRef.current) {
-                              skipExplorationDescriptionCommitRef.current = false;
-                              return;
-                            }
-                            commitEditingExplorationDescription(exp.id);
-                          }}
-                          aria-label="Edit exploration description"
-                        />
-                      )}
-                      {!isEditingDescription && (
-                        <button
-                          type="button"
-                          className={`absolute right-0 top-1/2 -translate-y-1/2 z-10 opacity-0 transition-opacity pointer-events-none group-hover/exp-card-desc:opacity-100 group-hover/exp-card-desc:pointer-events-auto ${editButtonClass}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            startEditingExplorationDescription(exp.id, description);
-                          }}
-                          aria-label="Edit exploration description"
-                        >
-                          <EditIcon size={editIconSize} />
-                        </button>
-                      )}
+                            }}
+                            aria-label="Edit exploration description"
+                          />
+                        )}
+                        {!isEditingDescription && (
+                          <button
+                            type="button"
+                            className={`absolute right-0 top-1/2 -translate-y-1/2 z-10 opacity-0 transition-opacity pointer-events-none group-hover/exp-card-desc:opacity-100 group-hover/exp-card-desc:pointer-events-auto ${editButtonClass}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startEditingExplorationDescription(exp.id, description);
+                            }}
+                            aria-label="Edit exploration description"
+                          >
+                            <EditIcon size={editIconSize} />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
+                )}
+                extra={
+                  <Dropdown menu={cardMenu} trigger={['click']} placement="bottomRight">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<MoreHorizontal size={16} />}
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      aria-label="Exploration actions"
+                    />
+                  </Dropdown>
+                }
+              >
+                <div className="flex w-full flex-1 flex-col">
+                  <div className="flex flex-col gap-2">
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {updatedLabel}
+                    </Text>
+                    <Space size="small" wrap>
+                      <Tag color="default" variant="filled" className="rounded-full px-2">
+                        {tableCount} tables
+                      </Tag>
+                      <Tag color="default" variant="filled" className="rounded-full px-2">
+                        {rowCount} rows
+                      </Tag>
+                      <Tag color="default" variant="filled" className="rounded-full px-2">
+                        {nodeCount} nodes
+                      </Tag>
+                      <Tag color="default" variant="filled" className="rounded-full px-2">
+                        {branchCount} branches
+                      </Tag>
+                    </Space>
+                  </div>
+                  <div className="mt-auto w-full pt-2">
+                    <Button
+                      type="default"
+                      block
+                      className="w-full"
+                      icon={<Play size={14} />}
+                      onClick={() => openAsset(exp)}
+                    >
+                      Open Exploration
+                    </Button>
+                  </div>
                 </div>
-              )}
-              extra={
-                <Dropdown menu={cardMenu} trigger={['click']} placement="bottomRight">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<MoreHorizontal size={16} />}
-                    onClick={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    aria-label="Exploration actions"
-                  />
-                </Dropdown>
-              }
-            >
-              <div className="flex w-full flex-1 flex-col">
-                <div className="flex flex-col gap-2">
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {updatedLabel}
-                  </Text>
-                  <Space size="small" wrap>
-                    <Tag color="default" variant="filled" className="rounded-full px-2">
-                      {tableCount} tables
+              </Card>
+            );
+          })}
+        </div>
+        )
+    );
+
+    const renderRawDatasetGrid = () => (
+      rawDatasetAssets.length === 0
+        ? renderRawDatasetEmpty()
+        : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {rawDatasetAssets.map((asset) => {
+            const snapshot = asset.datasetSnapshot || {};
+            const rowCount = Number.isFinite(snapshot.rowCount) ? snapshot.rowCount : 0;
+            const columnCount = Array.isArray(snapshot.schema) ? snapshot.schema.length : 0;
+            const updated = asset.updatedAt ? new Date(asset.updatedAt).toLocaleString() : '';
+            const updatedLabel = updated ? `Updated ${updated}` : 'Updated just now';
+            const displayName = asset.name || asset.rawDataName || 'Raw dataset';
+            const cardMenu = buildCardMenu(
+              () => duplicateAsset(asset.id),
+              () => openDeleteExplorationModal(asset.id)
+            );
+            return (
+              <Card
+                key={asset.id}
+                size="small"
+                variant="borderless"
+                className="raw-dataset-card group h-full rounded-2xl border border-blue-300/80 bg-blue-50/80 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-blue-600/70 dark:bg-blue-950/30 flex flex-col"
+                styles={{
+                  body: {
+                    padding: 16,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    flex: 1,
+                  },
+                  header: { padding: '12px 16px' },
+                }}
+                title={(
+                  <div className="flex items-center justify-between gap-2 w-full">
+                    <div className="truncate text-slate-900 dark:text-slate-100 font-semibold">
+                      {displayName}
+                    </div>
+                    <Tag color="blue" variant="filled" className="rounded-full px-2">
+                      Raw dataset
                     </Tag>
-                    <Tag color="default" variant="filled" className="rounded-full px-2">
-                      {rowCount} rows
-                    </Tag>
-                    <Tag color="default" variant="filled" className="rounded-full px-2">
-                      {nodeCount} nodes
-                    </Tag>
-                    <Tag color="default" variant="filled" className="rounded-full px-2">
-                      {branchCount} branches
-                    </Tag>
-                  </Space>
+                  </div>
+                )}
+                extra={
+                  <Dropdown menu={cardMenu} trigger={['click']} placement="bottomRight">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<MoreHorizontal size={16} />}
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      aria-label="Raw dataset actions"
+                    />
+                  </Dropdown>
+                }
+              >
+                <div className="flex w-full flex-1 flex-col gap-3">
+                  <div className="flex flex-col gap-2">
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {updatedLabel}
+                    </Text>
+                    <Space size="small" wrap>
+                      <Tag color="default" variant="filled" className="rounded-full px-2">
+                        {rowCount} rows
+                      </Tag>
+                      <Tag color="default" variant="filled" className="rounded-full px-2">
+                        {columnCount} columns
+                      </Tag>
+                    </Space>
+                  </div>
+                  <div className="mt-auto w-full pt-2">
+                    <Button
+                      type="default"
+                      block
+                      className="w-full"
+                      icon={<Play size={14} />}
+                      onClick={() => openAsset(asset)}
+                    >
+                      Open Raw Dataset
+                    </Button>
+                  </div>
                 </div>
-                <div className="mt-auto w-full pt-2">
-                  <Button
-                    type="default"
-                    block
-                    className="w-full"
-                    icon={<Play size={14} />}
-                    onClick={() => openExploration(exp)}
-                  >
-                    Open Exploration
-                  </Button>
+              </Card>
+            );
+          })}
+        </div>
+        )
+    );
+
+    const renderSqlAssetGrid = () => (
+      sqlAssets.length === 0
+        ? renderSqlAssetEmpty()
+        : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {sqlAssets.map((asset) => {
+            const snapshot = asset.sqlSnapshot || {};
+            const rowCount = Number.isFinite(snapshot.rowCount) ? snapshot.rowCount : 0;
+            const columnCount = Array.isArray(snapshot.schema) ? snapshot.schema.length : 0;
+            const updated = asset.updatedAt ? new Date(asset.updatedAt).toLocaleString() : '';
+            const updatedLabel = updated ? `Updated ${updated}` : 'Updated just now';
+            const displayName = asset.name || 'SQL transformation';
+            const inputEntry = asset.sqlInputTable ? externalTableRegistry.allByName?.[asset.sqlInputTable] : null;
+            const inputLabel = inputEntry?.label || asset.sqlInputTable || 'No input selected';
+            const cardMenu = buildCardMenu(
+              () => duplicateAsset(asset.id),
+              () => openDeleteExplorationModal(asset.id)
+            );
+            return (
+              <Card
+                key={asset.id}
+                size="small"
+                variant="borderless"
+                className="sql-asset-card group h-full rounded-2xl border border-fuchsia-300/80 bg-fuchsia-50/80 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-fuchsia-600/70 dark:bg-fuchsia-950/30 flex flex-col"
+                styles={{
+                  body: {
+                    padding: 16,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    flex: 1,
+                  },
+                  header: { padding: '12px 16px' },
+                }}
+                title={(
+                  <div className="flex items-center justify-between gap-2 w-full">
+                    <div className="truncate text-slate-900 dark:text-slate-100 font-semibold">
+                      {displayName}
+                    </div>
+                    <Tag color="purple" variant="filled" className="rounded-full px-2">
+                      SQL
+                    </Tag>
+                  </div>
+                )}
+                extra={
+                  <Dropdown menu={cardMenu} trigger={['click']} placement="bottomRight">
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<MoreHorizontal size={16} />}
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      aria-label="SQL asset actions"
+                    />
+                  </Dropdown>
+                }
+              >
+                <div className="flex w-full flex-1 flex-col gap-3">
+                  <div className="flex flex-col gap-2">
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      {updatedLabel}
+                    </Text>
+                    <Text type="secondary" className="text-xs">
+                      Input: {inputLabel}
+                    </Text>
+                    <Space size="small" wrap>
+                      <Tag color="default" variant="filled" className="rounded-full px-2">
+                        {rowCount} rows
+                      </Tag>
+                      <Tag color="default" variant="filled" className="rounded-full px-2">
+                        {columnCount} columns
+                      </Tag>
+                    </Space>
+                  </div>
+                  <div className="mt-auto w-full pt-2">
+                    <Button
+                      type="default"
+                      block
+                      className="w-full"
+                      icon={<Play size={14} />}
+                      onClick={() => openAsset(asset)}
+                    >
+                      Open SQL Transformation
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </Card>
-          );
-        })}
+              </Card>
+            );
+          })}
+        </div>
+        )
+    );
+
+    return (
+      <div className="space-y-10">
+        <div className="space-y-4">
+          {renderSectionHeader('Explorations', 'Node-based workflows and datasets.')}
+          {renderExplorationGrid()}
+        </div>
+        <div className="space-y-4">
+          {renderSectionHeader('Raw datasets', 'Ingested tables ready to reuse.')}
+          {renderRawDatasetGrid()}
+        </div>
+        <div className="space-y-4">
+          {renderSectionHeader('SQL transformations', 'Reusable SQL transformations.')}
+          {renderSqlAssetGrid()}
+        </div>
       </div>
-      )
-  );
+    );
+  };
 
   const renderExplorationGraph = () => (
     workbenchDependencyGraph.nodes.length === 0 ? renderExplorationEmpty() : (
@@ -3993,18 +4851,18 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         edges={workbenchDependencyGraph.edges}
         anchorsByNodeId={workbenchDependencyGraph.anchorsByNodeId}
         placementHints={graphPlacementHints}
-        onOpenExploration={(explorationId) => {
-          const exp = explorations.find((item) => item.id === explorationId);
-          if (exp) openExploration(exp);
+        onOpenAsset={(assetId) => {
+          const asset = explorations.find((item) => item.id === assetId);
+          if (asset) openAsset(asset);
         }}
         onOpenDataset={(entry) => {
           if (!entry) return;
           const exp = explorations.find((item) => item.id === entry.explorationId);
-          if (exp) openExploration(exp, { focusNodeId: entry.nodeId });
+          if (exp) openAsset(exp, { focusNodeId: entry.nodeId });
         }}
         onFlattenDataset={openFlattenModal}
-        onDuplicateExploration={duplicateExploration}
-        onDeleteExploration={openDeleteExplorationModal}
+        onDuplicateAsset={duplicateAsset}
+        onDeleteAsset={openDeleteExplorationModal}
         onDuplicateDataset={duplicateDatasetEntry}
         onDeleteDataset={openDeleteDatasetModal}
         className={isLandingGraph ? 'flex-1 min-h-0' : ''}
@@ -4013,7 +4871,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   );
 
   const renderDatasetCards = () => (
-    <div className="pt-4">
+    <div className="pt-6 space-y-4">
+      <div className="flex flex-col gap-1">
+        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">Saved datasets</div>
+        <Text type="secondary" className="text-xs">Dataset outputs saved from explorations.</Text>
+      </div>
       {datasetEntries.length === 0 ? (
         <div className={`mt-4 bg-white border border-gray-200 rounded-2xl text-center shadow-sm dark:bg-slate-900 dark:border-slate-700 ${isMobileMode ? 'p-6' : 'p-8'}`}>
           <Empty
@@ -4115,7 +4977,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                       <Space size="small" wrap>
                         {dependencies.map((dep) => (
                           <Tag
-                            key={`${dep.explorationId}:${dep.nodeId}`}
+                            key={`${dep.assetId || dep.explorationId || dep.name}:${dep.nodeId || 'dep'}`}
                             color={dep.isDataset ? 'green' : 'default'}
                             className="rounded-full px-2"
                             title={dep.explorationName ? `From ${dep.explorationName}` : undefined}
@@ -4137,7 +4999,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                         onClick={() => {
                           const exp = explorations.find((item) => item.id === dataset.explorationId);
                           if (exp) {
-                            openExploration(exp, { focusNodeId: dataset.nodeId });
+                            openAsset(exp, { focusNodeId: dataset.nodeId });
                           }
                         }}
                       >
@@ -4199,14 +5061,21 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
   }), [themePreference, onThemeChange, tableDensity]);
 
   const activeExploration = explorations.find(exp => exp.id === activeExplorationId);
-  const explorationDisplayName = activeExploration?.name || draftExplorationName || rawDataName || 'Exploration';
+  const resolvedActiveAssetType = activeExploration ? resolveAssetType(activeExploration) : activeAssetType;
+  const activeAssetFallback = resolveAssetFallbackName(resolvedActiveAssetType);
+  const explorationDisplayName = activeExploration?.name || draftExplorationName || rawDataName || activeAssetFallback;
   const explorationDescription = activeExploration?.description ?? draftExplorationDescription ?? '';
+  const isExplorationMode = resolvedActiveAssetType === ASSET_TYPES.EXPLORATION;
+  const isRawDatasetMode = resolvedActiveAssetType === ASSET_TYPES.RAW_DATASET;
+  const isSqlAssetMode = resolvedActiveAssetType === ASSET_TYPES.SQL;
   const explorationDescriptionLabel = explorationDescription || 'Add a description';
   const explorationDescriptionTone = explorationDescription
     ? 'text-gray-400 dark:text-slate-400'
     : 'text-gray-400 dark:text-slate-500 italic';
-  const isFlattenedDataset = activeExploration?.isFlattenedDataset === true
-    || nodes.some((node) => node.params?.isFlattened && node.params?.datasetSnapshot);
+  const isFlattenedDataset = resolvedActiveAssetType === ASSET_TYPES.EXPLORATION && (
+    activeExploration?.isFlattenedDataset === true
+    || nodes.some((node) => node.params?.isFlattened && node.params?.datasetSnapshot)
+  );
   const editButtonClass = 'inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-slate-600 shadow-sm transition hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200';
   const landingSegmentBaseClass = '!font-medium !border transition-colors';
   const landingSegmentActiveClass = [
@@ -4428,20 +5297,24 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
               <Space size="small" align="center" wrap={isMobileMode}>
                 {isMobileMode && (
                   <Space size="small" wrap>
-                    <Button
-                      size="small"
-                      type={isStatsCollapsed ? 'default' : 'primary'}
-                      onClick={() => (isStatsCollapsed ? expandStatsPanel() : collapseStatsPanel())}
-                    >
-                      Stats
-                    </Button>
-                    <Button
-                      size="small"
-                      type={isPropertiesCollapsed ? 'default' : 'primary'}
-                      onClick={() => (isPropertiesCollapsed ? expandPropertiesPanel() : collapsePropertiesPanel())}
-                    >
-                      Properties
-                    </Button>
+                    {!isSqlAssetMode && (
+                      <Button
+                        size="small"
+                        type={isStatsCollapsed ? 'default' : 'primary'}
+                        onClick={() => (isStatsCollapsed ? expandStatsPanel() : collapseStatsPanel())}
+                      >
+                        Stats
+                      </Button>
+                    )}
+                    {!isSqlAssetMode && (
+                      <Button
+                        size="small"
+                        type={isPropertiesCollapsed ? 'default' : 'primary'}
+                        onClick={() => (isPropertiesCollapsed ? expandPropertiesPanel() : collapsePropertiesPanel())}
+                      >
+                        Properties
+                      </Button>
+                    )}
                   </Space>
                 )}
                 <Button
@@ -4467,12 +5340,14 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     aria-label="Redo"
                   />
                 </Space.Compact>
-                <Dropdown menu={renderModeMenu} trigger={['click']} placement="bottomRight">
-                  <Button size={isMobileMode ? 'small' : 'middle'} icon={<ActiveRenderModeIcon size={renderModeIconSize} />}>
-                    {activeRenderModeLabel}
-                  </Button>
-                </Dropdown>
-                <Button size={isMobileMode ? 'small' : 'middle'} type="primary" icon={<Save size={14} />} onClick={saveExploration}>
+                {isExplorationMode && (
+                  <Dropdown menu={renderModeMenu} trigger={['click']} placement="bottomRight">
+                    <Button size={isMobileMode ? 'small' : 'middle'} icon={<ActiveRenderModeIcon size={renderModeIconSize} />}>
+                      {activeRenderModeLabel}
+                    </Button>
+                  </Dropdown>
+                )}
+                <Button size={isMobileMode ? 'small' : 'middle'} type="primary" icon={<Save size={14} />} onClick={saveAsset}>
                   Save & Exit
                 </Button>
                 {saveError && (
@@ -4502,14 +5377,15 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                     Dependency graph
                   </Button>
                 </Space.Compact>
-                <Button
-                  type="primary"
-                  icon={<Plus size={14} />}
-                  onClick={startNewExploration}
-                  block={isMobileMode}
-                >
-                  New Exploration
-                </Button>
+                <Dropdown menu={newAssetMenu} trigger={['click']} placement="bottomRight">
+                  <Button
+                    type="primary"
+                    icon={<Plus size={14} />}
+                    block={isMobileMode}
+                  >
+                    New Asset
+                  </Button>
+                </Dropdown>
               </Space>
             )}
           </div>
@@ -4877,7 +5753,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
                                     onClick={() => {
                                       const exp = explorations.find((item) => item.id === dataset.explorationId);
                                       if (exp) {
-                                        openExploration(exp, { focusNodeId: dataset.nodeId });
+                                        openAsset(exp, { focusNodeId: dataset.nodeId });
                                       }
                                     }}
                                   >
@@ -4905,91 +5781,87 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
             </div>
           </div>
         ) : (
-          <div
-            ref={canvasScrollRef}
-            className={renderMode === 'freeLayout'
-              ? 'flex-1 min-h-0 overflow-hidden bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-slate-50 dark:bg-slate-950 dark:bg-none'
-              : 'flex-1 min-h-0 overflow-auto bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-slate-50 dark:bg-slate-950 dark:bg-none cursor-grab active:cursor-grabbing'}
-            onClick={() => {
-              setShowAddMenuForId(null);
-              setShowInsertMenuForId(null);
-            }}
-          >
-            {renderMode === 'freeLayout' ? (
-              <FreeLayoutCanvas
-                nodes={renderNodes}
-                selectedNodeId={selectedNodeId}
-                chainData={chainData}
-                tableDensity={tableDensity}
-                onSelect={handleSelect}
-                onAdd={addNode}
-                onInsert={insertNode}
-                onRemove={removeNode}
-                onToggleExpand={toggleNodeExpansion}
-                onToggleBranch={toggleBranchCollapse}
-                onToggleDataset={toggleDatasetForNode}
-                onDrillDown={handleChartDrillDown}
-                onTableCellClick={handleTableCellClick}
-                onTableSortChange={handleTableSortChange}
-                onAssistantRequest={handleAssistantRequest}
-                onAddFilter={addFilterToNode}
-                onUpdateFilter={updateFilterOnNode}
-                onRemoveFilter={removeFilterFromNode}
-                onFilterCellAction={handleFilterCellAction}
-                showAddMenuForId={showAddMenuForId}
-                setShowAddMenuForId={setShowAddMenuForId}
-                showInsertMenuForId={showInsertMenuForId}
-                setShowInsertMenuForId={setShowInsertMenuForId}
-                onUpdateNodePosition={updateNodePosition}
-                onAutoLayout={applyAutoLayout}
-                onEntangledColorChange={updateEntangledGroupColor}
-                onRenameBranch={renameBranch}
-              />
-            ) : (
-              <div className={isMobileMode
-                ? 'w-full flex justify-center px-4 py-6 items-start min-h-full'
-                : (isSmartMode
-                  ? 'w-full flex justify-start px-20 pt-6 items-start min-h-full'
-                  : 'min-w-full inline-flex justify-center p-20 items-start min-h-full')}>
-                <TreeNode
-                  nodeId="node-start"
-                  nodes={renderNodes}
-                  selectedNodeId={selectedNodeId}
-                  chainData={chainData}
-                  tableDensity={tableDensity}
-                  onSelect={handleSelect}
-                  onAdd={addNode}
-                  onInsert={insertNode}
-                  onRemove={removeNode}
-                  onToggleExpand={toggleNodeExpansion}
-                  onToggleBranch={toggleBranchCollapse}
-                  onToggleDataset={toggleDatasetForNode}
-                  onDrillDown={handleChartDrillDown}
-                  onTableCellClick={handleTableCellClick}
-                  onTableSortChange={handleTableSortChange}
-                  onAssistantRequest={handleAssistantRequest}
-                  onAddFilter={addFilterToNode}
-                  onUpdateFilter={updateFilterOnNode}
-                  onRemoveFilter={removeFilterFromNode}
-                  onFilterCellAction={handleFilterCellAction}
-                  showAddMenuForId={showAddMenuForId}
-                  setShowAddMenuForId={setShowAddMenuForId}
-                  showInsertMenuForId={showInsertMenuForId}
-                  setShowInsertMenuForId={setShowInsertMenuForId}
-                  renderMode={renderMode}
-                  leafCountById={leafCountById}
-                  branchSelectionByNodeId={branchSelectionByNodeId}
-                  onSelectBranch={setBranchSelection}
-                  onRenameBranch={renameBranch}
-                  onToggleEntangle={toggleEntangledBranch}
-                  onEntangledColorChange={updateEntangledGroupColor}
-                />
-              </div>
-            )}
-          </div>
+          isRawDatasetMode ? (
+            <RawDatasetAssetView
+              nodes={nodes}
+              chainData={chainData}
+              tableDensity={tableDensity}
+              onTableSortChange={handleTableSortChange}
+            />
+          ) : isSqlAssetMode ? (
+            <SqlTransformationAssetView
+              nodes={nodes}
+              chainData={chainData}
+              tableDensity={tableDensity}
+              sqlDraftInput={sqlDraftInput}
+              sqlDraftText={sqlDraftText}
+              sqlDraftError={sqlDraftError}
+              sqlDraftMode={sqlDraftMode}
+              sqlDraftJoinType={sqlDraftJoinType}
+              sqlDraftRightTable={sqlDraftRightTable}
+              sqlDraftLeftKey={sqlDraftLeftKey}
+              sqlDraftRightKey={sqlDraftRightKey}
+              setSqlDraftInput={setSqlDraftInput}
+              setSqlDraftText={setSqlDraftText}
+              setSqlDraftError={setSqlDraftError}
+              setSqlDraftMode={setSqlDraftMode}
+              setSqlDraftJoinType={setSqlDraftJoinType}
+              setSqlDraftRightTable={setSqlDraftRightTable}
+              setSqlDraftLeftKey={setSqlDraftLeftKey}
+              setSqlDraftRightKey={setSqlDraftRightKey}
+              runSqlDraft={runSqlDraft}
+              externalTableRegistry={externalTableRegistry}
+              activeExplorationId={activeExplorationId}
+              explorations={explorations}
+              assetTypes={ASSET_TYPES}
+              onTableSortChange={handleTableSortChange}
+            />
+          ) : (
+            <ExplorationAssetView
+              renderMode={renderMode}
+              renderNodes={renderNodes}
+              selectedNodeId={selectedNodeId}
+              chainData={chainData}
+              tableDensity={tableDensity}
+              isMobileMode={isMobileMode}
+              isSmartMode={isSmartMode}
+              leafCountById={leafCountById}
+              branchSelectionByNodeId={branchSelectionByNodeId}
+              onSelect={handleSelect}
+              onAdd={addNode}
+              onInsert={insertNode}
+              onRemove={removeNode}
+              onToggleExpand={toggleNodeExpansion}
+              onToggleBranch={toggleBranchCollapse}
+              onToggleDataset={toggleDatasetForNode}
+              onDrillDown={handleChartDrillDown}
+              onTableCellClick={handleTableCellClick}
+              onTableSortChange={handleTableSortChange}
+              onAssistantRequest={handleAssistantRequest}
+              onAddFilter={addFilterToNode}
+              onUpdateFilter={updateFilterOnNode}
+              onRemoveFilter={removeFilterFromNode}
+              onFilterCellAction={handleFilterCellAction}
+              showAddMenuForId={showAddMenuForId}
+              setShowAddMenuForId={setShowAddMenuForId}
+              showInsertMenuForId={showInsertMenuForId}
+              setShowInsertMenuForId={setShowInsertMenuForId}
+              onUpdateNodePosition={updateNodePosition}
+              onAutoLayout={applyAutoLayout}
+              onEntangledColorChange={updateEntangledGroupColor}
+              onRenameBranch={renameBranch}
+              onToggleEntangle={toggleEntangledBranch}
+              onSelectBranch={setBranchSelection}
+              canvasScrollRef={canvasScrollRef}
+              onCanvasClick={() => {
+                setShowAddMenuForId(null);
+                setShowInsertMenuForId(null);
+              }}
+            />
+          )
         )}
 
-        {viewMode === 'canvas' && isMinimapMode && !isMobileMode && (
+        {viewMode === 'canvas' && isExplorationMode && isMinimapMode && !isMobileMode && (
           <GraphMinimapPanel
             nodes={renderNodes}
             chainData={chainData}
@@ -5001,12 +5873,12 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
 
         {viewMode === 'canvas' && !isMobileMode && (isStatsCollapsed || isPropertiesCollapsed) && (
           <div className="absolute right-4 top-20 flex flex-col gap-2 z-40">
-            {isStatsCollapsed && (
+            {isStatsCollapsed && !isSqlAssetMode && (
               <Button size="small" onClick={expandStatsPanel}>
                 Show Stats
               </Button>
             )}
-            {isPropertiesCollapsed && (
+            {isPropertiesCollapsed && !isSqlAssetMode && (
               <Button size="small" onClick={expandPropertiesPanel}>
                 Show Properties
               </Button>
@@ -5016,7 +5888,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       </div>
 
       {/* 3. COLUMN STATS PANEL */}
-      {viewMode === 'canvas' && !isMobileMode && !isStatsCollapsed && !isStatsDetached && (
+      {viewMode === 'canvas' && !isMobileMode && !isSqlAssetMode && !isStatsCollapsed && !isStatsDetached && (
         <ColumnStatsPanel
           node={nodes.find(n => n.id === selectedNodeId)}
           schema={selectedSchema}
@@ -5030,7 +5902,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         />
       )}
 
-      {viewMode === 'canvas' && isMobileMode && (
+      {viewMode === 'canvas' && isMobileMode && !isSqlAssetMode && (
         <Drawer
           open={!isStatsCollapsed}
           placement="right"
@@ -5054,12 +5926,13 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
       )}
 
       {/* 4. PROPERTIES PANEL */}
-      {viewMode === 'canvas' && !isMobileMode && !isPropertiesCollapsed && (
+      {viewMode === 'canvas' && !isMobileMode && !isPropertiesCollapsed && !isSqlAssetMode && (
         <PropertiesPanel
           node={nodes.find(n => n.id === selectedNodeId)}
           updateNode={updateNodeFromPanel}
           schema={selectedSchema}
           data={selectedData}
+          assetType={resolvedActiveAssetType}
           dataModel={dataModel}
           availableTables={availableTables}
           sourceStatus={sourceStatus}
@@ -5074,7 +5947,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         />
       )}
 
-      {viewMode === 'canvas' && isMobileMode && (
+      {viewMode === 'canvas' && isMobileMode && !isSqlAssetMode && (
         <Drawer
           open={!isPropertiesCollapsed}
           placement="right"
@@ -5089,6 +5962,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
             updateNode={updateNodeFromPanel}
             schema={selectedSchema}
             data={selectedData}
+            assetType={resolvedActiveAssetType}
             dataModel={dataModel}
             availableTables={availableTables}
             sourceStatus={sourceStatus}
@@ -5104,7 +5978,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         </Drawer>
       )}
 
-      {viewMode === 'canvas' && !isMobileMode && isStatsDetached && !isStatsCollapsed && (
+      {viewMode === 'canvas' && !isMobileMode && !isSqlAssetMode && isStatsDetached && !isStatsCollapsed && (
         <div
           className="fixed bg-white border border-gray-200 shadow-2xl rounded-xl overflow-hidden dark:bg-slate-900 dark:border-slate-700 z-50"
           style={{
@@ -5142,7 +6016,11 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }) => {
         cancelText="Cancel"
         okButtonProps={{ danger: true }}
         centered
-        title={deleteModalState?.type === 'dataset' ? 'Delete dataset' : 'Delete exploration'}
+        title={deleteModalState?.type === 'dataset'
+          ? 'Delete dataset'
+          : (deleteModalState?.assetType === ASSET_TYPES.RAW_DATASET
+            ? 'Delete raw dataset'
+            : (deleteModalState?.assetType === ASSET_TYPES.SQL ? 'Delete SQL transformation' : 'Delete exploration'))}
       >
         <div className="space-y-4 text-sm text-slate-600 dark:text-slate-300">
           <div>
