@@ -2,6 +2,62 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    --background: 210 40% 98%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.625rem;
+  }
+
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
 /* Subtle animation helpers */
 @keyframes slide-in-from-bottom-4 {
   from {
@@ -40,7 +96,7 @@
 .progress-bar {
   position: relative;
   height: 8px;
-  background: #dbeafe;
+  background: hsl(var(--muted));
   border-radius: 9999px;
   overflow: hidden;
 }
@@ -52,7 +108,7 @@
   top: 0;
   bottom: 0;
   width: 40%;
-  background: #3b82f6;
+  background: hsl(var(--primary));
   animation: progress-indeterminate 1s linear infinite;
 }
 
@@ -65,15 +121,15 @@
   }
 }
 
-/* Table density helpers for Ant tables */
-.table-density-dense .ant-table-cell {
-  padding: 4px 8px 4px 8px !important;
+/* Table density helpers (will be updated when Table migrates to shadcn) */
+.table-density-dense td {
+  padding: 4px 8px !important;
   font-size: 12px;
   line-height: 1.2;
 }
 
-.table-density-comfortable .ant-table-cell {
-  padding: 8px 12px 4px 12px !important;
+.table-density-comfortable td {
+  padding: 8px 12px !important;
   font-size: 13px;
   line-height: 1.2;
 }
@@ -92,16 +148,7 @@
   height: 18px;
 }
 
-/* Exploration cards: full-width titles + clean inline edit */
-.exploration-card .ant-card-head {
-  overflow: visible;
-}
-
-.exploration-card .ant-card-head-title {
-  min-width: 0;
-  overflow: visible;
-}
-
+/* Exploration cards */
 .exploration-card-title {
   display: flex;
   align-items: center;
@@ -115,28 +162,7 @@
   min-width: 0;
 }
 
-.exploration-card-title .ant-typography-edit-content {
-  margin: 0;
-  width: 100%;
-}
-
-.exploration-card-title .ant-typography-edit-content > input,
-.exploration-card-title .ant-typography-edit-content > textarea {
-  width: 100%;
-  min-width: 0;
-}
-
-/* Dataset cards */
-.dataset-card .ant-card-head {
-  overflow: visible;
-}
-
-.dataset-card .ant-card-head-title {
-  min-width: 0;
-  overflow: visible;
-}
-
-/* Free layout canvas + compact node header */
+/* Free layout canvas */
 .free-layout-canvas {
   cursor: default;
 }

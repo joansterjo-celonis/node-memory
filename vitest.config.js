@@ -17,19 +17,23 @@ const jsxInJs = () => ({
 
 export default defineConfig({
   plugins: [jsxInJs()],
+  resolve: {
+    alias: {
+      '@': '/Users/j.sterjo/Documents/GitHub/figma-quiz/src'
+    }
+  },
   test: {
     environment: 'jsdom',
     setupFiles: ['./tests/setup.js'],
     include: [
-      'tests/unit/**/*.{test,spec}.{js,jsx}',
-      'tests/integration/**/*.{test,spec}.{js,jsx}'
+      'tests/unit/**/*.{test,spec}.{js,jsx,ts,tsx}',
+      'tests/integration/**/*.{test,spec}.{js,jsx,ts,tsx}'
     ],
     exclude: ['tests/e2e/**', 'node_modules/**'],
     pool: 'threads',
     maxWorkers: 1
   },
   esbuild: {
-    jsx: 'automatic',
-    loader: 'jsx'
+    jsx: 'automatic'
   }
 });
