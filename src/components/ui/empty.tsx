@@ -18,7 +18,7 @@ function Empty({ className, description, icon, children, ...props }: EmptyProps)
     >
       {icon ?? <InboxIcon className="h-10 w-10 text-muted-foreground/40 mb-3" />}
       {description && (
-        <p className="text-sm text-muted-foreground">{description}</p>
+        <div className="text-sm text-muted-foreground">{description}</div>
       )}
       {children}
     </div>

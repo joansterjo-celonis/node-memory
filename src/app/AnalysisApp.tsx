@@ -5077,7 +5077,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }: { themePrefere
                     {!isSqlAssetMode && (
                       <Button
                         size="sm"
-                        variant={isStatsCollapsed ? 'outline' : 'default'}
+                        variant={isStatsCollapsed ? 'outline' : 'secondary'}
                         onClick={() => (isStatsCollapsed ? expandStatsPanel() : collapseStatsPanel())}
                       >
                         Stats
@@ -5086,7 +5086,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }: { themePrefere
                     {!isSqlAssetMode && (
                       <Button
                         size="sm"
-                        variant={isPropertiesCollapsed ? 'outline' : 'default'}
+                        variant={isPropertiesCollapsed ? 'outline' : 'secondary'}
                         onClick={() => (isPropertiesCollapsed ? expandPropertiesPanel() : collapsePropertiesPanel())}
                       >
                         Properties
@@ -5126,7 +5126,7 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }: { themePrefere
                 {isExplorationMode && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button size={isMobileMode ? 'sm' : 'default'}>
+                      <Button variant="outline" size={isMobileMode ? 'sm' : 'default'}>
                         <ActiveRenderModeIcon size={renderModeIconSize} />
                         {activeRenderModeLabel}
                       </Button>
@@ -5685,12 +5685,12 @@ const AnalysisApp = ({ themePreference = 'auto', onThemeChange }: { themePrefere
         {viewMode === 'canvas' && !isMobileMode && (isStatsCollapsed || isPropertiesCollapsed) && (
           <div className="absolute right-4 top-20 flex flex-col gap-2 z-40">
             {isStatsCollapsed && !isSqlAssetMode && (
-              <Button size="sm" onClick={expandStatsPanel}>
+              <Button variant="outline" size="sm" onClick={expandStatsPanel}>
                 Show Stats
               </Button>
             )}
             {isPropertiesCollapsed && !isSqlAssetMode && (
-              <Button size="sm" onClick={expandPropertiesPanel}>
+              <Button variant="outline" size="sm" onClick={expandPropertiesPanel}>
                 Show Properties
               </Button>
             )}
