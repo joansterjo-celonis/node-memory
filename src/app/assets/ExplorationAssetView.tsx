@@ -78,9 +78,10 @@ const ExplorationAssetView = ({
   canvasScrollRef,
   onCanvasClick
 }: ExplorationAssetViewProps) => {
+  const dotBg = '[background-image:radial-gradient(circle,_rgb(0_0_0_/_0.12)_1px,_transparent_1px)] [background-size:20px_20px] bg-muted/30 dark:[background-image:radial-gradient(circle,_rgb(255_255_255_/_0.1)_1px,_transparent_1px)]';
   const containerClass = renderMode === 'freeLayout'
-    ? 'flex-1 min-h-0 overflow-hidden bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-muted/30 dark:bg-none'
-    : 'flex-1 min-h-0 overflow-auto bg-[url(\'https://www.transparenttextures.com/patterns/cubes.png\')] bg-muted/30 dark:bg-none cursor-grab active:cursor-grabbing';
+    ? `flex-1 min-h-0 overflow-hidden ${dotBg}`
+    : `flex-1 min-h-0 overflow-auto ${dotBg} cursor-grab active:cursor-grabbing`;
 
   return (
     <div

@@ -298,11 +298,8 @@ const AssistantPanel = React.memo(({ node, schema, onRun }: { node: any; schema:
   const isLoading = node.params.assistantStatus === 'loading';
 
   return (
-    <Card>
-      <CardHeader className="p-3">
-        <CardTitle className="text-sm">AI Assistant</CardTitle>
-      </CardHeader>
-      <CardContent className="p-3 pt-0">
+    <Card className="rounded-none border-x-0 border-b-0 shadow-none">
+      <CardContent className="p-3">
         <div className="flex flex-col gap-2">
           <form onSubmit={handleSubmit}>
             <div className="flex flex-col gap-2">
@@ -2339,7 +2336,7 @@ const TreeNode = ({
                 >
                   <DropdownMenuTrigger asChild>
                     <Button
-                      variant="outline"
+                      variant="ghost"
                       size="icon"
                       className="h-6 w-6 rounded-full"
                       title="Insert Step Here"
@@ -3206,7 +3203,7 @@ const FreeLayoutCanvas = ({
               >
                 <DropdownMenuTrigger asChild>
                   <Button
-                    variant="outline"
+                    variant="ghost"
                     size="icon"
                     className="h-6 w-6 rounded-full"
                     title="Insert Step Here"
