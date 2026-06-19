@@ -1,5 +1,12 @@
 import React from 'react';
-import { TreeNode, FreeLayoutCanvas } from '../../components/TreeNode';
+import { TreeNode as TreeNodeImpl, FreeLayoutCanvas as FreeLayoutCanvasImpl } from './components/TreeNode';
+
+// TreeNode and FreeLayoutCanvas are ported from a JS codebase and have
+// loose prop types with a handful of optional-by-convention fields
+// (menuId, headerDragProps, shouldSuppressSelect). Cast to any to keep
+// the view wrapper thin; full typing can be added incrementally.
+const TreeNode = TreeNodeImpl as any;
+const FreeLayoutCanvas = FreeLayoutCanvasImpl as any;
 
 interface ExplorationAssetViewProps {
   renderMode: string;
@@ -18,9 +25,9 @@ interface ExplorationAssetViewProps {
   onToggleExpand: (nodeId: string) => void;
   onToggleBranch: (nodeId: string) => void;
   onToggleDataset: (nodeId: string) => void;
-  onDrillDown: (nodeId: string, value: any) => void;
+  onDrillDown: (...args: any[]) => void;
   onTableCellClick: (...args: any[]) => void;
-  onTableSortChange: (sortBy: string, sortDirection: string) => void;
+  onTableSortChange: (...args: any[]) => void;
   onAssistantRequest: (...args: any[]) => void;
   onAddFilter: (...args: any[]) => void;
   onUpdateFilter: (...args: any[]) => void;
@@ -36,7 +43,7 @@ interface ExplorationAssetViewProps {
   onRenameBranch: (...args: any[]) => void;
   onToggleEntangle: (...args: any[]) => void;
   onSelectBranch: (...args: any[]) => void;
-  canvasScrollRef: React.RefObject<HTMLDivElement>;
+  canvasScrollRef: React.RefObject<HTMLDivElement | null>;
   onCanvasClick: (e: React.MouseEvent) => void;
 }
 

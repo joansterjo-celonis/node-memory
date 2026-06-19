@@ -1,15 +1,15 @@
 import React from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Empty } from '@/components/ui/empty';
-import { Statistic } from '@/components/ui/statistic';
-import { Progress } from '@/components/ui/progress';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Button } from './ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Badge } from './ui/badge';
+import { Input } from './ui/input';
+import { Textarea } from './ui/textarea';
+import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { Empty } from './ui/empty';
+import { Statistic } from './ui/statistic';
+import { Progress } from './ui/progress';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,17 +18,17 @@ import {
   DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuSeparator
-} from '@/components/ui/dropdown-menu';
+} from './ui/dropdown-menu';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue
-} from '@/components/ui/select';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
+} from './ui/select';
+import { RadioGroup, RadioGroupItem } from './ui/radio-group';
+import { Label } from './ui/label';
+import { Checkbox } from './ui/checkbox';
 import { Loader2, AlertCircle, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
 import {
   Plus,
@@ -49,12 +49,12 @@ import {
   Edit as EditIcon,
   Share2,
   Layout
-} from '../ui/icons';
-import { getChildren, countDescendants, getNodeResult, formatNumber } from '../utils/nodeUtils';
-import { SQL_INCOMING_TABLE } from '../utils/dataEngine';
-import { normalizeFilters, resolveFilterMode } from '../utils/filterUtils';
-import VisxChart from '../ui/SimpleChart';
-import WorldMapChart from '../ui/WorldMapChart';
+} from '../icons';
+import { getChildren, countDescendants, getNodeResult, formatNumber } from '../lib/nodeUtils';
+import { SQL_INCOMING_TABLE } from '../lib/dataEngine';
+import { normalizeFilters, resolveFilterMode } from '../lib/filterUtils';
+import VisxChart from '../charts/SimpleChart';
+import WorldMapChart from '../charts/WorldMapChart';
 import TablePreview from './TablePreview';
 
 const BRANCH_CONNECTOR_HEIGHT = 16;
