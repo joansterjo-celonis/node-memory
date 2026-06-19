@@ -1,0 +1,3317 @@
+import React from 'react';
+import { Button } from './ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Badge } from './ui/badge';
+import { Input } from './ui/input';
+import { Textarea } from './ui/textarea';
+import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { Empty } from './ui/empty';
+import { Statistic } from './ui/statistic';
+import { Progress } from './ui/progress';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuSeparator
+} from './ui/dropdown-menu';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from './ui/select';
+import { RadioGroup, RadioGroupItem } from './ui/radio-group';
+import { Label } from './ui/label';
+import { Checkbox } from './ui/checkbox';
+import { Loader2, AlertCircle, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
+import {
+  Plus,
+  Filter,
+  BarChart3,
+  Database,
+  Trash2,
+  ChevronRight,
+  ChevronDown,
+  Sigma,
+  TableIcon,
+  GitBranch,
+  Hash,
+  Gauge,
+  LinkIcon,
+  Minimize2,
+  MoreHorizontal,
+  Edit as EditIcon,
+  Share2,
+  Layout
+} from '../icons';
+import { getChildren, countDescendants, getNodeResult, formatNumber } from '../lib/nodeUtils';
+import { SQL_INCOMING_TABLE } from '../lib/dataEngine';
+import { normalizeFilters, resolveFilterMode } from '../lib/filterUtils';
+import VisxChart from '../charts/SimpleChart';
+import WorldMapChart from '../charts/WorldMapChart';
+import TablePreview from './TablePreview';
+
+const BRANCH_CONNECTOR_HEIGHT = 16;
+const BRANCH_CONNECTOR_STROKE = 2;
+const CLASSIC_SMART_MIN_WIDTH = 250;
+const CLASSIC_SMART_COLUMN_GAP = 32;
+const CLASSIC_SMART_COLLAPSED_SCALE = 0.6;
+const CLASSIC_SMART_COLLAPSED_MIN_WIDTH = 160;
+const FREE_LAYOUT_MIN_SCALE = 0.4;
+const FREE_LAYOUT_MAX_SCALE = 2.2;
+const FREE_LAYOUT_ZOOM_STEP = 1.15;
+const FREE_LAYOUT_DEFAULT_NODE_SIZE = { width: 640, height: 320 };
+const FREE_LAYOUT_BASE_OFFSET = { x: 80, y: 80 };
+const FREE_LAYOUT_MIN_GAP_X = 80;
+const FREE_LAYOUT_MIN_GAP_Y = 60;
+const DEFAULT_ENTANGLED_COLOR = '#facc15';
+const ENTANGLED_COLOR_OPTIONS = [
+  { value: '#facc15', label: 'Gold' },
+  { value: '#38bdf8', label: 'Sky' },
+  { value: '#34d399', label: 'Emerald' },
+  { value: '#a78bfa', label: 'Violet' },
+  { value: '#f472b6', label: 'Pink' },
+  { value: '#fb7185', label: 'Rose' }
+];
+const KPI_LABELS = {
+  count: 'Count',
+  count_distinct: 'Distinct Count',
+  sum: 'Sum',
+  avg: 'Average',
+  min: 'Min',
+  max: 'Max'
+};
+const FILTER_OPERATOR_LABELS = {
+  equals: '=',
+  not_equals: '!=',
+  gt: '>',
+  lt: '<',
+  gte: '>=',
+  lte: '<=',
+  in: 'in',
+  contains: 'contains'
+};
+
+const INSERT_MENU_ITEMS = [
+  {
+    type: 'group',
+    label: 'Insert Step',
+    children: [
+      { key: 'FILTER', label: 'Filter', icon: <span className="w-1.5 h-1.5 rounded-full bg-orange-400" /> },
+      { key: 'AGGREGATE', label: 'Aggregate', icon: <span className="w-1.5 h-1.5 rounded-full bg-purple-400" /> },
+      { key: 'JOIN', label: 'SQL', icon: <span className="w-1.5 h-1.5 rounded-full bg-pink-400" /> },
+      { type: 'divider' },
+      { key: 'COMPONENT:TABLE', label: 'Table', icon: <TableIcon size={12} /> },
+      { key: 'COMPONENT:PIVOT', label: 'Pivot Table', icon: <TableIcon size={12} /> },
+      { key: 'COMPONENT:AI', label: 'AI Assistant', icon: <Share2 size={12} /> }
+    ]
+  }
+];
+
+const metricRequiresField = (fn: string) => ['sum', 'avg', 'min', 'max', 'count_distinct'].includes(fn);
+
+const EntangledIndicator = ({
+  color,
+  rootId,
+  onChange,
+  className,
+  tooltip = 'Entangled branch'
+}: {
+  color?: string;
+  rootId?: string;
+  onChange?: (rootId: string, color: string) => void;
+  className?: string;
+  tooltip?: string;
+}) => {
+  const resolvedColor = color || DEFAULT_ENTANGLED_COLOR;
+  const canEdit = !!rootId && typeof onChange === 'function';
+  const resolvedOption = ENTANGLED_COLOR_OPTIONS.some((option) => option.value === resolvedColor)
+    ? resolvedColor
+    : DEFAULT_ENTANGLED_COLOR;
+  const [draftColor, setDraftColor] = React.useState(resolvedOption);
+  const [isOpen, setIsOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!isOpen) {
+      setDraftColor(resolvedOption);
+    }
+  }, [resolvedOption, isOpen]);
+
+  const handleApply = () => {
+    if (!rootId) return;
+    onChange?.(rootId, draftColor || resolvedOption);
+    setIsOpen(false);
+  };
+  const indicator = (
+    <span
+      className={className}
+      style={buildEntangledIndicatorStyle(resolvedColor)}
+    />
+  );
+  const tooltipWrapped = tooltip ? (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>{indicator}</TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  ) : indicator;
+  const colorPicker = (
+    <div className="flex flex-col gap-2" onClick={(event) => event.stopPropagation()}>
+      <RadioGroup value={draftColor} onValueChange={setDraftColor}>
+        <div className="flex flex-col gap-1">
+          {ENTANGLED_COLOR_OPTIONS.map((option) => (
+            <div key={option.value} className="flex items-center gap-2">
+              <RadioGroupItem value={option.value} id={`entangled-color-${option.value}`} />
+              <Label htmlFor={`entangled-color-${option.value}`} className="flex items-center gap-2 cursor-pointer">
+                <span
+                  className="inline-block h-3 w-3 rounded-sm"
+                  style={buildEntangledIndicatorStyle(option.value)}
+                />
+                <span>{option.label}</span>
+              </Label>
+            </div>
+          ))}
+        </div>
+      </RadioGroup>
+      <div className="flex items-center gap-2 justify-end">
+        <Button variant="outline" size="sm" onClick={() => setIsOpen(false)}>
+          Cancel
+        </Button>
+        <Button
+          size="sm"
+          onClick={handleApply}
+          disabled={!draftColor || draftColor === resolvedOption}
+        >
+          Apply
+        </Button>
+      </div>
+    </div>
+  );
+  const wrapper = (
+    <span
+      className="inline-flex"
+      onClick={(event) => event.stopPropagation()}
+      onPointerDown={(event) => event.stopPropagation()}
+    >
+      {tooltipWrapped}
+    </span>
+  );
+  if (!canEdit) return wrapper;
+  return (
+    <Popover open={isOpen} onOpenChange={setIsOpen}>
+      <PopoverTrigger asChild>
+        {wrapper}
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-3">
+        {colorPicker}
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+const formatMetricLabel = (metric) => {
+  if (metric.label) return metric.label;
+  const fnLabel = KPI_LABELS[metric.fn] || metric.fn || 'Count';
+  if (metric.fn === 'count') return fnLabel;
+  if (!metric.field) return fnLabel;
+  return `${fnLabel} of ${metric.field}`;
+};
+
+const formatFilterLabel = (filter) => {
+  const field = filter.field || '';
+  const operator = FILTER_OPERATOR_LABELS[filter.operator] || filter.operator || '=';
+  const value = filter.value ?? '';
+  if (!field && (value === '' || value === null || value === undefined)) {
+    return 'New filter';
+  }
+  const resolvedField = field || 'Filter';
+  if (value === '' || value === null || value === undefined) {
+    return `${resolvedField} ${operator}`.trim();
+  }
+  return `${resolvedField} ${operator} ${value}`.trim();
+};
+
+const hexToRgb = (color) => {
+  if (!color || typeof color !== 'string') return null;
+  const hex = color.replace('#', '').trim();
+  if (hex.length !== 6) return null;
+  const int = Number.parseInt(hex, 16);
+  if (Number.isNaN(int)) return null;
+  return {
+    r: (int >> 16) & 255,
+    g: (int >> 8) & 255,
+    b: int & 255
+  };
+};
+
+const toRgba = (color, alpha) => {
+  const rgb = hexToRgb(color);
+  if (!rgb) return color;
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+};
+
+const buildEntangledIndicatorStyle = (color) => {
+  const resolved = color || DEFAULT_ENTANGLED_COLOR;
+  return {
+    background: resolved,
+    backgroundColor: resolved,
+    boxShadow: `0 0 0 1px ${toRgba(resolved, 0.6)}`
+  };
+};
+
+const buildEntangledPairStyle = (color) => {
+  const resolved = color || DEFAULT_ENTANGLED_COLOR;
+  return {
+    borderColor: toRgba(resolved, 0.6),
+    backgroundColor: toRgba(resolved, 0.18)
+  };
+};
+
+const getElementLayoutHeight = (element) => {
+  if (!element) return 0;
+  return element.offsetHeight || element.clientHeight || 0;
+};
+
+const AssistantPanel = React.memo(({ node, schema, onRun }: { node: any; schema: string[]; onRun?: (nodeId: string, question: string) => void }) => {
+  const [question, setQuestion] = React.useState(node.params.assistantQuestion || '');
+
+  React.useEffect(() => {
+    setQuestion(node.params.assistantQuestion || '');
+  }, [node.id, node.params.assistantQuestion]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onRun) return;
+    const trimmed = question.trim();
+    if (!trimmed) return;
+    onRun(node.id, trimmed);
+  };
+
+  const planSteps: string[] = node.params.assistantPlan || [];
+  const isLoading = node.params.assistantStatus === 'loading';
+
+  return (
+    <Card className="rounded-none border-x-0 border-b-0 shadow-none">
+      <CardContent className="p-3">
+        <div className="flex flex-col gap-2">
+          <form onSubmit={handleSubmit}>
+            <div className="flex flex-col gap-2">
+              <Textarea
+                className="min-h-[72px] max-h-[144px] resize-y"
+                placeholder="Ask a question… e.g. 'Show total revenue by region'"
+                value={question}
+                onChange={(e) => setQuestion(e.target.value)}
+              />
+              <div className="flex items-center w-full justify-between">
+                <span className="text-xs text-muted-foreground">
+                  {schema.length === 0 ? 'No columns available yet.' : `${schema.length} columns available`}
+                </span>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={!question.trim() || isLoading}
+                >
+                  {isLoading && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                  {isLoading ? 'Thinking…' : 'Build Nodes'}
+                </Button>
+              </div>
+            </div>
+          </form>
+          {isLoading && (
+            <Alert>
+              <Info className="h-4 w-4" />
+              <AlertDescription>Analyzing question and building a plan…</AlertDescription>
+            </Alert>
+          )}
+          {node.params.assistantStatus === 'error' && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{node.params.assistantError || 'I could not build a plan from that question.'}</AlertDescription>
+            </Alert>
+          )}
+          {node.params.assistantStatus === 'success' && node.params.assistantSummary && (
+            <Alert className="border-green-200 text-green-800 dark:border-green-800 dark:text-green-200">
+              <CheckCircle2 className="h-4 w-4" />
+              <AlertDescription>{node.params.assistantSummary}</AlertDescription>
+            </Alert>
+          )}
+          {node.params.assistantLlmError && (
+            <Alert className="border-yellow-200 text-yellow-800 dark:border-yellow-800 dark:text-yellow-200">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>{`LLM unavailable: ${node.params.assistantLlmError}`}</AlertDescription>
+            </Alert>
+          )}
+          {planSteps.length > 0 && (
+            <Card>
+              <CardHeader className="p-3">
+                <CardTitle className="text-sm">Planned Steps</CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 pt-0">
+                <div className="flex flex-col gap-1">
+                  {planSteps.map((step: string, idx: number) => (
+                    <span key={`${step}-${idx}`} className="text-sm text-muted-foreground">
+                      • {step}
+                    </span>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+          {node.params.assistantStatus !== 'success' && node.params.assistantStatus !== 'error' && (
+            <span className="text-xs text-muted-foreground">
+              Ask a question to build a filter, aggregate, and view automatically.
+            </span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+});
+
+const MultiBranchGroup = ({ childrenNodes, renderChild, isClassicSmartMode, parentRef, leafCountById }) => {
+  const containerRef = React.useRef(null);
+  const childRefs = React.useRef([]);
+  const rafRef = React.useRef(null);
+  const childrenNodesRef = React.useRef(childrenNodes);
+  const [layout, setLayout] = React.useState({ parentX: 0, childXs: [], pairRects: [], width: 0 });
+  const childrenById = React.useMemo(
+    () => new Map(childrenNodes.map((child) => [child.nodeId, child])),
+    [childrenNodes]
+  );
+  // Smart mode: weight columns by subtree leaf count to prevent overlaps.
+  const resolveLeafWeight = (nodeId) => {
+    if (!leafCountById) return 1;
+    const value = leafCountById instanceof Map ? leafCountById.get(nodeId) : leafCountById?.[nodeId];
+    if (!Number.isFinite(value) || value <= 0) return 1;
+    return value;
+  };
+  const resolveMinWidth = (leafWeight, { isCollapsed = false } = {}) => {
+    const baseWidth = CLASSIC_SMART_MIN_WIDTH * leafWeight
+      + CLASSIC_SMART_COLUMN_GAP * Math.max(leafWeight - 1, 0);
+    if (!isCollapsed) return baseWidth;
+    return Math.max(CLASSIC_SMART_COLLAPSED_MIN_WIDTH, baseWidth * CLASSIC_SMART_COLLAPSED_SCALE);
+  };
+  const resolveFlexWeight = (leafWeight, { isCollapsed = false } = {}) => {
+    if (!isCollapsed) return leafWeight;
+    return Math.max(CLASSIC_SMART_COLLAPSED_SCALE, leafWeight * CLASSIC_SMART_COLLAPSED_SCALE);
+  };
+  const layoutKey = React.useMemo(
+    () => childrenNodes
+      .map((child) => {
+        const leafWeight = isClassicSmartMode ? resolveLeafWeight(child.nodeId) : 1;
+        const collapsedFlag = child.node?.isBranchCollapsed ? '1' : '0';
+        return `${child.nodeId}:${child.entangledPeerId || ''}:${leafWeight}:${collapsedFlag}`;
+      })
+      .join('|'),
+    [childrenNodes, isClassicSmartMode, leafCountById]
+  );
+
+  React.useEffect(() => {
+    childrenNodesRef.current = childrenNodes;
+  }, [childrenNodes]);
+
+  const updateLayout = React.useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    if (!rect.width) return;
+    const parentRect = parentRef?.current?.getBoundingClientRect?.();
+    const currentChildren = childrenNodesRef.current;
+    const childRects = childRefs.current.map((el) => (el ? el.getBoundingClientRect() : null));
+    const childXs = childRects
+      .map((childRect) => {
+        if (!childRect) return null;
+        return childRect.left + childRect.width / 2 - rect.left;
+      })
+      .filter((val) => val !== null);
+
+    const indexById = new Map(currentChildren.map((child, idx) => [child.nodeId, idx]));
+    const contentWidth = Math.max(
+      rect.width,
+      ...childRects.map((childRect) => (childRect ? childRect.right - rect.left : 0))
+    );
+    const pairRects = [];
+    currentChildren.forEach((child, idx) => {
+      if (!child.entangledPeerId) return;
+      const peerIndex = indexById.get(child.entangledPeerId);
+      if (peerIndex === undefined || peerIndex <= idx) return;
+      const rectA = childRects[idx];
+      const rectB = childRects[peerIndex];
+      if (!rectA || !rectB) return;
+      const padding = 8;
+      const left = Math.min(rectA.left, rectB.left) - rect.left - padding;
+      const right = Math.max(rectA.right, rectB.right) - rect.left + padding;
+      const top = Math.min(rectA.top, rectB.top) - rect.top - padding;
+      const bottom = Math.max(rectA.bottom, rectB.bottom) - rect.top + padding;
+      pairRects.push({
+        key: `${child.nodeId}::${child.entangledPeerId}`,
+        nodeId: child.nodeId,
+        peerId: child.entangledPeerId,
+        left,
+        top,
+        width: right - left,
+        height: bottom - top
+      });
+    });
+
+    const parentX = parentRect
+      ? (parentRect.left + parentRect.width / 2 - rect.left)
+      : rect.width / 2;
+    setLayout({ parentX, childXs, pairRects, width: contentWidth });
+  }, [parentRef]);
+
+  const scheduleUpdate = React.useCallback(() => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      updateLayout();
+    });
+  }, [updateLayout]);
+
+  React.useLayoutEffect(() => {
+    scheduleUpdate();
+  }, [layoutKey, scheduleUpdate]);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    const hasResizeObserver = typeof ResizeObserver !== 'undefined';
+    if (!container) return undefined;
+
+    let observer = null;
+    if (hasResizeObserver) {
+      observer = new ResizeObserver(scheduleUpdate);
+      observer.observe(container);
+      childRefs.current.forEach((el) => {
+        if (el) observer.observe(el);
+      });
+      if (parentRef?.current) observer.observe(parentRef.current);
+    } else {
+      window.addEventListener('resize', scheduleUpdate);
+    }
+
+    return () => {
+      if (observer) observer.disconnect();
+      window.removeEventListener('resize', scheduleUpdate);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [layoutKey, scheduleUpdate]);
+
+  childRefs.current = [];
+  const hasLayout = layout.parentX > 0 && layout.childXs.length === childrenNodes.length;
+  const midY = BRANCH_CONNECTOR_HEIGHT / 2;
+
+  return (
+    <div className={`flex flex-col items-center ${isClassicSmartMode ? 'w-full' : ''}`}>
+      <div
+        ref={containerRef}
+        className={isClassicSmartMode ? 'relative flex w-full gap-8' : 'relative flex gap-8'}
+        style={{ paddingTop: BRANCH_CONNECTOR_HEIGHT }}
+      >
+        {hasLayout && layout.pairRects.length > 0 && (
+          <div className="absolute inset-0 pointer-events-none">
+            {layout.pairRects.map((rect) => {
+              const primary = childrenById.get(rect.nodeId)?.entangledColor;
+              const secondary = childrenById.get(rect.peerId)?.entangledColor;
+              const pairColor = primary || secondary || DEFAULT_ENTANGLED_COLOR;
+              return (
+                <div
+                  key={rect.key}
+                  className="entangled-pair"
+                  style={{
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                    ...buildEntangledPairStyle(pairColor)
+                  }}
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {hasLayout && (
+          <svg
+            className="absolute top-0 left-0 text-gray-300 dark:text-slate-600 pointer-events-none"
+            style={{ width: layout.width ? `${layout.width}px` : '100%', minWidth: '100%' }}
+            height={BRANCH_CONNECTOR_HEIGHT}
+            aria-hidden="true"
+          >
+            <line
+              x1={layout.parentX}
+              y1="0"
+              x2={layout.parentX}
+              y2={midY}
+              stroke="currentColor"
+              strokeWidth={BRANCH_CONNECTOR_STROKE}
+              strokeLinecap="round"
+            />
+            {layout.childXs.map((childX, idx) => (
+              <polyline
+                key={idx}
+                points={`${layout.parentX},${midY} ${childX},${midY} ${childX},${BRANCH_CONNECTOR_HEIGHT}`}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={BRANCH_CONNECTOR_STROKE}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ))}
+          </svg>
+        )}
+        {childrenNodes.map((child, idx) => {
+          const leafWeight = isClassicSmartMode ? resolveLeafWeight(child.nodeId) : 1;
+          const isCollapsed = isClassicSmartMode && child.node?.isBranchCollapsed;
+          const childStyle = isClassicSmartMode
+            ? {
+              flex: `${resolveFlexWeight(leafWeight, { isCollapsed })} 1 0`,
+              minWidth: resolveMinWidth(leafWeight, { isCollapsed })
+            }
+            : undefined;
+          return (
+            <div
+              key={child.renderKey || child.id || child.nodeId}
+              ref={(el) => {
+                if (el) childRefs.current[idx] = el;
+              }}
+              className={isClassicSmartMode ? 'flex flex-col items-stretch w-full' : 'flex flex-col items-center'}
+              style={childStyle}
+            >
+              {renderChild(child)}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const TreeNode = ({
+  nodeId,
+  nodes,
+  selectedNodeId,
+  chainData,
+  tableDensity = 'comfortable',
+  onSelect,
+  onAdd,
+  onInsert,
+  onRemove,
+  onToggleExpand,
+  onToggleBranch,
+  onToggleDataset,
+  onDrillDown,
+  onTableCellClick,
+  onTableSortChange,
+  onAssistantRequest,
+  onAddFilter,
+  onUpdateFilter,
+  onRemoveFilter,
+  onFilterCellAction,
+  showAddMenuForId,
+  setShowAddMenuForId,
+  showInsertMenuForId,
+  setShowInsertMenuForId,
+  renderMode = 'classic',
+  leafCountById,
+  branchSelectionByNodeId,
+  onSelectBranch,
+  onRenameBranch,
+  onToggleEntangle,
+  onEntangledColorChange,
+  renderChildren = true,
+  compactHeader = false,
+  menuId,
+  headerDragProps,
+  shouldSuppressSelect
+}) => {
+  const node = nodes.find(n => n.id === nodeId);
+  if (!node) return null;
+
+  const result = getNodeResult(chainData, nodeId);
+  const parentResult = node.parentId ? getNodeResult(chainData, node.parentId) : null;
+  const filterSourceResult = node.type === 'FILTER' && parentResult ? parentResult : result;
+  const filters = React.useMemo(
+    () => (node.type === 'FILTER' ? normalizeFilters(node.params) : []),
+    [node.type, node.params]
+  );
+  const [isFilterBuilderOpen, setIsFilterBuilderOpen] = React.useState(false);
+  const [filterBuilderTargetIndex, setFilterBuilderTargetIndex] = React.useState(null);
+  const [filterBuilderAnchor, setFilterBuilderAnchor] = React.useState(null);
+  const [isFilterOverflowMenuOpen, setIsFilterOverflowMenuOpen] = React.useState(false);
+  const [visibleFilterCount, setVisibleFilterCount] = React.useState(null);
+  const [filterChipsContainerEl, setFilterChipsContainerEl] = React.useState(null);
+  const [filterChipLabelMaxWidth, setFilterChipLabelMaxWidth] = React.useState(null);
+  const [filterBuilderMode, setFilterBuilderMode] = React.useState('operator');
+  const [operatorDraft, setOperatorDraft] = React.useState({ field: '', operator: 'equals', value: '' });
+  const [attributeDraft, setAttributeDraft] = React.useState({ field: '', values: [] });
+  const filterChipsContainerRef = React.useRef(null);
+  const filterChipMeasureRefs = React.useRef([]);
+  const filterChipLabelMeasureRefs = React.useRef([]);
+  const filterAddButtonRef = React.useRef(null);
+  const filterOverflowMeasureRef = React.useRef(null);
+  const filterChipGapRef = React.useRef(6);
+  const filterChipBaseLabelMaxRef = React.useRef(180);
+  const filterChipMinLabelMeasureRef = React.useRef(null);
+  const setFilterChipsContainerNode = React.useCallback((node) => {
+    filterChipsContainerRef.current = node;
+    setFilterChipsContainerEl(node);
+  }, []);
+  const rawChildren = getChildren(nodes, nodeId);
+  const isActive = selectedNodeId === nodeId;
+  const isExpanded = node.isExpanded !== false;
+  const isBranchCollapsed = node.isBranchCollapsed === true;
+  const isDataset = !!node.params?.isDataset;
+  const isEntangledMode = renderMode === 'entangled' || renderMode === 'entangledSmart';
+  const isClassicSmartMode = renderMode === 'classicSmart' || renderMode === 'entangledSmart';
+  const isMobileMode = renderMode === 'mobile';
+  const isSingleStreamMode = renderMode === 'singleStream' || isMobileMode;
+  const peerNode = node.entangledPeerId ? nodes.find(n => n.id === node.entangledPeerId) : null;
+  const isEntangledRoot = !!peerNode && peerNode.parentId === node.parentId;
+  const resolvedMenuId = menuId || nodeId;
+  const useScopedMenuIds = resolvedMenuId !== nodeId;
+  const tableDensityClass = tableDensity === 'dense' ? 'table-density-dense' : 'table-density-comfortable';
+  const addMenuRef = React.useRef(null);
+  const insertMenuRef = React.useRef(null);
+  const nodeCardRef = React.useRef(null);
+  const [editingBranchId, setEditingBranchId] = React.useState(null);
+  const [branchNameDraft, setBranchNameDraft] = React.useState('');
+  const branchInputRef = React.useRef(null);
+  const skipBranchCommitRef = React.useRef(false);
+  const [isNarrowNodeCard, setIsNarrowNodeCard] = React.useState(false);
+
+  const startBranchRename = React.useCallback((childId, label) => {
+    skipBranchCommitRef.current = false;
+    setEditingBranchId(childId);
+    setBranchNameDraft(label || '');
+  }, []);
+
+  const cancelBranchRename = React.useCallback(() => {
+    setEditingBranchId(null);
+    setBranchNameDraft('');
+  }, []);
+
+  const commitBranchRename = React.useCallback((childId) => {
+    if (!childId) return;
+    const nextName = typeof branchNameDraft === 'string' ? branchNameDraft.trim() : '';
+    if (onRenameBranch) {
+      onRenameBranch(childId, nextName);
+    }
+    cancelBranchRename();
+  }, [branchNameDraft, onRenameBranch, cancelBranchRename]);
+
+  React.useEffect(() => {
+    if (!editingBranchId) return undefined;
+    const frame = requestAnimationFrame(() => {
+      branchInputRef.current?.focus?.();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [editingBranchId]);
+
+  const resolvedSelectedChildId = React.useMemo(() => {
+    if (!isSingleStreamMode || rawChildren.length === 0) return null;
+    const preferred = branchSelectionByNodeId?.[nodeId];
+    const exists = rawChildren.some(child => child.id === preferred);
+    return exists ? preferred : rawChildren[0].id;
+  }, [isSingleStreamMode, rawChildren, branchSelectionByNodeId, nodeId]);
+
+  React.useEffect(() => {
+    if (!isSingleStreamMode || rawChildren.length <= 1 || !resolvedSelectedChildId) return;
+    if (branchSelectionByNodeId?.[nodeId] !== resolvedSelectedChildId) {
+      onSelectBranch?.(nodeId, resolvedSelectedChildId);
+    }
+  }, [isSingleStreamMode, rawChildren, resolvedSelectedChildId, branchSelectionByNodeId, nodeId, onSelectBranch]);
+
+  const renderChildrenItems = React.useMemo(() => {
+    const baseChildren = (isSingleStreamMode && resolvedSelectedChildId)
+      ? rawChildren.filter(child => child.id === resolvedSelectedChildId)
+      : rawChildren;
+    const buildMenuKey = (childId) => (
+      useScopedMenuIds ? `${resolvedMenuId}::${childId}` : childId
+    );
+    return baseChildren.map(child => ({
+      node: child,
+      nodeId: child.id,
+      renderKey: buildMenuKey(child.id),
+      menuKey: buildMenuKey(child.id),
+      entangledPeerId: isEntangledMode ? child.entangledPeerId : undefined,
+      entangledRootId: isEntangledMode ? child.entangledRootId : undefined,
+      entangledColor: isEntangledMode ? child.entangledColor : undefined
+    }));
+  }, [isSingleStreamMode, resolvedSelectedChildId, rawChildren, isEntangledMode, resolvedMenuId, useScopedMenuIds]);
+
+  const showBranchTabs = isSingleStreamMode && rawChildren.length > 1;
+
+  const nodeCardWidth = isMobileMode
+    ? 'min(92vw, 560px)'
+    : (isSingleStreamMode ? '65vw' : (isClassicSmartMode ? '100%' : 640));
+  const nodeCardMaxWidth = isMobileMode
+    ? '92vw'
+    : (isSingleStreamMode ? 1800 : (isClassicSmartMode ? '100%' : undefined));
+  const nodeCardMinWidth = isMobileMode
+    ? 'min(92vw, 320px)'
+    : (isSingleStreamMode ? 'min(520px, 65vw)' : (isClassicSmartMode ? CLASSIC_SMART_MIN_WIDTH : 520));
+  const nodeCardResize = isExpanded && node.params.subtype !== 'AI'
+    ? (isMobileMode ? 'none' : ((isSingleStreamMode || isClassicSmartMode) ? 'vertical' : 'both'))
+    : 'none';
+  const isSmartNarrow = isClassicSmartMode && isNarrowNodeCard;
+  const headerIsCompact = compactHeader || isSmartNarrow;
+
+  React.useEffect(() => {
+    if (!isClassicSmartMode) {
+      setIsNarrowNodeCard(false);
+      return undefined;
+    }
+    const nodeEl = nodeCardRef.current;
+    if (!nodeEl) return undefined;
+    const updateNarrowState = () => {
+      const nextIsNarrow = nodeEl.getBoundingClientRect().width < 350;
+      setIsNarrowNodeCard((prev) => (prev === nextIsNarrow ? prev : nextIsNarrow));
+    };
+    updateNarrowState();
+    const hasResizeObserver = typeof ResizeObserver !== 'undefined';
+    let observer = null;
+    if (hasResizeObserver) {
+      observer = new ResizeObserver(updateNarrowState);
+      observer.observe(nodeEl);
+    } else {
+      window.addEventListener('resize', updateNarrowState);
+    }
+    return () => {
+      if (observer) observer.disconnect();
+      window.removeEventListener('resize', updateNarrowState);
+    };
+  }, [isClassicSmartMode]);
+
+  React.useEffect(() => {
+    if (showAddMenuForId !== resolvedMenuId || !addMenuRef.current) return undefined;
+    const frame = requestAnimationFrame(() => {
+      addMenuRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [showAddMenuForId, resolvedMenuId]);
+
+  React.useEffect(() => {
+    if (showInsertMenuForId !== resolvedMenuId || !insertMenuRef.current) return undefined;
+    const frame = requestAnimationFrame(() => {
+      insertMenuRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [showInsertMenuForId, resolvedMenuId]);
+
+
+  const handleAddMenuClick = ({ key }) => {
+    if (!onAdd) return;
+    if (key.startsWith('COMPONENT:')) {
+      onAdd('COMPONENT', nodeId, key.split(':')[1]);
+    } else {
+      onAdd(key, nodeId);
+    }
+    setShowAddMenuForId(null);
+  };
+
+  const handleInsertMenuClick = ({ key }) => {
+    if (!onInsert) return;
+    if (key.startsWith('COMPONENT:')) {
+      onInsert('COMPONENT', nodeId, key.split(':')[1]);
+    } else {
+      onInsert(key, nodeId);
+    }
+    setShowInsertMenuForId(null);
+  };
+
+  const addMenuItems = [
+    {
+      type: 'group',
+      label: 'Data Ops',
+      children: [
+        { key: 'FILTER', label: 'Filter', icon: <span className="w-2 h-2 rounded-full bg-orange-400" /> },
+        { key: 'AGGREGATE', label: 'Aggregate', icon: <span className="w-2 h-2 rounded-full bg-purple-400" /> },
+        { key: 'JOIN', label: 'SQL', icon: <span className="w-2 h-2 rounded-full bg-pink-400" /> }
+      ]
+    },
+    { type: 'divider' },
+    {
+      type: 'group',
+      label: 'Components',
+      children: [
+        { key: 'COMPONENT:TABLE', label: 'Table', icon: <TableIcon size={14} /> },
+        { key: 'COMPONENT:PIVOT', label: 'Pivot Table', icon: <TableIcon size={14} /> },
+        { key: 'COMPONENT:AI', label: 'AI Assistant', icon: <Share2 size={14} /> },
+        { key: 'COMPONENT:CHART', label: 'Chart', icon: <BarChart3 size={14} /> },
+        { key: 'COMPONENT:KPI', label: 'KPI', icon: <Hash size={14} /> },
+        { key: 'COMPONENT:GAUGE', label: 'Gauge', icon: <Gauge size={14} /> }
+      ]
+    }
+  ];
+
+  const resetFilterDrafts = React.useCallback(() => {
+    setOperatorDraft({ field: '', operator: 'equals', value: '' });
+    setAttributeDraft({ field: '', values: [] });
+  }, []);
+
+  const closeFilterBuilder = React.useCallback(() => {
+    setIsFilterBuilderOpen(false);
+    setFilterBuilderTargetIndex(null);
+    setFilterBuilderAnchor(null);
+  }, []);
+
+  const resolveAttributeValues = React.useCallback((filter) => {
+    if (!filter) return [];
+    if (Array.isArray(filter.value)) {
+      return filter.value.map((item) => String(item)).filter(Boolean);
+    }
+    if (filter.operator === 'in') {
+      return String(filter.value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+    if (filter.value === null || filter.value === undefined || filter.value === '') return [];
+    return [String(filter.value)];
+  }, []);
+
+  const openNewFilterBuilder = React.useCallback((mode = 'operator') => {
+    resetFilterDrafts();
+    setFilterBuilderMode(mode);
+    setFilterBuilderTargetIndex(-1);
+    setFilterBuilderAnchor('add');
+    setIsFilterOverflowMenuOpen(false);
+    setIsFilterBuilderOpen(true);
+  }, [resetFilterDrafts]);
+
+  const openFilterBuilderForFilter = React.useCallback((filter, index, anchor = 'chip') => {
+    const mode = resolveFilterMode(filter);
+    setFilterBuilderMode(mode);
+    setFilterBuilderTargetIndex(index);
+    setFilterBuilderAnchor(anchor);
+    setIsFilterOverflowMenuOpen(false);
+    if (mode === 'attribute') {
+      setAttributeDraft({ field: filter.field || '', values: resolveAttributeValues(filter) });
+      setOperatorDraft({ field: '', operator: 'equals', value: '' });
+    } else {
+      setOperatorDraft({
+        field: filter.field || '',
+        operator: filter.operator || 'equals',
+        value: filter.value ?? ''
+      });
+      setAttributeDraft({ field: '', values: [] });
+    }
+    setIsFilterBuilderOpen(true);
+  }, [resolveAttributeValues]);
+
+  const measureOverflowChipWidth = React.useCallback(() => (
+    filterOverflowMeasureRef.current?.offsetWidth || 0
+  ), []);
+
+  const updateVisibleFilterCount = React.useCallback(() => {
+    const container = filterChipsContainerRef.current;
+    const total = filters.length;
+    if (!container) return;
+    if (total === 0) {
+      setVisibleFilterCount(0);
+      return;
+    }
+    const containerWidth = container.offsetWidth || 0;
+    if (!containerWidth) {
+      setVisibleFilterCount(total);
+      return;
+    }
+    const addWidth = filterAddButtonRef.current?.offsetWidth || 0;
+    const gap = filterChipGapRef.current || 0;
+    const chipWidths = filters.map((_, index) => filterChipMeasureRefs.current[index]?.offsetWidth || 0);
+    const labelWidths = filters.map((_, index) => filterChipLabelMeasureRefs.current[index]?.offsetWidth || 0);
+    if (chipWidths.every((width) => width === 0)) {
+      setVisibleFilterCount(total);
+      return;
+    }
+
+    const baseLabelMaxWidth = filterChipBaseLabelMaxRef.current || 180;
+    const minLabelWidthPx = filterChipMinLabelMeasureRef.current?.offsetWidth || 0;
+    const overheadValues = chipWidths
+      .map((width, index) => Math.max(0, width - (labelWidths[index] || 0)))
+      .filter((value) => value > 0);
+    const avgOverhead = overheadValues.length > 0
+      ? overheadValues.reduce((sum, value) => sum + value, 0) / overheadValues.length
+      : 0;
+    const gapsForAll = total * gap;
+    const availableForLabels = containerWidth - addWidth - gapsForAll - (avgOverhead * total);
+    const maxLabelWidthForAll = total > 0 ? Math.floor(availableForLabels / total) : baseLabelMaxWidth;
+    let nextLabelMaxWidth = Math.min(
+      baseLabelMaxWidth,
+      Number.isFinite(maxLabelWidthForAll) ? maxLabelWidthForAll : baseLabelMaxWidth
+    );
+    if (nextLabelMaxWidth <= 0) {
+      nextLabelMaxWidth = baseLabelMaxWidth;
+    }
+    if (minLabelWidthPx > 0) {
+      nextLabelMaxWidth = Math.max(minLabelWidthPx, nextLabelMaxWidth);
+    }
+    const resolvedLabelMaxWidth = filterChipLabelMaxWidth ?? baseLabelMaxWidth;
+    if (Math.abs(nextLabelMaxWidth - resolvedLabelMaxWidth) >= 1) {
+      setFilterChipLabelMaxWidth(nextLabelMaxWidth);
+      return;
+    }
+
+    const totalChipWidth = (count) => (
+      chipWidths.slice(0, count).reduce((sum, width) => sum + width, 0)
+    );
+
+    const overflowWidth = measureOverflowChipWidth();
+    const totalWidthForCount = (count) => {
+      const hasOverflow = count < total;
+      const children = count + (hasOverflow ? 1 : 0) + 1;
+      const gaps = Math.max(0, children - 1) * gap;
+      return totalChipWidth(count) + addWidth + (hasOverflow ? overflowWidth : 0) + gaps;
+    };
+
+    if (totalWidthForCount(total) <= containerWidth) {
+      setVisibleFilterCount(total);
+      return;
+    }
+
+    let nextVisible = 0;
+    for (let count = total; count >= 0; count -= 1) {
+      if (totalWidthForCount(count) <= containerWidth) {
+        nextVisible = count;
+        break;
+      }
+    }
+    setVisibleFilterCount(nextVisible);
+  }, [filters, filterChipLabelMaxWidth, measureOverflowChipWidth]);
+
+  React.useLayoutEffect(() => {
+    updateVisibleFilterCount();
+  });
+
+  React.useEffect(() => {
+    if (!filterChipsContainerEl) return undefined;
+    updateVisibleFilterCount();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateVisibleFilterCount);
+      return () => window.removeEventListener('resize', updateVisibleFilterCount);
+    }
+    const observer = new ResizeObserver(() => updateVisibleFilterCount());
+    observer.observe(filterChipsContainerEl);
+    return () => observer.disconnect();
+  }, [filterChipsContainerEl, updateVisibleFilterCount]);
+
+  const handleApplyOperatorFilter = () => {
+    if (!operatorDraft.field) return;
+    const payload = {
+      field: operatorDraft.field,
+      operator: operatorDraft.operator || 'equals',
+      value: operatorDraft.value ?? '',
+      mode: 'operator'
+    };
+    if (filterBuilderTargetIndex != null && filterBuilderTargetIndex >= 0) {
+      onUpdateFilter?.(nodeId, filterBuilderTargetIndex, payload);
+    } else {
+      onAddFilter?.(nodeId, payload);
+    }
+    resetFilterDrafts();
+    closeFilterBuilder();
+  };
+
+  const handleApplyAttributeFilter = () => {
+    if (!attributeDraft.field || attributeDraft.values.length === 0) return;
+    const value = attributeDraft.values.join(', ');
+    const operator = attributeDraft.values.length > 1 ? 'in' : 'equals';
+    const payload = {
+      field: attributeDraft.field,
+      operator,
+      value,
+      mode: 'attribute'
+    };
+    if (filterBuilderTargetIndex != null && filterBuilderTargetIndex >= 0) {
+      onUpdateFilter?.(nodeId, filterBuilderTargetIndex, payload);
+    } else {
+      onAddFilter?.(nodeId, payload);
+    }
+    resetFilterDrafts();
+    closeFilterBuilder();
+  };
+
+  const canToggleEntangle = !!node.parentId && (!node.entangledPeerId || isEntangledRoot);
+  const entangleMenu = {
+    items: [
+      {
+        key: 'entangle-toggle',
+        label: node.entangledPeerId ? 'Remove entangled mirror' : 'Create entangled mirror',
+        disabled: !canToggleEntangle
+      }
+    ],
+    onClick: () => {
+      if (!canToggleEntangle) return;
+      onToggleEntangle?.(nodeId);
+    }
+  };
+
+  const resolvedBranchLabel = React.useMemo(() => {
+    let current = node;
+    while (current) {
+      if (current.branchName) return current.branchName;
+      if (!current.parentId) break;
+      current = nodes.find((n) => n.id === current.parentId);
+    }
+    return '';
+  }, [node, nodes]);
+
+  // Resolve icon by node type (and component subtype).
+  let Icon = Database;
+  if (node.type === 'FILTER') Icon = Filter;
+  if (node.type === 'AGGREGATE') Icon = Sigma;
+  if (node.type === 'JOIN') Icon = LinkIcon;
+  if (node.type === 'COMPONENT') {
+    if (node.params.subtype === 'TABLE') Icon = TableIcon;
+    if (node.params.subtype === 'PIVOT') Icon = TableIcon;
+    if (node.params.subtype === 'AI') Icon = Share2;
+    if (node.params.subtype === 'CHART') Icon = BarChart3;
+    if (node.params.subtype === 'KPI') Icon = Hash;
+    if (node.params.subtype === 'GAUGE') Icon = Gauge;
+  }
+
+  // KPI/Gauge metric calculation (derived from node output).
+  const gaugeMetricValue = (node.type === 'COMPONENT' && node.params.subtype === 'GAUGE' && result)
+    ? (result.getMetric ? result.getMetric(node.params.fn || 'count', node.params.metricField) : 0)
+    : 0;
+
+  // Columns for table preview (user-selected or default schema).
+  const visibleColumns = (node.type === 'COMPONENT' && node.params.subtype === 'TABLE' && node.params.columns && node.params.columns.length > 0)
+    ? node.params.columns
+    : result ? result.schema : [];
+
+  const filterFieldOptions = filterSourceResult?.schema || result?.schema || [];
+  const attributeValueOptions = React.useMemo(() => {
+    if (!filterSourceResult || !attributeDraft.field) return [];
+    if (filterSourceResult.getColumnStats) {
+      const stats = filterSourceResult.getColumnStats(attributeDraft.field, 32);
+      if (stats?.topValues?.length) {
+        return stats.topValues.map((item) => ({
+          label: `${item.value} (${item.count})`,
+          value: String(item.value)
+        }));
+      }
+    }
+    const fallbackRows = filterSourceResult.sampleRows || filterSourceResult.data || [];
+    const seen = new Set();
+    const options = [];
+    fallbackRows.forEach((row) => {
+      if (options.length >= 32) return;
+      const raw = row?.[attributeDraft.field];
+      if (raw === null || raw === undefined || raw === '') return;
+      const display = String(raw);
+      if (seen.has(display)) return;
+      seen.add(display);
+      options.push({ label: display, value: display });
+    });
+    return options;
+  }, [filterSourceResult, attributeDraft.field]);
+
+  const isEditingFilter = filterBuilderTargetIndex != null && filterBuilderTargetIndex >= 0;
+  const filterBuilderContent = (
+    <div className="w-80 p-3" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
+      <div className="flex flex-col gap-2 w-full">
+        <span className="text-xs text-muted-foreground">
+          {isEditingFilter ? 'Edit filter' : 'Add a filter'}
+        </span>
+        <div className="flex">
+          <button
+            type="button"
+            className={`flex-1 rounded-l-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+              filterBuilderMode === 'operator'
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-input bg-background hover:bg-accent'
+            }`}
+            onClick={() => setFilterBuilderMode('operator')}
+          >
+            Operator
+          </button>
+          <button
+            type="button"
+            className={`flex-1 rounded-r-md border border-l-0 px-3 py-1.5 text-xs font-medium transition-colors ${
+              filterBuilderMode === 'attribute'
+                ? 'border-primary bg-primary text-primary-foreground'
+                : 'border-input bg-background hover:bg-accent'
+            }`}
+            onClick={() => setFilterBuilderMode('attribute')}
+          >
+            Attribute
+          </button>
+        </div>
+        {filterBuilderMode === 'operator' ? (
+          <div className="flex flex-col gap-2 w-full">
+            <Select
+              value={operatorDraft.field || '__empty__'}
+              onValueChange={(value) => setOperatorDraft((prev: any) => ({ ...prev, field: value === '__empty__' ? '' : value }))}
+              disabled={filterFieldOptions.length === 0}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select column" />
+              </SelectTrigger>
+              <SelectContent>
+                {filterFieldOptions.map((field: string) => (
+                  <SelectItem key={field} value={field}>{field}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="flex items-center gap-2 w-full">
+              <Select
+                value={operatorDraft.operator || 'equals'}
+                onValueChange={(value) => setOperatorDraft((prev: any) => ({ ...prev, operator: value }))}
+              >
+                <SelectTrigger className="w-[120px] shrink-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="equals">=</SelectItem>
+                  <SelectItem value="not_equals">!=</SelectItem>
+                  <SelectItem value="gt">&gt;</SelectItem>
+                  <SelectItem value="lt">&lt;</SelectItem>
+                  <SelectItem value="gte">&gt;=</SelectItem>
+                  <SelectItem value="lte">&lt;=</SelectItem>
+                  <SelectItem value="in">In list</SelectItem>
+                  <SelectItem value="contains">Like</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                placeholder={operatorDraft.operator === 'in' ? 'Comma-separated values' : 'Value'}
+                value={operatorDraft.value}
+                onChange={(e) => setOperatorDraft((prev: any) => ({ ...prev, value: e.target.value }))}
+              />
+            </div>
+            <Button
+              size="sm"
+              onClick={handleApplyOperatorFilter}
+              disabled={!operatorDraft.field}
+            >
+              Apply filter
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2 w-full">
+            <Select
+              value={attributeDraft.field || '__empty__'}
+              onValueChange={(value) => setAttributeDraft({ field: value === '__empty__' ? '' : value, values: [] })}
+              disabled={filterFieldOptions.length === 0}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select column" />
+              </SelectTrigger>
+              <SelectContent>
+                {filterFieldOptions.map((field: string) => (
+                  <SelectItem key={field} value={field}>{field}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-full justify-between" disabled={!attributeDraft.field}>
+                  {attributeDraft.values.length > 0
+                    ? `${attributeDraft.values.length} selected`
+                    : (attributeDraft.field ? 'Select values' : 'Pick a column first')}
+                  <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-2" align="start">
+                <div className="max-h-48 overflow-y-auto space-y-0.5">
+                  {attributeValueOptions.map((opt: any) => (
+                    <label key={opt.value} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-accent cursor-pointer text-sm">
+                      <Checkbox
+                        checked={attributeDraft.values.includes(opt.value)}
+                        onCheckedChange={(checked) => {
+                          setAttributeDraft((prev: any) => ({
+                            ...prev,
+                            values: checked
+                              ? [...prev.values, opt.value]
+                              : prev.values.filter((v: string) => v !== opt.value)
+                          }));
+                        }}
+                      />
+                      {opt.label}
+                    </label>
+                  ))}
+                  {attributeValueOptions.length === 0 && (
+                    <span className="block px-2 py-1 text-xs text-muted-foreground">No values available</span>
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
+            <Button
+              size="sm"
+              onClick={handleApplyAttributeFilter}
+              disabled={!attributeDraft.field || attributeDraft.values.length === 0}
+            >
+              Apply filter
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const filterAddTrigger = (
+    <Button
+      variant="outline"
+      size="sm"
+      className="border-dashed"
+      onClick={(e: React.MouseEvent) => {
+        e.stopPropagation();
+        openNewFilterBuilder('operator');
+      }}
+    >
+      <Plus size={12} />
+      Add filter
+    </Button>
+  );
+
+  const filterAddTriggerCompact = (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-6 w-6"
+      onClick={(e: React.MouseEvent) => {
+        e.stopPropagation();
+        openNewFilterBuilder('operator');
+      }}
+    >
+      <Plus size={12} />
+    </Button>
+  );
+
+  const renderFilterChips = (compact = false) => {
+    const chipGap = compact ? 4 : 6;
+    filterChipGapRef.current = chipGap;
+    filterChipMeasureRefs.current = [];
+    filterChipLabelMeasureRefs.current = [];
+    const baseLabelMaxWidth = compact ? 90 : 180;
+    filterChipBaseLabelMaxRef.current = baseLabelMaxWidth;
+    const resolvedLabelMaxWidth = filterChipLabelMaxWidth ?? baseLabelMaxWidth;
+    const chipTagClassName = compact
+      ? 'cursor-pointer select-none text-[9px] px-1 min-w-0'
+      : 'cursor-pointer select-none min-w-0';
+    const chipLabelClassName = compact ? 'block truncate' : 'block truncate';
+    const deleteOverlayClassName =
+      'absolute -top-2 -right-1 z-20 flex items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover/filter-chip:opacity-100 group-hover/filter-chip:pointer-events-auto';
+    const deleteButtonClassName =
+      'inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-red-600 shadow-sm hover:text-red-700 dark:border-slate-600 dark:bg-slate-800 dark:text-red-300';
+    const dropdownChipTagClassName = `${chipTagClassName} max-w-[200px]`;
+    const dropdownChipLabelClassName = 'block truncate max-w-full';
+    const getLabelStyle = (label) => ({
+      maxWidth: resolvedLabelMaxWidth,
+      minWidth: label && label.length >= 8 ? '8ch' : undefined
+    });
+    const resolvedVisibleCount = Math.min(filters.length, Math.max(0, visibleFilterCount ?? filters.length));
+    const visibleFilters = filters.slice(0, resolvedVisibleCount);
+    const hiddenFilters = filters.slice(resolvedVisibleCount).map((filter, offset) => ({
+      filter,
+      index: offset + resolvedVisibleCount
+    }));
+    const hiddenCount = hiddenFilters.length;
+
+    const overflowList = (
+      <div
+        className="inline-flex max-h-60 overflow-y-auto overflow-x-hidden pr-2 pt-2"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex flex-col gap-2">
+          {hiddenFilters.map(({ filter, index }) => {
+            const label = formatFilterLabel(filter);
+            return (
+              <span key={filter.id || `filter-overflow-${index}`} className="relative inline-flex group/filter-chip">
+                <span
+                  className="inline-flex"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openFilterBuilderForFilter(filter, index, 'overflow');
+                    setIsFilterOverflowMenuOpen(false);
+                  }}
+                >
+                  <Badge variant="outline" className={`bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:border-orange-500/30 ${dropdownChipTagClassName}`}>
+                    <span className={dropdownChipLabelClassName} title={label}>
+                      {label}
+                    </span>
+                  </Badge>
+                </span>
+                <div className={deleteOverlayClassName}>
+                  <button
+                    type="button"
+                    className={deleteButtonClassName}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveFilter?.(nodeId, index);
+                      if (isFilterBuilderOpen && filterBuilderTargetIndex === index) {
+                        closeFilterBuilder();
+                      }
+                    }}
+                    aria-label="Remove filter"
+                  >
+                    <Trash2 size={10} />
+                  </button>
+                </div>
+              </span>
+            );
+          })}
+        </div>
+      </div>
+    );
+
+    const overflowPopoverOpen = isFilterOverflowMenuOpen || (isFilterBuilderOpen && filterBuilderAnchor === 'overflow');
+    const overflowPopoverContent =
+      isFilterBuilderOpen && filterBuilderAnchor === 'overflow' ? filterBuilderContent : overflowList;
+
+    return (
+      <div
+        ref={setFilterChipsContainerNode}
+        className="relative flex min-w-0 items-center"
+        style={{ gap: chipGap }}
+      >
+        {visibleFilters.map((filter, index) => {
+          const isOpen = isFilterBuilderOpen && filterBuilderTargetIndex === index && filterBuilderAnchor === 'chip';
+          const label = formatFilterLabel(filter);
+          return (
+            <Popover
+              key={filter.id || `filter-${index}`}
+              open={isOpen}
+              onOpenChange={(open) => {
+                if (!open) closeFilterBuilder();
+              }}
+            >
+              <PopoverTrigger asChild>
+                <span
+                  className="relative inline-flex group/filter-chip"
+                  onClick={(e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    openFilterBuilderForFilter(filter, index, 'chip');
+                  }}
+                >
+                  <Badge variant="outline" className={`bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:border-orange-500/30 ${chipTagClassName}`}>
+                    <span className={chipLabelClassName} title={label} style={getLabelStyle(label)}>
+                      {label}
+                    </span>
+                  </Badge>
+                  <div className={deleteOverlayClassName}>
+                    <button
+                      type="button"
+                      className={deleteButtonClassName}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onRemoveFilter?.(nodeId, index);
+                        if (isFilterBuilderOpen && filterBuilderTargetIndex === index) {
+                          closeFilterBuilder();
+                        }
+                      }}
+                      aria-label="Remove filter"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
+                </span>
+              </PopoverTrigger>
+              <PopoverContent side="bottom" align="start" className="w-auto p-0">
+                {filterBuilderContent}
+              </PopoverContent>
+            </Popover>
+          );
+        })}
+
+        {hiddenCount > 0 && (
+          <Popover
+            open={overflowPopoverOpen}
+            onOpenChange={(open) => {
+              if (!open) {
+                setIsFilterOverflowMenuOpen(false);
+                if (filterBuilderAnchor === 'overflow') closeFilterBuilder();
+                return;
+              }
+              if (filterBuilderAnchor && filterBuilderAnchor !== 'overflow') {
+                closeFilterBuilder();
+              }
+              if (!isFilterBuilderOpen) setIsFilterOverflowMenuOpen(true);
+            }}
+          >
+            <PopoverTrigger asChild>
+              <span
+                className="relative inline-flex group/filter-chip shrink-0"
+                onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                aria-label="Show all filters"
+              >
+                <Badge variant="outline" className={`bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:border-orange-500/30 ${chipTagClassName}`}>
+                  <span className={chipLabelClassName}>{`+${hiddenCount}`}</span>
+                </Badge>
+              </span>
+            </PopoverTrigger>
+            <PopoverContent side="bottom" align="start" className="w-auto p-0">
+              {overflowPopoverContent}
+            </PopoverContent>
+          </Popover>
+        )}
+
+        <Popover
+          open={isFilterBuilderOpen && filterBuilderTargetIndex === -1 && filterBuilderAnchor === 'add'}
+          onOpenChange={(open) => {
+            if (!open) closeFilterBuilder();
+          }}
+        >
+          <PopoverTrigger asChild>
+            <span ref={filterAddButtonRef} className="inline-flex shrink-0">
+              {compact ? filterAddTriggerCompact : filterAddTrigger}
+            </span>
+          </PopoverTrigger>
+          <PopoverContent side="bottom" align="start" className="w-auto p-0">
+            {filterBuilderContent}
+          </PopoverContent>
+        </Popover>
+
+        {filters.length > 0 && (
+          <div
+            className="absolute -left-[9999px] -top-[9999px] flex items-center opacity-0 pointer-events-none"
+            style={{ gap: chipGap }}
+            aria-hidden="true"
+          >
+            {filters.map((filter: any, index: number) => {
+              const label = formatFilterLabel(filter);
+              return (
+                <span
+                  key={filter.id || `filter-measure-${index}`}
+                  ref={(el) => { filterChipMeasureRefs.current[index] = el; }}
+                  className="inline-flex"
+                >
+                  <Badge variant="outline" className={`bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:border-orange-500/30 ${chipTagClassName}`}>
+                    <span
+                      className={chipLabelClassName}
+                      ref={(el) => { filterChipLabelMeasureRefs.current[index] = el; }}
+                      style={getLabelStyle(label)}
+                    >
+                      {label}
+                    </span>
+                  </Badge>
+                </span>
+              );
+            })}
+            <span ref={filterOverflowMeasureRef} className="inline-flex">
+              <Badge variant="outline" className={`bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:border-orange-500/30 ${chipTagClassName}`}>
+                <span className={chipLabelClassName}>{`+${filters.length}`}</span>
+              </Badge>
+            </span>
+            <Badge variant="outline" className={`bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:border-orange-500/30 ${chipTagClassName}`}>
+              <span
+                ref={filterChipMinLabelMeasureRef}
+                className={chipLabelClassName}
+                style={{ width: '8ch' }}
+              >
+                MMMMMMMM
+              </span>
+            </Badge>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const kpiMetrics = React.useMemo(() => {
+    if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'KPI') return [];
+    const rawMetrics = (node.params.metrics && node.params.metrics.length > 0)
+      ? node.params.metrics
+      : [{ id: 'metric-default', label: '', fn: node.params.fn || 'count', field: node.params.metricField || '' }];
+    return rawMetrics.map(metric => ({
+      ...metric,
+      value: result.getMetric ? result.getMetric(metric.fn || 'count', metric.field) : 0
+    }));
+  }, [node.type, node.params.subtype, node.params.metrics, node.params.fn, node.params.metricField, result]);
+
+  const pivotTableRef = React.useRef(null);
+  const [pivotTableHeight, setPivotTableHeight] = React.useState(220);
+  const [pivotHeaderHeight, setPivotHeaderHeight] = React.useState(38);
+
+  const pivotState = React.useMemo(() => {
+    if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'PIVOT') return null;
+    const rowField = node.params.pivotRow;
+    const columnField = node.params.pivotColumn;
+    const valueField = node.params.pivotValue;
+    const fn = node.params.pivotFn || 'count';
+    if (!rowField || !columnField) {
+      return { error: 'Select row and column fields to render the pivot.' };
+    }
+    if (metricRequiresField(fn) && !valueField) {
+      return { error: 'Select a value field for this aggregation.' };
+    }
+    if (!result.getPivotData) {
+      return { rowKeys: [], colKeys: [], matrix: [], fn, rowField, columnField };
+    }
+    return result.getPivotData({
+      rowField,
+      columnField,
+      valueField,
+      fn
+    });
+  }, [
+    node.type,
+    node.params.subtype,
+    node.params.pivotRow,
+    node.params.pivotColumn,
+    node.params.pivotValue,
+    node.params.pivotFn,
+    result
+  ]);
+
+  React.useEffect(() => {
+    const el = pivotTableRef.current;
+    if (!el) return undefined;
+
+    const updateLayoutMetrics = () => {
+      const nextHeight = getElementLayoutHeight(el);
+      if (nextHeight) setPivotTableHeight(nextHeight);
+      const header = el.querySelector('thead');
+      if (header) {
+        const nextHeaderHeight = getElementLayoutHeight(header);
+        if (nextHeaderHeight) {
+          setPivotHeaderHeight((prev: number) => (prev === nextHeaderHeight ? prev : nextHeaderHeight));
+        }
+      }
+    };
+    updateLayoutMetrics();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateLayoutMetrics);
+      return () => window.removeEventListener('resize', updateLayoutMetrics);
+    }
+
+    let frame: number | null = null;
+    const observer = new ResizeObserver(() => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updateLayoutMetrics);
+    });
+    observer.observe(el);
+    const header = el.querySelector('thead');
+    if (header) observer.observe(header);
+
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [pivotState?.rowKeys?.length, pivotState?.colKeys?.length, tableDensity]);
+
+  const chartType = node.params.chartType || 'bar';
+  const chartAggFn = node.params.chartAggFn || 'none';
+  const chartYAxis = (chartType !== 'scatter' && chartType !== 'map' && chartAggFn === 'count' && !node.params.yAxis)
+    ? 'Record Count'
+    : node.params.yAxis;
+
+  const chartDataInfo = React.useMemo(() => {
+    if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'CHART') {
+      return { data: [], yField: chartYAxis };
+    }
+    if (chartType === 'map') return { data: [], yField: chartYAxis };
+    const xField = node.params.xAxis;
+    const yField = chartYAxis;
+    if (!xField || !yField) {
+      const fallback = result.getSampleRows ? result.getSampleRows(5000) : (result.data || []);
+      return { data: fallback, yField };
+    }
+    const aggFn = chartAggFn;
+    const shouldAggregate = chartType !== 'scatter' && aggFn !== 'none';
+    if (!shouldAggregate) {
+      const fallback = result.getSampleRows ? result.getSampleRows(5000) : (result.data || []);
+      return { data: fallback, yField };
+    }
+    if (!result.getAggregatedRows) return { data: [], yField };
+    const aggregated = result.getAggregatedRows({ groupBy: xField, fn: aggFn, metricField: yField });
+    return {
+      data: aggregated.rows || [],
+      yField: aggregated.outputField || yField
+    };
+  }, [
+    result,
+    node.type,
+    node.params.subtype,
+    chartType,
+    chartAggFn,
+    chartYAxis,
+    node.params.xAxis
+  ]);
+
+  const mapData = React.useMemo(() => {
+    if (!result || node.type !== 'COMPONENT' || node.params.subtype !== 'CHART' || chartType !== 'map') return [];
+    const mapField = node.params.xAxis;
+    if (!mapField) return [];
+    const aggFn = chartAggFn === 'none' ? 'count' : chartAggFn;
+    if (!result.getAggregatedRows) return [];
+    const aggregated = result.getAggregatedRows({ groupBy: mapField, fn: aggFn, metricField: node.params.yAxis });
+    const valueField = aggregated.outputField || node.params.yAxis || 'Record Count';
+    return (aggregated.rows || []).map((row) => ({
+      code: row?.[mapField],
+      value: row?.[valueField]
+    }));
+  }, [
+    result,
+    node.type,
+    node.params.subtype,
+    chartType,
+    chartAggFn,
+    node.params.xAxis,
+    node.params.yAxis
+  ]);
+
+  const chartData = chartDataInfo.data;
+  const resolvedChartYAxis = chartDataInfo.yField;
+
+  const actionMenuItems = React.useMemo(() => {
+    const items = [
+      { key: 'fork', label: 'Fork branch', icon: <GitBranch size={14} /> }
+    ];
+    if (node.parentId) {
+      items.push({ key: 'minimize', label: 'Minimize node', icon: <Minimize2 size={14} /> });
+    }
+    if (node.type !== 'SOURCE') {
+      items.push({ key: 'delete', label: 'Delete node', icon: <Trash2 size={14} />, danger: true });
+    }
+    return items;
+  }, [node.parentId, node.type]);
+
+  const handleActionMenuClick = React.useCallback(({ key, domEvent }) => {
+    domEvent?.stopPropagation?.();
+    if (key === 'fork') {
+      onAdd('FILTER', nodeId);
+      return;
+    }
+    if (key === 'minimize') {
+      onToggleBranch(nodeId);
+      return;
+    }
+    if (key === 'delete') {
+      onRemove(nodeId);
+    }
+  }, [nodeId, onAdd, onToggleBranch, onRemove]);
+
+  // Compact collapsed branch representation.
+  if (isBranchCollapsed) {
+    const collapsedTitle = (
+      <span
+        className={`text-xs truncate ${isClassicSmartMode ? 'max-w-[140px] inline-block' : ''}`}
+        title={node.title}
+      >
+        {node.title}
+      </span>
+    );
+
+    return (
+      <div
+        className="flex flex-col items-center animate-in fade-in zoom-in-95 duration-300"
+        data-node-id={nodeId}
+      >
+        <div className="relative z-10">
+          <Button
+            variant="outline"
+            className={`rounded-full ${isClassicSmartMode ? 'max-w-full' : ''}`}
+            onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
+          >
+            <GitBranch size={14} />
+            <span className={`flex items-center gap-2 ${isClassicSmartMode ? 'min-w-0' : ''}`}>
+              {collapsedTitle}
+              <Badge variant="secondary" className="flex items-center gap-0.5">
+                <Plus size={8} />
+                {countDescendants(nodes, nodeId) + 1}
+              </Badge>
+            </span>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const showCompactFilterRow = headerIsCompact && node.type === 'FILTER' && filters.length > 0;
+  const showCompactFilterInline = headerIsCompact && node.type === 'FILTER' && filters.length === 0;
+
+  const nodeCard = (
+    <div className={`relative group z-10 ${isClassicSmartMode ? 'w-full' : ''}`}>
+      <div
+        onClick={(e) => {
+          e.stopPropagation();
+          if (shouldSuppressSelect?.()) return;
+          onSelect(nodeId);
+        }}
+        className={`
+          node-card bg-white dark:bg-slate-900 rounded-xl border-2 transition-all cursor-pointer overflow-hidden relative flex flex-col
+          ${headerIsCompact ? 'node-card--compact' : ''}
+          ${isActive
+            ? 'border-blue-500 shadow-xl shadow-blue-500/10 ring-1 ring-blue-500 z-20 dark:shadow-blue-500/20'
+            : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md dark:border-slate-700 dark:hover:border-slate-600 dark:shadow-black/40'}
+        `}
+        style={{
+          width: nodeCardWidth,
+          maxWidth: nodeCardMaxWidth,
+          height: isExpanded ? (node.params.subtype === 'AI' ? 'auto' : 320) : 'auto',
+          minWidth: nodeCardMinWidth,
+          minHeight: isExpanded ? (node.params.subtype === 'AI' ? 0 : 180) : 0,
+          resize: nodeCardResize
+        }}
+        data-node-id={nodeId}
+        data-node-resize="true"
+        ref={nodeCardRef}
+      >
+        {/* Header */}
+        <div
+          className={`node-card-header p-4 flex items-center gap-3 ${headerIsCompact ? 'node-card-header--compact' : ''} ${headerDragProps ? 'node-drag-handle' : ''}`}
+          {...headerDragProps}
+        >
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 shrink-0"
+            onClick={(e) => { e.stopPropagation(); onToggleExpand(nodeId); }}
+          >
+            {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          </Button>
+          <div className={`node-card-icon w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${isActive ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-300' : 'bg-gray-100 text-gray-500 dark:bg-slate-800 dark:text-slate-400'}`}>
+            <Icon size={20} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className={`font-semibold truncate node-card-title leading-tight ${isSmartNarrow ? 'max-w-[160px]' : ''}`}
+              >
+                {node.title}
+              </span>
+              {resolvedBranchLabel && (
+                <Badge
+                  variant="outline"
+                  className={`bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:text-blue-300 dark:border-blue-500/30 uppercase text-[9px] font-bold inline-flex items-center leading-tight min-w-0 ${isSmartNarrow ? 'max-w-[90px]' : ''}`}
+                >
+                  <span className="block truncate" title={resolvedBranchLabel}>
+                    {resolvedBranchLabel}
+                  </span>
+                </Badge>
+              )}
+              {isDataset && (
+                <Badge
+                  variant="outline"
+                  className="bg-green-50 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-300 dark:border-green-500/30 uppercase text-[9px] font-bold inline-flex items-center leading-tight"
+                >
+                  Dataset
+                </Badge>
+              )}
+              {showCompactFilterInline && renderFilterChips(true)}
+              {node.entangledPeerId && (
+                <EntangledIndicator
+                  color={node.entangledColor}
+                  rootId={node.entangledRootId || node.id}
+                  onChange={onEntangledColorChange}
+                  className="entangled-node-indicator"
+                />
+              )}
+            </div>
+            {showCompactFilterRow && (
+              <div className="mt-1">
+                {renderFilterChips(true)}
+              </div>
+            )}
+            <div className="mt-0.5 node-card-subtitle">
+              {node.type === 'FILTER' ? (
+                headerIsCompact ? null : renderFilterChips(false)
+              ) : (
+                <span className="text-xs text-muted-foreground truncate block">
+                  {node.type === 'AGGREGATE' ? `Group by ${node.params.groupBy}` :
+                    node.type === 'JOIN'
+                      ? (node.params.sqlMode === 'custom' ? 'Custom SQL' : `with ${node.params.rightTable || '...'}`)
+                      :
+                    node.type === 'COMPONENT' ? (node.params.subtype === 'AI' ? 'AI Assistant' : `${node.params.subtype} View`) :
+                    node.description || node.type}
+                </span>
+              )}
+            </div>
+          </div>
+          {isSmartNarrow ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Node actions"
+                >
+                  <MoreHorizontal size={16} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {actionMenuItems.map((item: any) => (
+                  <DropdownMenuItem
+                    key={item.key}
+                    className={item.danger ? 'text-destructive focus:text-destructive' : ''}
+                    onClick={(e) => { e.stopPropagation(); handleActionMenuClick({ key: item.key, domEvent: e }); }}
+                  >
+                    {item.icon}
+                    {item.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <TooltipProvider delayDuration={200}>
+              <div className="flex items-center gap-1">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={(e) => { e.stopPropagation(); onAdd('FILTER', nodeId); }}
+                    >
+                      <GitBranch size={16} />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Fork Branch</TooltipContent>
+                </Tooltip>
+
+                {node.parentId && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={(e) => { e.stopPropagation(); onToggleBranch(nodeId); }}
+                      >
+                        <Minimize2 size={16} />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Minimize Node</TooltipContent>
+                  </Tooltip>
+                )}
+
+                {node.type !== 'SOURCE' && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-destructive hover:text-destructive"
+                    onClick={(e) => { e.stopPropagation(); onRemove(nodeId); }}
+                  >
+                    <Trash2 size={16} />
+                  </Button>
+                )}
+              </div>
+            </TooltipProvider>
+          )}
+        </div>
+
+        {showBranchTabs && (
+          <div className="px-4 pb-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              {rawChildren.map((child, index) => {
+                const label = child.branchName || `Branch ${index + 1}`;
+                const isActiveBranch = child.id === resolvedSelectedChildId;
+                const isEditing = editingBranchId === child.id;
+                const chipClasses = `inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                  isActiveBranch
+                    ? 'bg-blue-600 border-blue-600 text-white shadow-sm'
+                    : 'bg-white border-gray-200 text-slate-700 hover:border-gray-300 hover:bg-gray-50 dark:bg-slate-900 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-600'
+                } ${isEditing ? 'pointer-events-none opacity-0' : ''}`;
+                return (
+                  <span key={child.id} className="relative inline-flex group/branch-tab">
+                    <button
+                      type="button"
+                      className={chipClasses}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isEditing) return;
+                        onSelectBranch?.(nodeId, child.id);
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        startBranchRename(child.id, label);
+                      }}
+                    >
+                      <span className="inline-flex items-center gap-1">
+                        <span>{label}</span>
+                        {child.entangledPeerId && (
+                          <EntangledIndicator
+                            color={child.entangledColor}
+                            rootId={child.entangledRootId || child.id}
+                            onChange={onEntangledColorChange}
+                            className="entangled-tab-indicator"
+                          />
+                        )}
+                      </span>
+                    </button>
+
+                    {isEditing && (
+                      <div className="absolute inset-0 z-20">
+                        <input
+                          ref={branchInputRef}
+                          className="h-full w-full rounded-full border border-blue-400 bg-white/95 px-2.5 text-xs font-medium text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400 dark:bg-slate-900 dark:text-slate-100"
+                          value={branchNameDraft}
+                          onChange={(e) => setBranchNameDraft(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              skipBranchCommitRef.current = true;
+                              e.preventDefault();
+                              commitBranchRename(child.id);
+                            }
+                            if (e.key === 'Escape') {
+                              skipBranchCommitRef.current = true;
+                              e.preventDefault();
+                              cancelBranchRename();
+                            }
+                          }}
+                          onBlur={() => {
+                            if (skipBranchCommitRef.current) {
+                              skipBranchCommitRef.current = false;
+                              return;
+                            }
+                            commitBranchRename(child.id);
+                          }}
+                          aria-label="Rename branch"
+                        />
+                      </div>
+                    )}
+
+                    {!isEditing && (
+                      <div className="absolute -top-2 -right-1 z-20 flex items-center gap-1 opacity-0 transition-opacity pointer-events-none group-hover/branch-tab:opacity-100 group-hover/branch-tab:pointer-events-auto">
+                        <button
+                          type="button"
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-slate-600 shadow-sm hover:text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startBranchRename(child.id, label);
+                          }}
+                          aria-label="Rename branch"
+                        >
+                          <EditIcon size={10} />
+                        </button>
+                        <button
+                          type="button"
+                          className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-red-600 shadow-sm hover:text-red-700 dark:border-slate-600 dark:bg-slate-800 dark:text-red-300"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRemove?.(child.id);
+                          }}
+                          aria-label="Delete branch"
+                        >
+                          <Trash2 size={10} />
+                        </button>
+                      </div>
+                    )}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Content Preview */}
+        {isExpanded && result && (() => {
+            const isTablePreview = node.params.subtype === 'TABLE' || (node.type !== 'COMPONENT' && node.type !== 'JOIN');
+            const isPivotPreview = node.params.subtype === 'PIVOT';
+            const isAssistantPreview = node.params.subtype === 'AI';
+            const isChartPreview = node.params.subtype === 'CHART';
+            const showTableStats = node.params.subtype === 'TABLE' && !!node.params.tableShowStats;
+            const hasTableLikePreview = isTablePreview || isPivotPreview || isAssistantPreview;
+            const contentPaddingClass = hasTableLikePreview ? 'p-0' : (isChartPreview ? 'p-1' : 'p-4');
+            return (
+            <div className={`border-t border-gray-100 bg-gray-50 dark:border-slate-700 dark:bg-slate-800 ${contentPaddingClass} flex-1 min-h-0 animate-in slide-in-from-top-2 duration-200 flex flex-col overflow-hidden`}>
+              {/* TABLE VIEW */}
+              {isTablePreview && (
+                <div className="flex-1 min-h-0 flex flex-col">
+                  <div className="flex items-center justify-between text-xs font-medium text-gray-500 dark:text-slate-400 px-2 pt-2">
+                    <span>Preview</span>
+                    <span>{result.rowCount} rows</span>
+                  </div>
+                  <div className="flex-1 min-h-0 px-2 pb-2">
+                    <TablePreview
+                      rowCount={result.rowCount}
+                      columns={visibleColumns}
+                      getRowAt={result.getRowAt}
+                      sampleRows={result.sampleRows || result.data || []}
+                      onCellClick={onTableCellClick}
+                      enableInlineFilterMenu={node.type === 'FILTER'}
+                      onFilterCellAction={onFilterCellAction}
+                      onSortChange={onTableSortChange}
+                      nodeId={nodeId}
+                      sortBy={node.params.tableSortBy}
+                      sortDirection={node.params.tableSortDirection}
+                      tableDensity={tableDensity}
+                      showTableStats={showTableStats}
+                      getColumnStats={showTableStats ? result.getColumnStats : null}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* AI ASSISTANT VIEW */}
+              {isAssistantPreview && (
+                <AssistantPanel
+                  node={node}
+                  schema={result.schema || []}
+                  onRun={onAssistantRequest}
+                />
+              )}
+
+              {/* PIVOT VIEW */}
+              {isPivotPreview && (
+                <div className="h-full flex flex-col">
+                  <div className="flex items-center justify-between text-xs font-medium text-gray-500 dark:text-slate-400 px-2 pt-2">
+                    <span>Pivot</span>
+                    {pivotState && !pivotState.error && (
+                      <span>{pivotState.rowKeys.length} rows × {pivotState.colKeys.length} cols</span>
+                    )}
+                  </div>
+                  <div ref={pivotTableRef} className="flex-1 min-h-0 px-2 pb-2">
+                    {!pivotState || pivotState.error ? (
+                      <Empty description={pivotState?.error || 'Configure row and column fields to render the pivot.'} />
+                    ) : (
+                      (() => {
+                        const pivotColumns = [
+                          { title: pivotState.rowField, dataIndex: 'rowKey' },
+                          ...pivotState.colKeys.map((col: string) => ({ title: col, dataIndex: col }))
+                        ];
+                        const dataSource = pivotState.rowKeys.map((rowKey: string, rowIdx: number) => {
+                          const row: Record<string, any> = { rowKey };
+                          pivotState.colKeys.forEach((colKey: string, colIdx: number) => {
+                            const value = pivotState.matrix[rowIdx]?.[colIdx];
+                            row[colKey] = typeof value === 'number' ? formatNumber(value) : (value ?? '-');
+                          });
+                          return row;
+                        });
+                        const scrollHeight = Math.max(140, pivotTableHeight - pivotHeaderHeight);
+                        return (
+                          <div className={`overflow-auto ${tableDensityClass}`} style={{ maxHeight: scrollHeight }}>
+                            <table className="w-full text-sm border-collapse">
+                              <thead className="sticky top-0 bg-white dark:bg-slate-900 z-10">
+                                <tr>
+                                  {pivotColumns.map((col: any) => (
+                                    <th
+                                      key={col.dataIndex}
+                                      className={`px-2 py-1.5 text-left text-xs font-medium text-muted-foreground border-b whitespace-nowrap ${col.dataIndex === 'rowKey' ? 'sticky left-0 bg-white dark:bg-slate-900 z-20' : ''}`}
+                                    >
+                                      {col.title}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {dataSource.map((row: any) => (
+                                  <tr key={row.rowKey} className="border-b border-border/50 hover:bg-muted/50">
+                                    {pivotColumns.map((col: any) => (
+                                      <td
+                                        key={col.dataIndex}
+                                        className={`px-2 py-1 text-xs whitespace-nowrap ${col.dataIndex === 'rowKey' ? 'sticky left-0 bg-white dark:bg-slate-900 font-medium z-10' : 'text-right'}`}
+                                      >
+                                        {row[col.dataIndex]}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        );
+                      })()
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* JOIN VIEW */}
+              {node.type === 'JOIN' && (
+                <Card>
+                  <CardContent className="p-3">
+                    <div className="bg-slate-900 rounded p-3 text-[10px] font-mono text-slate-300 overflow-auto">
+                      {node.params.sqlMode === 'custom' ? (
+                        <>
+                          <pre className="whitespace-pre-wrap m-0">
+                            {node.params.sqlText?.trim() || `SELECT * FROM ${SQL_INCOMING_TABLE}`}
+                          </pre>
+                          <div className="mt-2 pt-2 border-t border-slate-700 text-slate-500 dark:text-slate-400 italic">
+                            Result: {result.rowCount} rows
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div><span className="text-pink-400">SELECT</span> *</div>
+                          <div><span className="text-pink-400">FROM</span> {SQL_INCOMING_TABLE}</div>
+                          <div><span className="text-pink-400">{node.params.joinType || 'LEFT'} JOIN</span> {node.params.rightTable || '...'}</div>
+                          <div><span className="text-pink-400">ON</span> {node.params.leftKey || '?'} = {node.params.rightKey || '?'}</div>
+                          <div className="mt-2 pt-2 border-t border-slate-700 text-slate-500 dark:text-slate-400 italic">
+                            Result: {result.rowCount} rows merged
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    {result.error && (
+                      <Alert variant="destructive" className="mt-2">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>SQL error</AlertTitle>
+                        <AlertDescription>{result.error}</AlertDescription>
+                      </Alert>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* CHART VIEW */}
+              {node.params.subtype === 'CHART' && (chartType === 'map' ? (
+                <WorldMapChart
+                  data={mapData}
+                  codeKey="code"
+                  valueKey="value"
+                  seriesColor={node.params.chartColor}
+                  showTooltip={node.params.chartShowTooltip}
+                  onSelect={(code) => onDrillDown({ activePayload: [{ payload: { __x: code } }] }, { xAxis: node.params.xAxis }, nodeId)}
+                />
+              ) : (
+                <VisxChart
+                  data={chartData}
+                  xAxis={node.params.xAxis}
+                  yAxis={resolvedChartYAxis}
+                  type={chartType}
+                  showGrid={node.params.chartShowGrid}
+                  showPoints={node.params.chartShowPoints}
+                  curveType={node.params.chartCurve}
+                  stacked={node.params.chartStacked}
+                  showTooltip={node.params.chartShowTooltip}
+                  orientation={node.params.chartOrientation || 'vertical'}
+                  barGap={node.params.chartBarGap}
+                  seriesColor={node.params.chartColor}
+                  onClick={(d) => onDrillDown(d, { xAxis: node.params.xAxis }, nodeId)}
+                />
+              ))}
+
+              {/* KPI VIEW */}
+              {node.params.subtype === 'KPI' && (
+                <Card className="h-full">
+                  <CardContent className="p-3">
+                    {kpiMetrics.length === 0 ? (
+                      <Empty description="Configure KPI metrics to display." />
+                    ) : kpiMetrics.length === 1 ? (
+                      <div className="flex flex-col gap-1 w-full text-center">
+                        <span className="uppercase text-xs text-muted-foreground">
+                          {formatMetricLabel(kpiMetrics[0])}
+                        </span>
+                        <h2 className="text-2xl font-bold m-0">
+                          {typeof kpiMetrics[0].value === 'number' ? formatNumber(kpiMetrics[0].value) : kpiMetrics[0].value}
+                        </h2>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3 w-full">
+                        {kpiMetrics.map((metric: any, idx: number) => (
+                          <Card key={metric.id || idx}>
+                            <CardContent className="p-3">
+                              <Statistic
+                                title={formatMetricLabel(metric)}
+                                value={typeof metric.value === 'number' ? formatNumber(metric.value) : metric.value}
+                              />
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* GAUGE VIEW */}
+              {node.params.subtype === 'GAUGE' && (
+                <Card className="h-full">
+                  <CardContent className="p-3">
+                    <div className="flex flex-col gap-2 w-full">
+                      <div className="flex items-center w-full justify-between">
+                        <span className="text-muted-foreground">{node.params.fn}</span>
+                        <span className="text-muted-foreground">Target: {node.params.target || 100}</span>
+                      </div>
+                      <h3 className="text-lg font-semibold m-0">
+                        {typeof gaugeMetricValue === 'number' ? formatNumber(gaugeMetricValue) : gaugeMetricValue}
+                      </h3>
+                      <Progress
+                        value={Math.min(100, Math.round((gaugeMetricValue / (node.params.target || 100)) * 100))}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {Math.round((gaugeMetricValue / (node.params.target || 100)) * 100)}% of target
+                      </span>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+            );
+          })()}
+      </div>
+
+      {/* ADD BUTTON - Only show if NO children */}
+      {rawChildren.length === 0 && (
+        <div className={`absolute -bottom-6 left-1/2 -translate-x-1/2 translate-y-full z-20 transition-all ${!isExpanded ? '-mt-4' : ''}`}>
+          <div className="flex items-center gap-2">
+            <div ref={addMenuRef}>
+              <DropdownMenu
+                open={showAddMenuForId === resolvedMenuId}
+                onOpenChange={(open) => setShowAddMenuForId(open ? resolvedMenuId : null)}
+              >
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="rounded-full"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Plus size={16} strokeWidth={3} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuLabel>Data Ops</DropdownMenuLabel>
+                  <DropdownMenuGroup>
+                    {addMenuItems[0].children.map((item: any) => (
+                      <DropdownMenuItem key={item.key} onClick={() => handleAddMenuClick({ key: item.key })}>
+                        {item.icon}
+                        {item.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Components</DropdownMenuLabel>
+                  <DropdownMenuGroup>
+                    {addMenuItems[2].children.map((item: any) => (
+                      <DropdownMenuItem key={item.key} onClick={() => handleAddMenuClick({ key: item.key })}>
+                        {item.icon}
+                        {item.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+            <TooltipProvider delayDuration={200}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={isDataset ? 'default' : 'outline'}
+                    size="icon"
+                    className="rounded-full"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleDataset?.(nodeId);
+                    }}
+                  >
+                    <Database size={14} />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>{isDataset ? 'Remove dataset' : 'Save as dataset'}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className={`flex flex-col animate-in fade-in zoom-in-95 duration-300 ${isClassicSmartMode ? 'w-full items-stretch' : 'items-center'}`}>
+      {/* NODE CARD */}
+      {isEntangledMode ? (
+        <div onContextMenu={(e) => {
+          e.preventDefault();
+          if (!canToggleEntangle) return;
+          onToggleEntangle?.(nodeId);
+        }}>
+          {nodeCard}
+        </div>
+      ) : nodeCard}
+
+      {/* CONNECTORS & CHILDREN */}
+      {renderChildren && renderChildrenItems.length > 0 && (
+        <div className={`flex flex-col items-center ${isClassicSmartMode ? 'w-full' : ''}`}>
+          <div className="w-0.5 h-8 bg-gray-300 dark:bg-slate-600 rounded-full relative group/line">
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover/line:opacity-100 transition-opacity z-30">
+              <div ref={insertMenuRef}>
+                <DropdownMenu
+                  open={showInsertMenuForId === resolvedMenuId}
+                  onOpenChange={(open) => setShowInsertMenuForId(open ? resolvedMenuId : null)}
+                >
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 rounded-full"
+                      title="Insert Step Here"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Plus size={12} strokeWidth={3} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuLabel>Insert Step</DropdownMenuLabel>
+                    <DropdownMenuGroup>
+                      {INSERT_MENU_ITEMS[0].children.filter((item: any) => item.type !== 'divider').map((item: any) => (
+                        <DropdownMenuItem key={item.key} onClick={() => handleInsertMenuClick({ key: item.key })}>
+                          {item.icon}
+                          {item.label}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </div>
+          </div>
+
+          {renderChildrenItems.length === 1 ? (
+            <TreeNode
+              nodeId={renderChildrenItems[0].nodeId}
+              menuId={renderChildrenItems[0].menuKey}
+              nodes={nodes}
+              selectedNodeId={selectedNodeId}
+              chainData={chainData}
+              tableDensity={tableDensity}
+              onSelect={onSelect}
+              onAdd={onAdd}
+              onInsert={onInsert}
+              onRemove={onRemove}
+              onToggleExpand={onToggleExpand}
+              onToggleBranch={onToggleBranch}
+              onToggleDataset={onToggleDataset}
+              onDrillDown={onDrillDown}
+              onTableCellClick={onTableCellClick}
+              onTableSortChange={onTableSortChange}
+              onAssistantRequest={onAssistantRequest}
+              onAddFilter={onAddFilter}
+              onUpdateFilter={onUpdateFilter}
+              onRemoveFilter={onRemoveFilter}
+              onFilterCellAction={onFilterCellAction}
+              showAddMenuForId={showAddMenuForId}
+              setShowAddMenuForId={setShowAddMenuForId}
+              showInsertMenuForId={showInsertMenuForId}
+              setShowInsertMenuForId={setShowInsertMenuForId}
+              renderMode={renderMode}
+              leafCountById={leafCountById}
+              branchSelectionByNodeId={branchSelectionByNodeId}
+              onSelectBranch={onSelectBranch}
+              onRenameBranch={onRenameBranch}
+              onToggleEntangle={onToggleEntangle}
+              onEntangledColorChange={onEntangledColorChange}
+            />
+          ) : (
+            <MultiBranchGroup
+              childrenNodes={renderChildrenItems}
+              isClassicSmartMode={isClassicSmartMode}
+              parentRef={nodeCardRef}
+              leafCountById={leafCountById}
+              renderChild={(child) => (
+                <TreeNode
+                  nodeId={child.nodeId}
+                  menuId={child.menuKey}
+                  nodes={nodes}
+                  selectedNodeId={selectedNodeId}
+                  chainData={chainData}
+                  tableDensity={tableDensity}
+                  onSelect={onSelect}
+                  onAdd={onAdd}
+                  onInsert={onInsert}
+                  onRemove={onRemove}
+                  onToggleExpand={onToggleExpand}
+                  onToggleBranch={onToggleBranch}
+                  onToggleDataset={onToggleDataset}
+                  onDrillDown={onDrillDown}
+                  onTableCellClick={onTableCellClick}
+                  onTableSortChange={onTableSortChange}
+                  onAssistantRequest={onAssistantRequest}
+                  onAddFilter={onAddFilter}
+                  onUpdateFilter={onUpdateFilter}
+                  onRemoveFilter={onRemoveFilter}
+                  onFilterCellAction={onFilterCellAction}
+                  showAddMenuForId={showAddMenuForId}
+                  setShowAddMenuForId={setShowAddMenuForId}
+                  showInsertMenuForId={showInsertMenuForId}
+                  setShowInsertMenuForId={setShowInsertMenuForId}
+                  renderMode={renderMode}
+                  leafCountById={leafCountById}
+                  branchSelectionByNodeId={branchSelectionByNodeId}
+                  onSelectBranch={onSelectBranch}
+                  onRenameBranch={onRenameBranch}
+                  onToggleEntangle={onToggleEntangle}
+                  onEntangledColorChange={onEntangledColorChange}
+                />
+              )}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const FreeLayoutNode = ({ nodeId, position, onMeasure, children }) => {
+  const ref = React.useRef(null);
+
+  const measure = React.useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    const width = el.offsetWidth || 0;
+    const height = el.offsetHeight || 0;
+    onMeasure(nodeId, width, height);
+  }, [nodeId, onMeasure]);
+
+  React.useLayoutEffect(() => {
+    measure();
+  }, [measure]);
+
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [measure]);
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: 'absolute',
+        left: position.x,
+        top: position.y
+      }}
+    >
+      {children}
+    </div>
+  );
+};
+
+const FreeLayoutCanvas = ({
+  nodes,
+  selectedNodeId,
+  chainData,
+  tableDensity = 'comfortable',
+  onSelect,
+  onAdd,
+  onInsert,
+  onRemove,
+  onToggleExpand,
+  onToggleBranch,
+  onToggleDataset,
+  onDrillDown,
+  onTableCellClick,
+  onTableSortChange,
+  onAssistantRequest,
+  onAddFilter,
+  onUpdateFilter,
+  onRemoveFilter,
+  onFilterCellAction,
+  showAddMenuForId,
+  setShowAddMenuForId,
+  showInsertMenuForId,
+  setShowInsertMenuForId,
+  onUpdateNodePosition,
+  onAutoLayout,
+  onEntangledColorChange,
+  onRenameBranch
+}) => {
+  const containerRef = React.useRef(null);
+  const [viewport, setViewport] = React.useState({ x: 0, y: 0, scale: 1 });
+  const viewportRef = React.useRef(viewport);
+  const [isPanning, setIsPanning] = React.useState(false);
+  const [isDragging, setIsDragging] = React.useState(false);
+  const [hoveredConnector, setHoveredConnector] = React.useState(null);
+  const [insertAnchor, setInsertAnchor] = React.useState(null);
+  const nodeSizesRef = React.useRef(new Map());
+  const dragPositionsRef = React.useRef(new Map());
+  const pendingDragPositionsRef = React.useRef(new Map());
+  const [dragVersion, setDragVersion] = React.useState(0);
+  const [layoutVersion, setLayoutVersion] = React.useState(0);
+  const panStateRef = React.useRef(null);
+  const dragStateRef = React.useRef(null);
+  const dragFrameRef = React.useRef(null);
+  const hoverFrameRef = React.useRef(null);
+  const hoverPayloadRef = React.useRef(null);
+  const connectorInsertRef = React.useRef(null);
+  const activeInsertEdgeRef = React.useRef(null);
+  const suppressSelectRef = React.useRef(false);
+  const clampScale = React.useCallback(
+    (value) => Math.min(FREE_LAYOUT_MAX_SCALE, Math.max(FREE_LAYOUT_MIN_SCALE, value)),
+    []
+  );
+
+  const getGraphPointFromEvent = React.useCallback((event) => {
+    const container = containerRef.current;
+    if (!container) return null;
+    const rect = container.getBoundingClientRect();
+    const { x, y, scale } = viewportRef.current;
+    if (!scale) return null;
+    return {
+      x: (event.clientX - rect.left - x) / scale,
+      y: (event.clientY - rect.top - y) / scale
+    };
+  }, []);
+
+  const resolveNodePosition = React.useCallback((node) => {
+    const override = dragPositionsRef.current.get(node.id);
+    if (override) return override;
+    return node.position || null;
+  }, []);
+
+  const scheduleConnectorHover = React.useCallback(() => {
+    if (hoverFrameRef.current) return;
+    hoverFrameRef.current = requestAnimationFrame(() => {
+      hoverFrameRef.current = null;
+      if (hoverPayloadRef.current) {
+        setHoveredConnector(hoverPayloadRef.current);
+      }
+    });
+  }, []);
+
+  const handleConnectorHover = React.useCallback((edge, event) => {
+    if (showInsertMenuForId && insertAnchor?.edgeKey === showInsertMenuForId) return;
+    const point = getGraphPointFromEvent(event);
+    if (!point) return;
+    hoverPayloadRef.current = {
+      edgeKey: edge.edgeKey,
+      parentId: edge.parentId,
+      childId: edge.childId,
+      position: point
+    };
+    scheduleConnectorHover();
+  }, [getGraphPointFromEvent, insertAnchor, scheduleConnectorHover, showInsertMenuForId]);
+
+  const handleConnectorLeave = React.useCallback((event, edgeKey) => {
+    if (showInsertMenuForId === edgeKey) return;
+    const related = event.relatedTarget;
+    if (related && connectorInsertRef.current?.contains(related)) return;
+    hoverPayloadRef.current = null;
+    setHoveredConnector((prev) => (prev?.edgeKey === edgeKey ? null : prev));
+  }, [showInsertMenuForId]);
+
+  const handleInsertButtonLeave = React.useCallback(() => {
+    if (showInsertMenuForId) return;
+    hoverPayloadRef.current = null;
+    setHoveredConnector(null);
+  }, [showInsertMenuForId]);
+
+  const resolveInsertPosition = React.useCallback((anchor) => {
+    if (!anchor?.position) return null;
+    const { x, y } = anchor.position;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return {
+      x: Math.round(x - FREE_LAYOUT_DEFAULT_NODE_SIZE.width / 2),
+      y: Math.round(y - FREE_LAYOUT_DEFAULT_NODE_SIZE.height / 2)
+    };
+  }, []);
+
+  const handleConnectorInsertClick = React.useCallback((event, anchor) => {
+    event.stopPropagation();
+    if (!anchor) return;
+    activeInsertEdgeRef.current = anchor;
+    setInsertAnchor(anchor);
+    setShowInsertMenuForId(anchor.edgeKey);
+  }, [setShowInsertMenuForId]);
+
+  const handleConnectorInsertMenuClick = React.useCallback(({ key }) => {
+    const target = activeInsertEdgeRef.current;
+    if (!target || !onInsert) return;
+    const insertPosition = resolveInsertPosition(target);
+    if (key.startsWith('COMPONENT:')) {
+      onInsert('COMPONENT', target.parentId, key.split(':')[1], target.childId, insertPosition);
+    } else {
+      onInsert(key, target.parentId, undefined, target.childId, insertPosition);
+    }
+    setShowInsertMenuForId(null);
+    setInsertAnchor(null);
+  }, [onInsert, resolveInsertPosition, setShowInsertMenuForId]);
+
+  const handleConnectorInsertOpenChange = React.useCallback((open, edgeKey) => {
+    if (open) {
+      setShowInsertMenuForId(edgeKey);
+      return;
+    }
+    setShowInsertMenuForId(null);
+    setInsertAnchor(null);
+  }, [setShowInsertMenuForId]);
+
+  React.useEffect(() => {
+    viewportRef.current = viewport;
+  }, [viewport]);
+
+  React.useEffect(() => {
+    return () => {
+      if (hoverFrameRef.current) cancelAnimationFrame(hoverFrameRef.current);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (showInsertMenuForId) return;
+    setInsertAnchor(null);
+  }, [showInsertMenuForId]);
+
+  const nodesById = React.useMemo(() => new Map(nodes.map(node => [node.id, node])), [nodes]);
+
+  const hiddenNodeIds = React.useMemo(() => {
+    const hidden = new Set();
+    nodes.forEach((node) => {
+      let current = node;
+      while (current?.parentId) {
+        const parent = nodesById.get(current.parentId);
+        if (!parent) break;
+        if (parent.isBranchCollapsed) {
+          hidden.add(node.id);
+          break;
+        }
+        current = parent;
+      }
+    });
+    return hidden;
+  }, [nodes, nodesById]);
+
+  const visibleNodes = React.useMemo(
+    () => nodes.filter(node => !hiddenNodeIds.has(node.id)),
+    [nodes, hiddenNodeIds]
+  );
+
+  React.useEffect(() => {
+    if (dragStateRef.current) return;
+    if (dragPositionsRef.current.size === 0 && pendingDragPositionsRef.current.size === 0) return;
+
+    const committed = [];
+    const stale = [];
+    pendingDragPositionsRef.current.forEach((position, nodeId) => {
+      const node = nodesById.get(nodeId);
+      if (!node) {
+        stale.push(nodeId);
+        return;
+      }
+      const current = node.position;
+      if (current && current.x === position.x && current.y === position.y) {
+        committed.push(nodeId);
+      }
+    });
+
+    const orphaned = [];
+    dragPositionsRef.current.forEach((_position, nodeId) => {
+      if (!pendingDragPositionsRef.current.has(nodeId)) {
+        orphaned.push(nodeId);
+      }
+    });
+
+    [...committed, ...stale].forEach((nodeId) => {
+      pendingDragPositionsRef.current.delete(nodeId);
+      dragPositionsRef.current.delete(nodeId);
+    });
+    orphaned.forEach((nodeId) => {
+      dragPositionsRef.current.delete(nodeId);
+    });
+
+    if (committed.length || stale.length || orphaned.length) {
+      setDragVersion((version) => version + 1);
+    }
+  }, [nodesById]);
+
+  const upstreamEdgeKeys = React.useMemo(() => {
+    const keys = new Set();
+    if (!selectedNodeId) return keys;
+    let current = nodesById.get(selectedNodeId);
+    while (current?.parentId) {
+      keys.add(`${current.parentId}::${current.id}`);
+      current = nodesById.get(current.parentId);
+    }
+    return keys;
+  }, [selectedNodeId, nodesById]);
+
+  const buildOptimizedLayout = React.useCallback(() => {
+    if (visibleNodes.length === 0) return null;
+    const sizeMap = nodeSizesRef.current;
+    const fallbackSize = FREE_LAYOUT_DEFAULT_NODE_SIZE;
+    const getSize = (nodeId) => sizeMap.get(nodeId) || fallbackSize;
+    const samples = visibleNodes.map((node) => getSize(node.id));
+    const averageWidth = samples.reduce((sum, size) => sum + size.width, 0) / samples.length;
+    const averageHeight = samples.reduce((sum, size) => sum + size.height, 0) / samples.length;
+    const horizontalGap = Math.max(FREE_LAYOUT_MIN_GAP_X, Math.round(averageWidth * 0.15));
+    const verticalGap = Math.max(FREE_LAYOUT_MIN_GAP_Y, Math.round(averageHeight * 0.25));
+    const rootGap = verticalGap * 2;
+    const offset = FREE_LAYOUT_BASE_OFFSET;
+
+    const visibleIds = new Set(visibleNodes.map((node) => node.id));
+    const childrenByParent = new Map();
+    visibleNodes.forEach((node) => {
+      const parentKey = node.parentId;
+      if (!childrenByParent.has(parentKey)) childrenByParent.set(parentKey, []);
+      childrenByParent.get(parentKey).push(node);
+    });
+
+    const roots = visibleNodes.filter((node) => !node.parentId || !visibleIds.has(node.parentId));
+    const depthById = new Map();
+    const assignDepth = (nodeId, depth) => {
+      if (depthById.has(nodeId)) return;
+      depthById.set(nodeId, depth);
+      const children = childrenByParent.get(nodeId) || [];
+      children.forEach((child) => assignDepth(child.id, depth + 1));
+    };
+    roots.forEach((root) => assignDepth(root.id, 0));
+
+    const columnWidths = [];
+    visibleNodes.forEach((node) => {
+      const depth = depthById.get(node.id) ?? 0;
+      const size = getSize(node.id);
+      columnWidths[depth] = Math.max(columnWidths[depth] || 0, size.width);
+    });
+
+    const columnOffsets = [];
+    let currentX = offset.x;
+    columnWidths.forEach((width, depth) => {
+      columnOffsets[depth] = currentX;
+      currentX += width + horizontalGap;
+    });
+
+    const subtreeHeights = new Map();
+    const measureSubtree = (nodeId) => {
+      const size = getSize(nodeId);
+      const children = childrenByParent.get(nodeId) || [];
+      if (children.length === 0) {
+        subtreeHeights.set(nodeId, size.height);
+        return size.height;
+      }
+      let childrenTotal = 0;
+      children.forEach((child, index) => {
+        const childHeight = measureSubtree(child.id);
+        if (index > 0) childrenTotal += verticalGap;
+        childrenTotal += childHeight;
+      });
+      const subtreeHeight = Math.max(size.height, childrenTotal);
+      subtreeHeights.set(nodeId, subtreeHeight);
+      return subtreeHeight;
+    };
+    roots.forEach((root) => measureSubtree(root.id));
+
+    const positions = {};
+    const assignPositions = (nodeId, top) => {
+      const size = getSize(nodeId);
+      const depth = depthById.get(nodeId) ?? 0;
+      const children = childrenByParent.get(nodeId) || [];
+      const subtreeHeight = subtreeHeights.get(nodeId) || size.height;
+      let centerY = top + subtreeHeight / 2;
+
+      if (children.length > 0) {
+        let childrenTotal = 0;
+        children.forEach((child, index) => {
+          const childHeight = subtreeHeights.get(child.id) || getSize(child.id).height;
+          if (index > 0) childrenTotal += verticalGap;
+          childrenTotal += childHeight;
+        });
+        let cursor = top + (subtreeHeight - childrenTotal) / 2;
+        const childCenters = [];
+        children.forEach((child) => {
+          assignPositions(child.id, cursor);
+          const childSize = getSize(child.id);
+          const childPos = positions[child.id];
+          childCenters.push(childPos.y + childSize.height / 2);
+          cursor += (subtreeHeights.get(child.id) || childSize.height) + verticalGap;
+        });
+        centerY = childCenters.reduce((sum, value) => sum + value, 0) / childCenters.length;
+      }
+
+      positions[nodeId] = {
+        x: Math.round(columnOffsets[depth] ?? offset.x),
+        y: Math.round(centerY - size.height / 2)
+      };
+    };
+
+    let rootTop = offset.y;
+    roots.forEach((root) => {
+      assignPositions(root.id, rootTop);
+      rootTop += (subtreeHeights.get(root.id) || getSize(root.id).height) + rootGap;
+    });
+
+    return positions;
+  }, [visibleNodes]);
+
+  const handleAutoLayout = React.useCallback(() => {
+    const positions = buildOptimizedLayout();
+    if (!positions) return;
+    onAutoLayout?.(positions);
+  }, [buildOptimizedLayout, onAutoLayout]);
+
+  const handleMeasureNode = React.useCallback((nodeId, width, height) => {
+    const prev = nodeSizesRef.current.get(nodeId);
+    if (prev && prev.width === width && prev.height === height) return;
+    nodeSizesRef.current.set(nodeId, { width, height });
+    setLayoutVersion((version) => version + 1);
+  }, []);
+
+  const zoomBy = React.useCallback((factor, point) => {
+    if (!point) return;
+    setViewport((prev) => {
+      const nextScale = clampScale(prev.scale * factor);
+      if (nextScale === prev.scale) return prev;
+      const ratio = nextScale / prev.scale;
+      return {
+        scale: nextScale,
+        x: point.x - (point.x - prev.x) * ratio,
+        y: point.y - (point.y - prev.y) * ratio
+      };
+    });
+  }, [clampScale]);
+
+  const handleWheel = React.useCallback((event) => {
+    const isZoomShortcut = event.shiftKey || event.ctrlKey || event.metaKey;
+    if (!isZoomShortcut) return;
+    event.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const pointer = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top
+    };
+    const dominantDelta = Math.abs(event.deltaY) > Math.abs(event.deltaX)
+      ? event.deltaY
+      : event.deltaX;
+    const zoomFactor = Math.exp(-dominantDelta * 0.001);
+    zoomBy(zoomFactor, pointer);
+  }, [zoomBy]);
+
+  const getViewportCenter = React.useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return null;
+    const rect = container.getBoundingClientRect();
+    return { x: rect.width / 2, y: rect.height / 2 };
+  }, []);
+
+  const handleZoomIn = React.useCallback(() => {
+    zoomBy(FREE_LAYOUT_ZOOM_STEP, getViewportCenter());
+  }, [zoomBy, getViewportCenter]);
+
+  const handleZoomOut = React.useCallback(() => {
+    zoomBy(1 / FREE_LAYOUT_ZOOM_STEP, getViewportCenter());
+  }, [zoomBy, getViewportCenter]);
+
+  const handleResetZoom = React.useCallback(() => {
+    setViewport({ x: 0, y: 0, scale: 1 });
+  }, []);
+
+  React.useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return undefined;
+    const onWheel = (event) => handleWheel(event);
+    container.addEventListener('wheel', onWheel, { passive: false });
+    return () => container.removeEventListener('wheel', onWheel);
+  }, [handleWheel]);
+
+  const handlePanMove = React.useCallback((event) => {
+    const state = panStateRef.current;
+    if (!state) return;
+    const dx = event.clientX - state.startX;
+    const dy = event.clientY - state.startY;
+    setViewport((prev) => ({ ...prev, x: state.originX + dx, y: state.originY + dy }));
+  }, []);
+
+  const handlePanEnd = React.useCallback(() => {
+    panStateRef.current = null;
+    setIsPanning(false);
+    window.removeEventListener('pointermove', handlePanMove);
+    window.removeEventListener('pointerup', handlePanEnd);
+  }, [handlePanMove]);
+
+  const handlePanStart = React.useCallback((event) => {
+    if (event.button !== 1) return;
+    event.preventDefault();
+    panStateRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: viewportRef.current.x,
+      originY: viewportRef.current.y
+    };
+    setIsPanning(true);
+    window.addEventListener('pointermove', handlePanMove);
+    window.addEventListener('pointerup', handlePanEnd);
+  }, [handlePanMove, handlePanEnd]);
+
+  const handleNodeDragMove = React.useCallback((event) => {
+    const state = dragStateRef.current;
+    if (!state) return;
+    state.lastX = event.clientX;
+    state.lastY = event.clientY;
+    const rawDx = event.clientX - state.startX;
+    const rawDy = event.clientY - state.startY;
+    if (!state.hasMoved && (Math.abs(rawDx) > 3 || Math.abs(rawDy) > 3)) {
+      state.hasMoved = true;
+    }
+    if (dragFrameRef.current) return;
+    dragFrameRef.current = requestAnimationFrame(() => {
+      dragFrameRef.current = null;
+      const scale = viewportRef.current.scale || 1;
+      const lastX = Number.isFinite(state.lastX) ? state.lastX : state.startX;
+      const lastY = Number.isFinite(state.lastY) ? state.lastY : state.startY;
+      const dx = (lastX - state.startX) / scale;
+      const dy = (lastY - state.startY) / scale;
+      const nextPosition = {
+        x: state.originX + dx,
+        y: state.originY + dy
+      };
+      dragPositionsRef.current.set(state.nodeId, nextPosition);
+      setDragVersion((version) => version + 1);
+    });
+  }, []);
+
+  const handleNodeDragEnd = React.useCallback(() => {
+    if (dragFrameRef.current) {
+      cancelAnimationFrame(dragFrameRef.current);
+      dragFrameRef.current = null;
+    }
+    const state = dragStateRef.current;
+    if (state?.hasMoved) {
+      suppressSelectRef.current = true;
+      requestAnimationFrame(() => {
+        suppressSelectRef.current = false;
+      });
+    }
+    if (state) {
+      const scale = viewportRef.current.scale || 1;
+      const lastX = Number.isFinite(state.lastX) ? state.lastX : state.startX;
+      const lastY = Number.isFinite(state.lastY) ? state.lastY : state.startY;
+      const dx = (lastX - state.startX) / scale;
+      const dy = (lastY - state.startY) / scale;
+      const hasDelta = dx !== 0 || dy !== 0;
+      if (hasDelta) {
+        const finalPosition = {
+          x: state.originX + dx,
+          y: state.originY + dy
+        };
+        const prevPosition = dragPositionsRef.current.get(state.nodeId);
+        if (!prevPosition || prevPosition.x !== finalPosition.x || prevPosition.y !== finalPosition.y) {
+          dragPositionsRef.current.set(state.nodeId, finalPosition);
+          setDragVersion((version) => version + 1);
+        }
+        pendingDragPositionsRef.current.set(state.nodeId, finalPosition);
+        onUpdateNodePosition?.(state.nodeId, finalPosition);
+      } else if (dragPositionsRef.current.has(state.nodeId)) {
+        dragPositionsRef.current.delete(state.nodeId);
+        setDragVersion((version) => version + 1);
+      }
+    }
+    dragStateRef.current = null;
+    setIsDragging(false);
+    window.removeEventListener('pointermove', handleNodeDragMove);
+    window.removeEventListener('pointerup', handleNodeDragEnd);
+  }, [handleNodeDragMove, onUpdateNodePosition]);
+
+  const handleNodeDragStart = React.useCallback((nodeId, event) => {
+    if (event.button !== 0) return;
+    const target = event.target;
+    if (target?.closest('button, a, input, textarea, [role="menu"], [role="listbox"], table')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    suppressSelectRef.current = false;
+    pendingDragPositionsRef.current.delete(nodeId);
+    onSelect?.(nodeId, { expand: false });
+    const node = nodesById.get(nodeId);
+    const origin = dragPositionsRef.current.get(nodeId) || node?.position || { x: 0, y: 0 };
+    dragStateRef.current = {
+      nodeId,
+      startX: event.clientX,
+      startY: event.clientY,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      originX: origin.x,
+      originY: origin.y,
+      hasMoved: false
+    };
+    setIsDragging(true);
+    window.addEventListener('pointermove', handleNodeDragMove);
+    window.addEventListener('pointerup', handleNodeDragEnd);
+  }, [nodesById, onSelect, handleNodeDragMove, handleNodeDragEnd]);
+
+  const shouldSuppressSelect = React.useCallback(() => {
+    if (!suppressSelectRef.current) return false;
+    suppressSelectRef.current = false;
+    return true;
+  }, []);
+
+  const connectors = React.useMemo(() => {
+    const lines = [];
+    const sizes = nodeSizesRef.current;
+    const getSize = (nodeId) => sizes.get(nodeId) || FREE_LAYOUT_DEFAULT_NODE_SIZE;
+    const getRect = (node) => {
+      const pos = resolveNodePosition(node);
+      if (!pos) return null;
+      const size = getSize(node.id);
+      const left = pos.x;
+      const top = pos.y;
+      return {
+        left,
+        top,
+        right: left + size.width,
+        bottom: top + size.height,
+        centerX: left + size.width / 2,
+        centerY: top + size.height / 2,
+        width: size.width,
+        height: size.height
+      };
+    };
+    const resolveAnchor = (rect, side) => {
+      if (side === 'left') return { x: rect.left, y: rect.centerY };
+      if (side === 'right') return { x: rect.right, y: rect.centerY };
+      if (side === 'top') return { x: rect.centerX, y: rect.top };
+      return { x: rect.centerX, y: rect.bottom };
+    };
+    const chooseSides = (parentRect, childRect) => {
+      const horizontalSeparation = Math.max(
+        0,
+        childRect.left - parentRect.right,
+        parentRect.left - childRect.right
+      );
+      const verticalSeparation = Math.max(
+        0,
+        childRect.top - parentRect.bottom,
+        parentRect.top - childRect.bottom
+      );
+      let orientation = 'vertical';
+      if (horizontalSeparation > verticalSeparation) {
+        orientation = 'horizontal';
+      } else if (horizontalSeparation === verticalSeparation) {
+        const dx = childRect.centerX - parentRect.centerX;
+        const dy = childRect.centerY - parentRect.centerY;
+        orientation = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical';
+      }
+      if (orientation === 'horizontal') {
+        const isRight = childRect.centerX >= parentRect.centerX;
+        return {
+          orientation,
+          parentSide: isRight ? 'right' : 'left',
+          childSide: isRight ? 'left' : 'right'
+        };
+      }
+      const isBelow = childRect.centerY >= parentRect.centerY;
+      return {
+        orientation,
+        parentSide: isBelow ? 'bottom' : 'top',
+        childSide: isBelow ? 'top' : 'bottom'
+      };
+    };
+    const visibleIds = new Set(visibleNodes.map(node => node.id));
+    visibleNodes.forEach((node) => {
+      if (!node.parentId || !visibleIds.has(node.parentId)) return;
+      const parent = nodesById.get(node.parentId);
+      if (!parent) return;
+      const parentRect = getRect(parent);
+      const childRect = getRect(node);
+      if (!parentRect || !childRect) return;
+      const { orientation, parentSide, childSide } = chooseSides(parentRect, childRect);
+      const start = resolveAnchor(parentRect, parentSide);
+      const end = resolveAnchor(childRect, childSide);
+      let path = '';
+      if (orientation === 'horizontal') {
+        const deltaX = Math.max(60, Math.abs(end.x - start.x) * 0.5);
+        const direction = end.x >= start.x ? 1 : -1;
+        const c1x = start.x + deltaX * direction;
+        const c2x = end.x - deltaX * direction;
+        path = `M ${start.x} ${start.y} C ${c1x} ${start.y}, ${c2x} ${end.y}, ${end.x} ${end.y}`;
+      } else {
+        const deltaY = Math.max(60, Math.abs(end.y - start.y) * 0.5);
+        const direction = end.y >= start.y ? 1 : -1;
+        const c1y = start.y + deltaY * direction;
+        const c2y = end.y - deltaY * direction;
+        path = `M ${start.x} ${start.y} C ${start.x} ${c1y}, ${end.x} ${c2y}, ${end.x} ${end.y}`;
+      }
+      const edgeKey = `${node.parentId}::${node.id}`;
+      lines.push({
+        path,
+        edgeKey,
+        parentId: node.parentId,
+        childId: node.id,
+        isUpstream: upstreamEdgeKeys.has(edgeKey),
+        x1: start.x,
+        y1: start.y,
+        x2: end.x,
+        y2: end.y
+      });
+    });
+    return lines;
+  }, [visibleNodes, nodesById, layoutVersion, upstreamEdgeKeys, dragVersion, resolveNodePosition]);
+
+  return (
+    <div
+      ref={containerRef}
+      className={`free-layout-canvas relative w-full h-full ${isPanning || isDragging ? 'is-panning' : ''}`}
+      onPointerDown={handlePanStart}
+    >
+      <div
+        className="absolute inset-0"
+        style={{
+          transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
+          transformOrigin: '0 0'
+        }}
+      >
+        <svg
+          className="absolute inset-0"
+          style={{ overflow: 'visible' }}
+          aria-hidden="true"
+        >
+          {connectors.map((line, index) => {
+            const colorClass = line.isUpstream
+              ? 'text-blue-500 dark:text-blue-300'
+              : 'text-gray-300 dark:text-slate-600';
+            return (
+              <g key={`${line.edgeKey}-${index}`} className={colorClass}>
+                <path
+                  d={line.path}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={line.isUpstream ? 3 : 2}
+                  strokeLinecap="round"
+                  pointerEvents="none"
+                />
+                <path
+                  d={line.path}
+                  fill="none"
+                  stroke="transparent"
+                  strokeWidth={line.isUpstream ? 18 : 14}
+                  strokeLinecap="round"
+                  pointerEvents="stroke"
+                  onPointerMove={(event) => handleConnectorHover(line, event)}
+                  onPointerLeave={(event) => handleConnectorLeave(event, line.edgeKey)}
+                />
+                <circle cx={line.x1} cy={line.y1} r={3} fill="currentColor" pointerEvents="none" />
+                <circle cx={line.x2} cy={line.y2} r={3} fill="currentColor" pointerEvents="none" />
+              </g>
+            );
+          })}
+        </svg>
+
+        {(() => {
+          const connectorInsertAnchor = (showInsertMenuForId && insertAnchor?.edgeKey === showInsertMenuForId)
+            ? insertAnchor
+            : hoveredConnector;
+          if (!connectorInsertAnchor || !connectorInsertAnchor.position) return null;
+          if (isDragging || isPanning) return null;
+          return (
+            <div
+              ref={connectorInsertRef}
+              className="absolute z-30"
+              style={{
+                left: connectorInsertAnchor.position.x,
+                top: connectorInsertAnchor.position.y,
+                transform: 'translate(-50%, -50%)'
+              }}
+              onPointerLeave={handleInsertButtonLeave}
+            >
+              <DropdownMenu
+                open={showInsertMenuForId === connectorInsertAnchor.edgeKey}
+                onOpenChange={(open) => handleConnectorInsertOpenChange(open, connectorInsertAnchor.edgeKey)}
+              >
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 rounded-full"
+                    title="Insert Step Here"
+                    onClick={(event) => handleConnectorInsertClick(event, connectorInsertAnchor)}
+                    onPointerDown={(event) => event.stopPropagation()}
+                  >
+                    <Plus size={12} strokeWidth={3} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  <DropdownMenuLabel>Insert Step</DropdownMenuLabel>
+                  <DropdownMenuGroup>
+                    {INSERT_MENU_ITEMS[0].children.filter((item: any) => item.type !== 'divider').map((item: any) => (
+                      <DropdownMenuItem key={item.key} onClick={() => handleConnectorInsertMenuClick({ key: item.key })}>
+                        {item.icon}
+                        {item.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          );
+        })()}
+
+        {visibleNodes.map((node) => {
+          const position = resolveNodePosition(node) || { x: 0, y: 0 };
+          return (
+            <FreeLayoutNode
+              key={node.id}
+              nodeId={node.id}
+              position={position}
+              onMeasure={handleMeasureNode}
+            >
+              <TreeNode
+                nodeId={node.id}
+                nodes={nodes}
+                selectedNodeId={selectedNodeId}
+                chainData={chainData}
+                tableDensity={tableDensity}
+                onSelect={onSelect}
+                onAdd={onAdd}
+                onInsert={onInsert}
+                onRemove={onRemove}
+                onToggleExpand={onToggleExpand}
+                onToggleBranch={onToggleBranch}
+                onToggleDataset={onToggleDataset}
+                onDrillDown={onDrillDown}
+                onTableCellClick={onTableCellClick}
+                onTableSortChange={onTableSortChange}
+                onAssistantRequest={onAssistantRequest}
+                onAddFilter={onAddFilter}
+                onUpdateFilter={onUpdateFilter}
+                onRemoveFilter={onRemoveFilter}
+                onFilterCellAction={onFilterCellAction}
+                showAddMenuForId={showAddMenuForId}
+                setShowAddMenuForId={setShowAddMenuForId}
+                showInsertMenuForId={showInsertMenuForId}
+                setShowInsertMenuForId={setShowInsertMenuForId}
+                onEntangledColorChange={onEntangledColorChange}
+                onRenameBranch={onRenameBranch}
+                renderMode="freeLayout"
+                renderChildren={false}
+                compactHeader
+                menuId={node.id}
+                shouldSuppressSelect={shouldSuppressSelect}
+                headerDragProps={{
+                  onPointerDown: (event) => handleNodeDragStart(node.id, event)
+                }}
+              />
+            </FreeLayoutNode>
+          );
+        })}
+      </div>
+      <div className="absolute right-4 top-4 z-20 flex flex-col gap-1 rounded-lg border border-gray-200 bg-white/90 p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900/90">
+        <button
+          onClick={handleZoomIn}
+          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800"
+          title="Zoom in"
+        >
+          +
+        </button>
+        <button
+          onClick={handleZoomOut}
+          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800"
+          title="Zoom out"
+        >
+          −
+        </button>
+        <button
+          onClick={handleResetZoom}
+          className="h-7 w-7 rounded text-[10px] font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800"
+          title="Reset zoom"
+        >
+          {Math.round(viewport.scale * 100)}%
+        </button>
+        <div className="my-1 h-px bg-gray-200 dark:bg-slate-700" />
+        <button
+          onClick={handleAutoLayout}
+          className="h-7 w-7 rounded text-sm font-semibold text-gray-600 hover:bg-gray-100 dark:text-slate-200 dark:hover:bg-slate-800 flex items-center justify-center"
+          title="Optimize layout"
+          aria-label="Optimize layout"
+        >
+          <Layout size={14} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+export { TreeNode, TablePreview, FreeLayoutCanvas };
